@@ -4,16 +4,18 @@ training/train_pipeline.py
 Wrapper pro celý tréninkový pipeline ICR.
 
 Spustí kroky v pořadí:
-  1. extract_params.py       — fyzikální parametry z WAV banky
-  2. find_outliers.py        — odstranění chybně extrahovaných samplov
-  3. compute_spectral_eq.py  — LTASE spektrální EQ křivka
+  1. extract_params.py          — fyzikální parametry z WAV banky
+  2. find_outliers.py           — odstranění chybně extrahovaných samplov
+  3. compute_spectral_eq.py     — LTASE spektrální EQ křivka
   4. train_instrument_profile.py — surrogate NN model (parametrový profil)
-  5. closed_loop_finetune.py — MRSTFT fine-tuning (volitelný, --finetune)
+  5. closed_loop_finetune.py    — MRSTFT fine-tuning (volitelný, --finetune)
+  6. export_soundbank_params.py — export PianoCore-ready JSON s EQ biquads
 
-Výstupní soubory (v --out-dir, default training/):
-  params-<banka>.json              naměřené fyzikální parametry
-  params-nn-profile-<banka>.json   NN-smoothed profil pro syntetizér
-  profile-<banka>.pt               váhy modelu (znovupoužitelné)
+Výstupní soubory:
+  training/params-<banka>.json              fyzikální parametry (kroky 1–3)
+  training/params-nn-profile-<banka>.json   NN-smoothed profil
+  training/profile-<banka>.pt               váhy modelu (znovupoužitelné)
+  soundbanks/params-<banka>-soundbank.json  ← PianoCore-ready, spusť s --params
 
 Použití
 ───────
@@ -132,9 +134,9 @@ def parse_args() -> argparse.Namespace:
                    help='Přeskočit krok 2 (outlier removal)')
     p.add_argument('--skip-eq',      action='store_true',
                    help='Přeskočit krok 3 (spektrální EQ)')
-    p.add_argument('--start-at',     type=int, default=1, choices=range(1, 6),
+    p.add_argument('--start-at',     type=int, default=1, choices=range(1, 7),
                    metavar='N',
-                   help='Spustit od kroku N (1–5, default: 1)')
+                   help='Spustit od kroku N (1–6, default: 1)')
     # Ostatní
     p.add_argument('--dry-run',      action='store_true',
                    help='Jen výpis příkazů, bez spuštění')
@@ -152,17 +154,19 @@ def main() -> int:
     workers   = args.workers or os.cpu_count() or 4
 
     # Odvozené cesty výstupních souborů
-    params_json  = out_dir / f"params-{bank_name}.json"
-    profile_json = out_dir / f"params-nn-profile-{bank_name}.json"
-    profile_pt   = out_dir / f"profile-{bank_name}.pt"
+    params_json    = out_dir / f"params-{bank_name}.json"
+    profile_json   = out_dir / f"params-nn-profile-{bank_name}.json"
+    profile_pt     = out_dir / f"profile-{bank_name}.pt"
+    soundbank_json = Path("soundbanks") / f"params-{bank_name}-soundbank.json"
 
     # Výpis plánu
     print("\nIthacaCoreResonator — tréninkový pipeline", flush=True)
     print(f"  banka:   {bank_dir}", flush=True)
     print(f"  výstup:  {out_dir}/", flush=True)
-    print(f"  params:  {params_json.name}", flush=True)
-    print(f"  profil:  {profile_json.name}", flush=True)
-    print(f"  model:   {profile_pt.name}", flush=True)
+    print(f"  params:    {params_json.name}", flush=True)
+    print(f"  profil:    {profile_json.name}", flush=True)
+    print(f"  model:     {profile_pt.name}", flush=True)
+    print(f"  soundbank: {soundbank_json}", flush=True)
     print(f"  epochy:  {args.epochs}  hidden={args.hidden}  lr={args.lr}", flush=True)
     if args.finetune:
         print(f"  fine-tune: {args.ft_epochs} epoch po NN tréninku", flush=True)
@@ -248,11 +252,24 @@ def main() -> int:
         print("\n  [Krok 5 přeskočen: přidej --finetune pro MRSTFT fine-tuning]",
               flush=True)
 
+    # ── Krok 6 — Export soundbank pro PianoCore ───────────────────────────────
+    if args.start_at <= 6:
+        _banner(6, f"Export soundbank pro PianoCore → {soundbank_json}")
+        Path("soundbanks").mkdir(exist_ok=True)
+        ok = _run(_python(
+            "training/export_soundbank_params.py",
+            "--soundbank", str(params_json),
+            "--out",       str(soundbank_json),
+        ), args.dry_run)
+        if not ok:
+            return 1
+
     print(f"\n{'='*60}", flush=True)
     print(" Pipeline dokončen.", flush=True)
-    print(f"  params:  {params_json}", flush=True)
-    print(f"  profil:  {profile_json}", flush=True)
-    print(f"  model:   {profile_pt}", flush=True)
+    print(f"  params:    {params_json}", flush=True)
+    print(f"  profil:    {profile_json}", flush=True)
+    print(f"  model:     {profile_pt}", flush=True)
+    print(f"  soundbank: {soundbank_json}  ← spusť s --params {soundbank_json}", flush=True)
     print(f"{'='*60}\n", flush=True)
     return 0
 

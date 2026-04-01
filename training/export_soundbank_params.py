@@ -275,8 +275,8 @@ def export(soundbank_path: str, out_path: str,
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--soundbank",  default="soundbanks/params-ks-grand-ft.json")
-    ap.add_argument("--out",        default="analysis/params-piano-soundbank.json")
+    ap.add_argument("--soundbank",  default="training/params-ks-grand.json")
+    ap.add_argument("--out",        default="soundbanks/params-ks-grand-soundbank.json")
     ap.add_argument("--sr",         type=int,   default=SR_DEFAULT)
     ap.add_argument("--duration",   type=float, default=DURATION_DEFAULT)
     ap.add_argument("--target-rms", type=float, default=TARGET_RMS)
