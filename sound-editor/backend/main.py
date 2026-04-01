@@ -97,6 +97,10 @@ class SysExPartialRequest(BaseModel):
 class ExportRequest(BaseModel):
     path: str
 
+class FitAllRequest(BaseModel):
+    velocities:  list[int] = list(range(8))   # which vel layers to fit
+    coherence:   float = 0.0                   # 0 = independent, 1 = average
+
 
 # ── Params endpoints ──────────────────────────────────────────────────────────
 
@@ -159,7 +163,7 @@ def update_spline_config(layer_id: str, req: SplineConfigRequest):
 
 @app.post("/spline/{layer_id}/fit")
 def fit_spline(layer_id: str):
-    """Fit spline and return evaluated values for all MIDI notes."""
+    """Fit spline for the default velocity and return evaluated values."""
     state    = _get_spline(layer_id)
     raw_data = store.extract_layer(layer_id)
     fitted   = engine.fit(state, raw_data)
@@ -168,6 +172,61 @@ def fit_spline(layer_id: str):
         for m, v in fitted.items()
     })
     return fitted
+
+@app.post("/spline/{layer_id}/fit_all")
+def fit_all_velocities(layer_id: str, req: FitAllRequest):
+    """
+    Fit one spline per velocity layer, apply coherence blending, return curves.
+
+    Returns:
+        { vel: { "fitted": {midi: value}, "curve": {"x": [...], "y": [...]} } }
+    """
+    import numpy as np
+
+    all_raw  = store.extract_layer(layer_id)    # {"m060_vel3": 0.41, ...}
+    vels     = req.velocities
+    coherence = max(0.0, min(1.0, req.coherence))
+    n_curve   = 200
+
+    # ── Per-velocity fit ──────────────────────────────────────────────────────
+    per_vel: dict[int, dict[int, float]] = {}
+    for vel in vels:
+        vel_data = {k: v for k, v in all_raw.items() if k.endswith(f"_vel{vel}")}
+        state    = _get_spline(f"{layer_id}__vel{vel}")
+        fitted   = engine.fit(state, vel_data)
+        per_vel[vel] = fitted
+
+    # ── Coherence blending ────────────────────────────────────────────────────
+    if coherence > 0 and len(vels) > 1:
+        midi_keys = sorted(set(m for d in per_vel.values() for m in d))
+        avg = {
+            m: float(np.mean([per_vel[v][m] for v in vels if m in per_vel[v]]))
+            for m in midi_keys
+        }
+        for vel in vels:
+            for m in per_vel[vel]:
+                ind = per_vel[vel][m]
+                per_vel[vel][m] = ind + coherence * (avg.get(m, ind) - ind)
+
+    # ── Write back + build curve ──────────────────────────────────────────────
+    result = {}
+    x_query = list(np.linspace(21, 108, n_curve))
+
+    for vel in vels:
+        fitted = per_vel[vel]
+        store.update_layer_values(layer_id, {
+            f"m{m:03d}_vel{vel}": v for m, v in fitted.items()
+        })
+        # Dense curve via linear interp on fitted discrete values
+        xs = sorted(fitted)
+        ys = [fitted[x] for x in xs]
+        if len(xs) >= 2:
+            y_curve = list(np.interp(x_query, xs, ys))
+        else:
+            y_curve = [0.0] * len(x_query)
+        result[vel] = {"fitted": fitted, "curve": {"x": x_query, "y": y_curve}}
+
+    return result
 
 @app.post("/spline/{layer_id}/curve")
 def get_spline_curve(layer_id: str, n_points: int = 200):

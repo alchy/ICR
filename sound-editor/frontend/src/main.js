@@ -9,13 +9,16 @@ import api            from "./comms/ApiClient.js";
 import { ParameterSpace } from "./scene/ParameterSpace.js";
 import { SplineEditor }   from "./editor/SplineEditor.js";
 import { LayerBrowser }   from "./editor/LayerBrowser.js";
+import { VelSelector }    from "./editor/VelSelector.js";
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-const container = document.getElementById("canvas-container");
-const space     = new ParameterSpace(container);
-const editor    = new SplineEditor(space);
-const browser   = new LayerBrowser(async (layerId, layer) => {
+const container  = document.getElementById("canvas-container");
+const space      = new ParameterSpace(container);
+const editor     = new SplineEditor(space);
+const velBarEl   = document.getElementById("vel-bar-container");
+const velSelector = new VelSelector(velBarEl, params => editor.onSelectorChange(params));
+const browser    = new LayerBrowser(async (layerId, layer) => {
     await editor.activateLayer(layerId, layer);
 });
 

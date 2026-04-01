@@ -40,6 +40,8 @@ export default {
     getSpline:       (layerId)    => get(`/spline/${layerId}`),
     updateConfig:    (layerId, cfg) => put(`/spline/${layerId}/config`, cfg),
     fitSpline:       (layerId)    => post(`/spline/${layerId}/fit`),
+    fitAllVelocities:(layerId, velocities, coherence) =>
+        post(`/spline/${layerId}/fit_all`, { velocities, coherence }),
     getSplineCurve:  (layerId, n) => post(`/spline/${layerId}/curve?n_points=${n ?? 300}`),
     addAnchor:       (layerId, midi, value, stickiness) =>
         post(`/spline/${layerId}/anchor`, { midi, value, stickiness, is_anchor: true }),
