@@ -2,7 +2,7 @@
  * src/editor/SplineEditor.js
  * ──────────────────────────
  * Orchestrates multi-velocity spline interaction.
- * Calls fit_all on the backend, updates per-velocity tubes in 3D space.
+ * Tracks per-layer state (kept, visible) and syncs badges in LayerBrowser.
  */
 
 import api from "../comms/ApiClient.js";
@@ -11,32 +11,52 @@ import { VEL_COLORS } from "./VelSelector.js";
 export class SplineEditor {
     /**
      * @param {import("../scene/ParameterSpace.js").ParameterSpace} space
+     * @param {import("./LayerBrowser.js").LayerBrowser}            browser
+     * @param {import("./VelSelector.js").VelSelector}              velSelector
      */
-    constructor(space) {
-        this._space      = space;
-        this._layerId    = null;
-        this._layer      = null;
-        this._selected   = new Set([0, 1, 2, 3, 4, 5, 6, 7]);
-        this._coherence  = 0.0;
-        this._stickiness = 3.0;
-        this._kept       = false;
-        this._config     = {
+    constructor(space, browser, velSelector) {
+        this._space       = space;
+        this._browser     = browser;
+        this._velSelector = velSelector;
+        this._layerId     = null;
+        this._layer       = null;
+        this._selected    = new Set([0, 1, 2, 3, 4, 5, 6, 7]);
+        this._coherence   = 0.0;
+        this._stickiness  = 3.0;
+        this._config      = {
             stiffness: 1.0, bass_split: 52,
             bass_stiffness: 1.0, treble_stiffness: 1.0, degree: 3,
         };
+        // Per-layer state: layerId → { kept: bool, visible: bool }
+        this._states = new Map();
 
         space.onCardClick     = c => this._onCardClick(c);
         space.onCardAltClick  = c => this._onCardAltClick(c);
     }
 
-    // ── Called by VelSelector when selection/params change ───────────────────
+    // ── Per-layer state ───────────────────────────────────────────────────────
+
+    _getState(layerId) {
+        if (!this._states.has(layerId))
+            this._states.set(layerId, { kept: false, visible: true });
+        return this._states.get(layerId);
+    }
+
+    _setState(layerId, patch) {
+        const s = this._getState(layerId);
+        Object.assign(s, patch);
+        this._browser.setLayerState(layerId, s);
+    }
+
+    // ── VelSelector callback ──────────────────────────────────────────────────
 
     onSelectorChange({ selected, coherence, stickiness, keepToggled, applyPressed }) {
-        const keepChanged = keepToggled !== this._kept;
+        const prevKept   = this._getState(this._layerId ?? "").kept;
+        const keepChanged = keepToggled !== prevKept;
+
         this._selected   = selected;
         this._coherence  = coherence;
         this._stickiness = stickiness;
-        this._kept       = keepToggled;
 
         if (!this._layerId) return;
 
@@ -58,11 +78,24 @@ export class SplineEditor {
         document.getElementById("active-layer-name").textContent =
             `${layer.label}  [${layerId}]`;
 
+        // Restore Keep button to match this layer's kept state
+        const state = this._getState(layerId);
+        this._velSelector.setKept(state.kept);
+
         const values = await api.getLayerValues(layerId);
         this._space.loadLayer(values, layer);
 
-        const state = await api.getSpline(layerId);
-        this._applyStateToUI(state);
+        // Restore ghost dots if this layer was kept
+        if (state.kept) {
+            const vels   = [...this._selected];
+            const result = await api.fitAllVelocities(layerId, vels, this._coherence);
+            const velFitted = {};
+            for (const [v, d] of Object.entries(result)) velFitted[v] = d.fitted;
+            this._space.applyKeep(velFitted);
+        }
+
+        const splineState = await api.getSpline(layerId);
+        this._applyStateToUI(splineState);
 
         await this.fitAndRedraw();
     }
@@ -78,10 +111,8 @@ export class SplineEditor {
     async applyConfig() {
         if (!this._layerId) return;
         this.readConfigFromUI();
-        // Apply config to all per-velocity spline states
-        for (const vel of this._selected) {
+        for (const vel of this._selected)
             await api.updateConfig(`${this._layerId}__vel${vel}`, this._config);
-        }
         setStatus("Config updated.");
     }
 
@@ -109,28 +140,21 @@ export class SplineEditor {
         }
     }
 
+    // ── Keep / Unkeep / Apply ─────────────────────────────────────────────────
+
     async _doKeep() {
         if (!this._layerId) return;
         setStatus("Keeping…");
         try {
-            // Fit+blend to get final values, commit to overrides
             await api.keepLayer(this._layerId, [...this._selected], this._coherence);
 
-            // Get the same blended values for dot placement
-            const vels   = [...this._selected];
             const result = await api.fitAllVelocities(
-                this._layerId, vels, this._coherence,
+                this._layerId, [...this._selected], this._coherence,
             );
-
-            // Build velFitted: { vel: { midi: value } }
             const velFitted = {};
-            for (const [velStr, data] of Object.entries(result)) {
-                velFitted[velStr] = data.fitted;   // { midi: value }
-            }
-
+            for (const [v, d] of Object.entries(result)) velFitted[v] = d.fitted;
             this._space.applyKeep(velFitted);
 
-            // Redraw splines without ghost (keep = definitive now)
             this._space.clearSplines();
             for (const [velStr, data] of Object.entries(result)) {
                 const vel = parseInt(velStr);
@@ -139,7 +163,9 @@ export class SplineEditor {
                     VEL_COLORS[vel % VEL_COLORS.length],
                 );
             }
-            setStatus("Kept ✓  Export will use blended values.");
+
+            this._setState(this._layerId, { kept: true });
+            setStatus("Kept ✓");
         } catch (err) {
             setStatus(`Keep error: ${err.message}`, true);
         }
@@ -149,7 +175,8 @@ export class SplineEditor {
         if (!this._layerId) return;
         await api.unkeepLayer(this._layerId, [...this._selected]);
         this._space.clearKeep();
-        setStatus("Keep removed — originals restored.");
+        this._setState(this._layerId, { kept: false });
+        setStatus("Keep removed.");
         await this.fitAndRedraw();
     }
 
@@ -157,33 +184,39 @@ export class SplineEditor {
         if (!this._layerId) return;
         setStatus("Applying…");
         try {
-            const vels = [...this._selected];
-            await api.applyLayer(this._layerId, vels, this._coherence);
+            await api.applyLayer(this._layerId, [...this._selected], this._coherence);
 
-            // Clear keep visual + reload layer from updated _params
             this._space.clearKeep();
-            this._kept = false;
+            this._setState(this._layerId, { kept: false });
+            this._velSelector.setKept(false);
 
             const values = await api.getLayerValues(this._layerId);
             this._space.loadLayer(values, this._layer);
 
             await this.fitAndRedraw();
-            setStatus("Applied ✓ — values baked into baseline.");
+            setStatus("Applied ✓");
         } catch (err) {
             setStatus(`Apply error: ${err.message}`, true);
         }
     }
 
-    // ── Card interaction ─────────────────────────────────────────────────────
+    // ── Visible toggle (from LayerBrowser badge) ──────────────────────────────
+
+    onToggleVisible(layerId, visible) {
+        this._setState(layerId, { visible });
+        // If it's the active layer, hide/show splines
+        if (layerId === this._layerId) {
+            this._space.setSplineVisibility(visible);
+        }
+    }
+
+    // ── Card interaction ──────────────────────────────────────────────────────
 
     async _onCardClick(card) {
         if (!this._layerId) return;
-        for (const vel of this._selected) {
-            await api.pullSpline(
-                `${this._layerId}__vel${vel}`,
-                card.midi, card.value, this._stickiness,
-            );
-        }
+        for (const vel of this._selected)
+            await api.pullSpline(`${this._layerId}__vel${vel}`,
+                card.midi, card.value, this._stickiness);
         await this.fitAndRedraw();
         this._refreshCPList();
     }
@@ -196,22 +229,19 @@ export class SplineEditor {
             const already = state.control_points.find(
                 p => p.midi === card.midi && p.is_anchor
             );
-            if (already) {
-                await api.removePoint(sid, card.midi);
-            } else {
-                await api.addAnchor(sid, card.midi, card.value, 8.0);
-            }
+            if (already) await api.removePoint(sid, card.midi);
+            else         await api.addAnchor(sid, card.midi, card.value, 8.0);
         }
         await this.fitAndRedraw();
         this._refreshCPList();
     }
 
-    // ── Control point list ───────────────────────────────────────────────────
+    // ── Control point list ────────────────────────────────────────────────────
 
     async _refreshCPList() {
         if (!this._layerId || this._selected.size !== 1) return;
-        const [vel]  = [...this._selected];
-        const state  = await api.getSpline(`${this._layerId}__vel${vel}`);
+        const [vel] = [...this._selected];
+        const state = await api.getSpline(`${this._layerId}__vel${vel}`);
         this._applyStateToUI(state);
     }
 
@@ -223,7 +253,6 @@ export class SplineEditor {
             document.getElementById("cfg-degree").value    = cfg.degree;
             document.getElementById("cfg-bass-split").value = cfg.bass_split;
         }
-
         const list = document.getElementById("cp-list");
         list.innerHTML = "";
         for (const cp of (state.control_points ?? [])) {
@@ -241,9 +270,8 @@ export class SplineEditor {
 
     async removeCP(midi) {
         if (!this._layerId) return;
-        for (const vel of this._selected) {
+        for (const vel of this._selected)
             await api.removePoint(`${this._layerId}__vel${vel}`, midi);
-        }
         await this.fitAndRedraw();
         this._refreshCPList();
     }

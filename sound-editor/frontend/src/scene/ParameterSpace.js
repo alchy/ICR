@@ -204,6 +204,11 @@ export class ParameterSpace {
         this._splines.clear();
     }
 
+    setSplineVisibility(visible) {
+        for (const sm of this._splines.values())
+            for (const obj of sm._objects) obj.visible = visible;
+    }
+
     /**
      * Keep activated: gray-out originals, spawn blue kept-position dots.
      * @param {Object} velFitted  { vel: { midi: value, … }, … }

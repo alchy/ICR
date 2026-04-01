@@ -13,14 +13,15 @@ import { VelSelector }    from "./editor/VelSelector.js";
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
-const container  = document.getElementById("canvas-container");
-const space      = new ParameterSpace(container);
-const editor     = new SplineEditor(space);
-const velBarEl   = document.getElementById("vel-bar-container");
+const container   = document.getElementById("canvas-container");
+const space       = new ParameterSpace(container);
+const velBarEl    = document.getElementById("vel-bar-container");
 const velSelector = new VelSelector(velBarEl, params => editor.onSelectorChange(params));
-const browser    = new LayerBrowser(async (layerId, layer) => {
-    await editor.activateLayer(layerId, layer);
-});
+const browser     = new LayerBrowser(
+    async (layerId, layer) => editor.activateLayer(layerId, layer),
+    (layerId, visible)     => editor.onToggleVisible(layerId, visible),
+);
+const editor      = new SplineEditor(space, browser, velSelector);
 
 // Expose to inline HTML handlers
 window.app = {

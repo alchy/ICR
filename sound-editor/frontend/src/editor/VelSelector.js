@@ -181,6 +181,12 @@ export class VelSelector {
         });
     }
 
+    /** Set Keep button state without emitting (called on layer switch). */
+    setKept(v) {
+        this.kept = !!v;
+        this._updateKeepBtn();
+    }
+
     /** Programmatically update stickiness (e.g. after loading spline state). */
     setStickiness(v) {
         this.stickiness = v;
