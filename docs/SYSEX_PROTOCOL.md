@@ -181,45 +181,95 @@ bridge.close()
 
 ---
 
-## C++ receiver skeleton (ICR side)
+## C++ receiver — implemented (ICR side)
+
+The protocol is fully implemented. Entry points:
+
+| File | Symbol | Role |
+|------|--------|------|
+| `engine/midi_input.cpp` | `MidiInput::callback` | Strips F0/F7, calls `handleSysEx`, sends PONG |
+| `engine/core_engine.cpp` | `CoreEngine::handleSysEx` | Dispatch + SET_BANK reassembly |
+| `cores/piano/piano_core.cpp` | `PianoCore::setNoteParam` | Writes one scalar field |
+| `cores/piano/piano_core.cpp` | `PianoCore::setNotePartialParam` | Writes one partial field |
+| `cores/piano/piano_core.cpp` | `PianoCore::loadBankJson` | Full bank swap |
+
+### Dispatch (CoreEngine::handleSysEx)
 
 ```cpp
-void ICRSynth::handleSysEx(const uint8_t* data, int len) {
-    // data starts AFTER F0, ends BEFORE F7
-    if (len < 3) return;
-    if (data[0] != 0x7D || data[1] != 0x01) return;  // not ICR
-
+// data: bytes AFTER F0, BEFORE F7
+std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
+    if (len < 3 || data[0] != 0x7D || data[1] != 0x01) return {};
     uint8_t cmd = data[2];
     const uint8_t* payload = data + 3;
     int payloadLen = len - 3;
-
     switch (cmd) {
     case 0x01:  // SET_NOTE_PARAM
-        if (payloadLen < 8) return;
-        handleSetNoteParam(payload);
-        break;
     case 0x02:  // SET_NOTE_PARTIAL
-        if (payloadLen < 9) return;
-        handleSetNotePartial(payload);
-        break;
-    case 0x03:  // SET_BANK
-        handleBankChunk(payload, payloadLen);
-        break;
-    case 0x10:  // SET_MASTER
-        if (payloadLen < 6) return;
-        handleSetMaster(payload);
-        break;
-    case 0xF0:  // PING → reply with PONG
-        sendPong();
-        break;
+    case 0x03:  // SET_BANK (chunk reassembly → loadBankJson when complete)
+    case 0x10:  // SET_MASTER → core->setParam(key, value)
+    case 0xF0:  // PING → returns {F0 7D 01 F1 F7}
     }
+    return {};
 }
+```
 
-float decodeSysExFloat(const uint8_t* b) {
+### Float decoding (core_engine.cpp)
+
+```cpp
+static float decodeSysExFloat(const uint8_t* b) {
     uint32_t bits = 0;
     for (int i = 0; i < 5; ++i)
         bits |= (uint32_t)(b[i] & 0x7F) << ((4 - i) * 7);
-    float v; memcpy(&v, &bits, 4);
+    float v;
+    std::memcpy(&v, &bits, sizeof(v));
     return v;
 }
 ```
+
+### param_id → key mapping (core_engine.cpp)
+
+```cpp
+// Scalar note params (commands 0x01 and 0x10)
+static const char* noteParamKey(uint8_t id) {
+    switch (id) {
+        case 0x01: return "f0_hz";
+        case 0x02: return "B";          // NOTE: not runtime-settable in PianoCore
+        case 0x03: return "attack_tau";
+        case 0x04: return "A_noise";
+        case 0x05: return "rms_gain";
+        case 0x06: return "phi_diff";
+        default:   return nullptr;
+    }
+}
+
+// Per-partial params (command 0x02)
+static const char* partialParamKey(uint8_t id) {
+    switch (id) {
+        case 0x10: return "f_hz";
+        case 0x11: return "A0";
+        case 0x12: return "tau1";
+        case 0x13: return "tau2";
+        case 0x14: return "a1";
+        case 0x15: return "beat_hz";
+        case 0x16: return "phi";
+        default:   return nullptr;
+    }
+}
+```
+
+### Notes and limitations
+
+**`B` (inharmonicity, 0x02):** Defined in the protocol but `PianoCore::setNoteParam`
+returns `false` for this key — inharmonicity is baked into partial frequencies at
+export time. To change `B`, re-export the soundbank and push it via `SET_BANK`.
+
+**SET_MASTER param IDs:** The protocol specifies the same ID table as SET_NOTE_PARAM,
+mapping to `ISynthCore::setParam` string keys (e.g. `"beat_scale"`, `"noise_level"`).
+However, the ID table only covers per-note keys (`f0_hz`, `B`, etc.) — none of which
+are global `setParam` keys in `PianoCore`. SET_MASTER currently succeeds silently
+only for keys that overlap (none at present). A dedicated master param ID table
+should be defined in a future protocol revision.
+
+**PONG:** Requires `MidiInput::openOutput(port_index)` to be called after
+`MidiInput::open()`. If no output port is open, PING is processed but PONG is
+dropped. Port index must be selected manually (no auto-pairing with the input port).
