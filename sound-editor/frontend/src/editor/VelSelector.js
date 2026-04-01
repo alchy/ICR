@@ -69,7 +69,12 @@ export class VelSelector {
                         style="padding:2px 9px;font-size:11px;background:#0a1a0a;
                                border:1px solid #4a8a4a;color:#4a8a4a;cursor:pointer;
                                margin-left:4px;white-space:nowrap;"
-                        title="Commit blended positions as override for export">Keep</button>
+                        title="Overlay blended values (reversible)">Keep</button>
+                    <button id="btn-apply"
+                        style="padding:2px 9px;font-size:11px;background:#1a0a0a;
+                               border:1px solid #8a4a4a;color:#8a4a4a;cursor:pointer;
+                               margin-left:2px;white-space:nowrap;"
+                        title="Bake current values into baseline (irreversible)">Apply</button>
                 </div>
                 <div class="vel-ctrl" id="ctrl-stickiness">
                     Stickiness
@@ -114,6 +119,18 @@ export class VelSelector {
             this.kept = !this.kept;
             this._updateKeepBtn();
             this._emit();
+        });
+
+        // Apply button
+        this._container.querySelector("#btn-apply").addEventListener("click", () => {
+            // Apply is always a fresh action — emit with applyPressed flag
+            this._onChange({
+                selected:     this.selected,
+                coherence:    this.coherence,
+                stickiness:   this.stickiness,
+                keepToggled:  this.kept,
+                applyPressed: true,
+            });
         });
 
         this._updateUI();

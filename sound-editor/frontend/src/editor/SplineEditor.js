@@ -31,7 +31,7 @@ export class SplineEditor {
 
     // ── Called by VelSelector when selection/params change ───────────────────
 
-    onSelectorChange({ selected, coherence, stickiness, keepToggled }) {
+    onSelectorChange({ selected, coherence, stickiness, keepToggled, applyPressed }) {
         const keepChanged = keepToggled !== this._kept;
         this._selected   = selected;
         this._coherence  = coherence;
@@ -40,8 +40,9 @@ export class SplineEditor {
 
         if (!this._layerId) return;
 
-        if (keepChanged) {
-            // Keep was toggled — commit or roll back
+        if (applyPressed) {
+            this._doApply();
+        } else if (keepChanged) {
             keepToggled ? this._doKeep() : this._doUnkeep();
         } else {
             this.fitAndRedraw();
@@ -96,15 +97,10 @@ export class SplineEditor {
             );
             this._space.clearSplines();
             for (const [velStr, data] of Object.entries(result)) {
-                const vel  = parseInt(velStr);
-                const hasGhost = data.curve_original &&
-                    this._isDifferent(data.curve.y, data.curve_original.y);
+                const vel = parseInt(velStr);
                 this._space.updateSpline(
-                    vel,
-                    data.curve.x, data.curve.y,
+                    vel, data.curve.x, data.curve.y,
                     VEL_COLORS[vel % VEL_COLORS.length],
-                    hasGhost ? data.curve_original.x : null,
-                    hasGhost ? data.curve_original.y : null,
                 );
             }
             setStatus("Fitted.");
@@ -157,11 +153,25 @@ export class SplineEditor {
         await this.fitAndRedraw();
     }
 
-    _isDifferent(a, b, tol = 1e-6) {
-        if (!a || !b || a.length !== b.length) return false;
-        for (let i = 0; i < a.length; i++)
-            if (Math.abs(a[i] - b[i]) > tol) return true;
-        return false;
+    async _doApply() {
+        if (!this._layerId) return;
+        setStatus("Applying…");
+        try {
+            const vels = [...this._selected];
+            await api.applyLayer(this._layerId, vels, this._coherence);
+
+            // Clear keep visual + reload layer from updated _params
+            this._space.clearKeep();
+            this._kept = false;
+
+            const values = await api.getLayerValues(this._layerId);
+            this._space.loadLayer(values, this._layer);
+
+            await this.fitAndRedraw();
+            setStatus("Applied ✓ — values baked into baseline.");
+        } catch (err) {
+            setStatus(`Apply error: ${err.message}`, true);
+        }
     }
 
     // ── Card interaction ─────────────────────────────────────────────────────

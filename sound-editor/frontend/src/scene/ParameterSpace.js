@@ -177,13 +177,13 @@ export class ParameterSpace {
      * @param {number[]} yVals    fitted values
      * @param {string}   colorHex
      */
-    updateSpline(vel, xMidi, yVals, colorHex, xOrig = null, yOrig = null) {
+    updateSpline(vel, xMidi, yVals, colorHex) {
         if (!this._splines.has(vel)) {
             this._splines.set(vel, new SplineMesh(
                 colorHex, vel, xFromMidi, v => this._yMapper(v),
             ));
         }
-        this._splines.get(vel).update(xMidi, yVals, this._scene, xOrig, yOrig);
+        this._splines.get(vel).update(xMidi, yVals, this._scene);
     }
 
     /** Mark a card as anchor (visual only). */

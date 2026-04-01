@@ -304,13 +304,41 @@ def keep_layer(layer_id: str, req: KeepRequest):
 @app.delete("/spline/{layer_id}/keep")
 def unkeep_layer(layer_id: str, velocities: str = ""):
     """Remove override for this layer (restores originals on export)."""
-    removed = []
     vels = [int(v) for v in velocities.split(",") if v.strip().isdigit()] if velocities else list(range(8))
+    removed = []
     for vel in vels:
         key = f"{layer_id}__vel{vel}"
         store.unkeep_layer(key)
         removed.append(key)
     return {"removed": removed}
+
+@app.post("/spline/{layer_id}/apply")
+def apply_layer(layer_id: str, req: KeepRequest):
+    """
+    Bake current overrides (or freshly fitted values) into _params permanently.
+    Clears the override — the applied values become the new baseline.
+    Export priority: Keep > Applied-baseline > raw-original.
+    """
+    import numpy as np
+    vels = req.velocities
+    baked: dict[str, float] = {}
+
+    for vel in vels:
+        override_key = f"{layer_id}__vel{vel}"
+        if override_key in store._overrides:
+            # Use existing override (from Keep)
+            baked.update(store._overrides[override_key])
+            store.unkeep_layer(override_key)
+        else:
+            # No keep active — fit and bake current spline
+            all_raw  = store.extract_layer(layer_id)
+            vel_data = {k: v for k, v in all_raw.items() if k.endswith(f"_vel{vel}")}
+            state    = _get_spline(f"{layer_id}__vel{vel}")
+            fitted   = engine.fit(state, vel_data)
+            baked.update({f"m{m:03d}_vel{vel}": v for m, v in fitted.items()})
+
+    store.update_layer_values(layer_id, baked)
+    return {"applied": True, "notes": len(baked)}
 
 @app.get("/spline/{layer_id}/keep_status")
 def keep_status(layer_id: str):
