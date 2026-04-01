@@ -34,14 +34,20 @@ build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-piano-s
 A bundled soundbank (`soundbanks/params-piano-soundbank.json`) is included in the repository.
 It was fitted from KS Grand recordings and includes per-note spectral EQ.
 
-### Train (full pipeline)
+### Train
 
 ```bash
 pip install -r training/requirements.txt
 
-python training/train_pipeline.py \
+# Simple (no NN, ~15 min)
+python training/train_pipeline.py simple \
     --bank "C:/SoundBanks/IthacaPlayer/ks-grand" \
-    --finetune
+    --out  soundbanks/params-ks-grand.json
+
+# Full (NN + finetune, ~60 min)
+python training/train_pipeline.py full \
+    --bank "C:/SoundBanks/IthacaPlayer/ks-grand" \
+    --out  soundbanks/params-ks-grand.json
 ```
 
 See `docs/TRAIN_BUILD_RUN.md` for the complete guide.
@@ -66,6 +72,7 @@ docs/          Documentation
 
 ## Documentation
 
-- [`docs/TRAIN_BUILD_RUN.md`](docs/TRAIN_BUILD_RUN.md) — full training pipeline, build, and run guide
+- [`docs/TRAIN_BUILD_RUN.md`](docs/TRAIN_BUILD_RUN.md) — training pipeline, build, and run guide
+- [`docs/TRAINING_MODULES.md`](docs/TRAINING_MODULES.md) — Python modules reference + code examples
 - [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — C++ engine architecture
 - [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — acoustic physics reference (papers)
