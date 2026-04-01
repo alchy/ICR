@@ -1,7 +1,7 @@
 """
-analysis/train_pipeline.py
+training/train_pipeline.py
 ───────────────────────────
-Wrapper pro celý tréninkový pipeline IthacaCoreResonator.
+Wrapper pro celý tréninkový pipeline ICR.
 
 Spustí kroky v pořadí:
   1. extract_params.py       — fyzikální parametry z WAV banky
@@ -10,7 +10,7 @@ Spustí kroky v pořadí:
   4. train_instrument_profile.py — surrogate NN model (parametrový profil)
   5. closed_loop_finetune.py — MRSTFT fine-tuning (volitelný, --finetune)
 
-Výstupní soubory (v --out-dir, default analysis/):
+Výstupní soubory (v --out-dir, default training/):
   params-<banka>.json              naměřené fyzikální parametry
   params-nn-profile-<banka>.json   NN-smoothed profil pro syntetizér
   profile-<banka>.pt               váhy modelu (znovupoužitelné)
@@ -18,31 +18,31 @@ Výstupní soubory (v --out-dir, default analysis/):
 Použití
 ───────
   # Celý pipeline (doporučené)
-  python analysis/train_pipeline.py --bank soundbanks/ks-grand
+  python training/train_pipeline.py --bank "C:/SoundBanks/IthacaPlayer/ks-grand"
 
   # S explicitním pojmenováním banky a výstupem
-  python analysis/train_pipeline.py \\
-      --bank soundbanks/ks-grand \\
+  python training/train_pipeline.py \\
+      --bank "C:/SoundBanks/IthacaPlayer/ks-grand" \\
       --bank-name ks-grand \\
-      --out-dir analysis/
+      --out-dir training/
 
   # Přeskočit EQ krok (rychlejší, ale profil bez tělové rezonance)
-  python analysis/train_pipeline.py --bank soundbanks/ks-grand --skip-eq
+  python training/train_pipeline.py --bank "C:/SoundBanks/IthacaPlayer/ks-grand" --skip-eq
 
   # Přidat closed-loop MRSTFT fine-tuning po NN tréninku
-  python analysis/train_pipeline.py --bank soundbanks/ks-grand --finetune
+  python training/train_pipeline.py --bank "C:/SoundBanks/IthacaPlayer/ks-grand" --finetune
 
   # Jen výpis příkazů (bez spuštění)
-  python analysis/train_pipeline.py --bank soundbanks/ks-grand --dry-run
+  python training/train_pipeline.py --bank "C:/SoundBanks/IthacaPlayer/ks-grand" --dry-run
 
   # Od kroku 4 (přeskočit extrakci, params JSON existuje)
-  python analysis/train_pipeline.py --bank soundbanks/ks-grand --start-at 4
+  python training/train_pipeline.py --bank "C:/SoundBanks/IthacaPlayer/ks-grand" --start-at 4
 
 Argumenty
 ─────────
   --bank         Adresář s WAV soubory (m060-vel3-f44.wav formát) [povinný]
   --bank-name    Název banky pro pojmenování souborů (default: jméno adresáře)
-  --out-dir      Výstupní adresář (default: analysis/)
+  --out-dir      Výstupní adresář (default: training/)
   --workers      Paralelní workery pro extrakci + EQ (default: CPU count)
   --epochs       Epochy NN tréninku (default: 1800)
   --hidden       Velikost MLP hidden vrstvy (default: 64)
@@ -110,8 +110,8 @@ def parse_args() -> argparse.Namespace:
                    help='Adresář s WAV soubory banky')
     p.add_argument('--bank-name',    default=None,
                    help='Název banky (default: jméno adresáře)')
-    p.add_argument('--out-dir',      default='analysis',
-                   help='Výstupní adresář (default: analysis/)')
+    p.add_argument('--out-dir',      default='training',
+                   help='Výstupní adresář (default: training/)')
     # Paralelismus
     p.add_argument('--workers',      type=int, default=None,
                    help='Paralelní workery pro extrakci + EQ (default: CPU count)')
@@ -176,7 +176,7 @@ def main() -> int:
     if args.start_at <= 1:
         _banner(1, "Extrakce fyzikálních parametrů")
         ok = _run(_python(
-            "analysis/extract_params.py",
+            "training/extract_params.py",
             "--bank",    str(bank_dir),
             "--out",     str(params_json),
             "--workers", str(workers),
@@ -188,7 +188,7 @@ def main() -> int:
     if args.start_at <= 2 and not args.skip_outlier:
         _banner(2, "Filtrace outlierů (z=10, in-place drop)")
         ok = _run(_python(
-            "analysis/find_outliers.py",
+            "training/find_outliers.py",
             "--params", str(params_json),
             "--z",      "10",
             "--drop",
@@ -202,7 +202,7 @@ def main() -> int:
     if args.start_at <= 3 and not args.skip_eq:
         _banner(3, "Spektrální EQ (LTASE, in-place)")
         ok = _run(_python(
-            "analysis/compute_spectral_eq.py",
+            "training/compute_spectral_eq.py",
             "--params",  str(params_json),
             "--bank",    str(bank_dir),
             "--workers", str(workers),
@@ -216,7 +216,7 @@ def main() -> int:
     if args.start_at <= 4:
         _banner(4, f"Surrogate NN trénink ({args.epochs} epoch)")
         ok = _run(_python(
-            "analysis/train_instrument_profile.py",
+            "training/train_instrument_profile.py",
             "--in",         str(params_json),
             "--out",        str(profile_json),
             "--model",      str(profile_pt),
@@ -232,7 +232,7 @@ def main() -> int:
     if args.start_at <= 5 and args.finetune:
         _banner(5, f"Closed-loop MRSTFT fine-tuning ({args.ft_epochs} epoch)")
         ft_cmd = [
-            "analysis/closed_loop_finetune.py",
+            "training/closed_loop_finetune.py",
             "--mode",    "finetune",
             "--model",   str(profile_pt),
             "--out",     str(profile_pt),   # přepsat in-place
