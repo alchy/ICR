@@ -13,6 +13,7 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { CardMesh }   from "./CardMesh.js";
 import { SplineMesh } from "./SplineMesh.js";
+import { AxisHelper } from "./AxisHelper.js";
 
 // ── World-space mapping helpers ───────────────────────────────────────────────
 
@@ -43,6 +44,7 @@ export class ParameterSpace {
         this._container = container;
         this._cards     = new Map();   // noteKey → CardMesh
         this._splines   = new Map();   // vel → SplineMesh
+        this._axes      = null;
         this._raycaster = new THREE.Raycaster();
         this._mouse     = new THREE.Vector2();
         this._hoveredCard = null;
@@ -53,6 +55,7 @@ export class ParameterSpace {
         this._initControls();
         this._initLights();
         this._initGrid();
+        this._axes = new AxisHelper(this._scene);
         this._bindEvents();
         this._animate();
     }
@@ -148,6 +151,9 @@ export class ParameterSpace {
     loadLayer(layerValues, layer) {
         this._clearCards();
         this._yMapper = makeYMapper(layer.min_val, layer.max_val);
+
+        // Rebuild axes for this layer's value range
+        this._axes.build(this._yMapper, layer);
 
         for (const [noteKey, value] of Object.entries(layerValues)) {
             const midi = parseInt(noteKey.slice(1, 4));
