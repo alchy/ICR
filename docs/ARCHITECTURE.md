@@ -212,11 +212,18 @@ To send PONG responses, call `MidiInput::openOutput(port_index)` after
 `MidiInput::open()`. The output port is separate from the input port. If no
 output port is open, PING is processed but PONG is silently dropped.
 
+### SET_MASTER param ranges
+
+| ID range  | Target              | How                                          |
+|-----------|---------------------|----------------------------------------------|
+| 0x01–0x07 | ISynthCore globals  | `core_->setParam(key, value)`                |
+| 0x10–0x13 | CoreEngine mix      | Direct atomic write (`master_gain_`, `pan_l_/r_`, `lfo_*`) |
+| 0x20–0x24 | DspChain            | `dsp_.set*()` via uint8 normalisation        |
+
 ### `B` (inharmonicity)
 
-SysEx param ID `0x02` (`B`) is defined in the protocol but is **not
-runtime-settable** in `PianoCore`: inharmonicity is baked into per-partial
-frequencies at export time (`analysis/export_piano_params.py`).
+SysEx param ID `0x02` (`B`) in SET_NOTE_PARAM is **not runtime-settable** in
+`PianoCore`: inharmonicity is baked into per-partial frequencies at export time.
 `setNoteParam(..., "B", ...)` returns `false`. To change inharmonicity,
 re-export the soundbank and reload via `SET_BANK`.
 

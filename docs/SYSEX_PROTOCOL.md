@@ -135,14 +135,44 @@ F0 7D 01  03  <chunk_hi> <chunk_lo>  <total_hi> <total_lo>  <data…>  F7
 
 ## 0x10 — SET_MASTER
 
-Update a global synthesis parameter.
+Update a global or engine-level parameter.
 
 ```
 F0 7D 01  10  <param_id>  <v0 v1 v2 v3 v4>  F7
 ```
 
-Uses the same Scalar Param IDs table as SET_NOTE_PARAM.
-Master parameters affect all notes simultaneously (e.g. global `beat_scale`, `noise_level`).
+param_id uses its own table (separate from SET_NOTE_PARAM):
+
+### ISynthCore global params (0x01–0x07)
+
+| id   | key               | Range      | Description                    |
+|------|-------------------|------------|--------------------------------|
+| 0x01 | `beat_scale`      | 0.0–4.0    | Scales all beat_hz values      |
+| 0x02 | `noise_level`     | 0.0–4.0    | Noise amplitude multiplier     |
+| 0x03 | `pan_spread`      | 0.0–π rad  | Within-note string spread      |
+| 0x04 | `stereo_decorr`   | 0.0–2.0    | Schroeder all-pass strength    |
+| 0x05 | `keyboard_spread` | 0.0–π rad  | L–R spread across keyboard     |
+| 0x06 | `eq_strength`     | 0.0–1.0    | Spectral EQ wet/dry blend      |
+| 0x07 | `rng_seed`        | 0–9999     | Base RNG seed (applied at noteOn) |
+
+### CoreEngine mix params (0x10–0x13)
+
+| id   | key           | Range       | Description                   |
+|------|---------------|-------------|-------------------------------|
+| 0x10 | `master_gain` | 0.0–2.0     | Output gain (1.0 = unity)     |
+| 0x11 | `master_pan`  | −1.0–+1.0   | Stereo pan (0 = centre)       |
+| 0x12 | `lfo_speed`   | 0.0–2.0 Hz  | LFO panning rate              |
+| 0x13 | `lfo_depth`   | 0.0–1.0     | LFO panning depth             |
+
+### DspChain params (0x20–0x24) — normalised 0.0–1.0
+
+| id   | key                  | 0.0         | 1.0       |
+|------|----------------------|-------------|-----------|
+| 0x20 | `limiter_threshold`  | −40 dB      | 0 dB      |
+| 0x21 | `limiter_release`    | 10 ms       | 2000 ms   |
+| 0x22 | `limiter_enabled`    | off         | on (≥0.5) |
+| 0x23 | `bbe_definition`     | 0 dB shelf  | +12 dB    |
+| 0x24 | `bbe_bass_boost`     | 0 dB shelf  | +10 dB    |
 
 ---
 
@@ -263,12 +293,10 @@ static const char* partialParamKey(uint8_t id) {
 returns `false` for this key — inharmonicity is baked into partial frequencies at
 export time. To change `B`, re-export the soundbank and push it via `SET_BANK`.
 
-**SET_MASTER param IDs:** The protocol specifies the same ID table as SET_NOTE_PARAM,
-mapping to `ISynthCore::setParam` string keys (e.g. `"beat_scale"`, `"noise_level"`).
-However, the ID table only covers per-note keys (`f0_hz`, `B`, etc.) — none of which
-are global `setParam` keys in `PianoCore`. SET_MASTER currently succeeds silently
-only for keys that overlap (none at present). A dedicated master param ID table
-should be defined in a future protocol revision.
+**SET_MASTER param ID ranges:** IDs 0x01–0x07 route to `ISynthCore::setParam`;
+0x10–0x13 write directly to `CoreEngine` atomics; 0x20–0x24 write to `DspChain`
+(normalised 0.0–1.0 → uint8 0–127). On the Python side, use `MASTER_PARAM_IDS`
+dict in `sysex_bridge.py` — `set_master()` raises `ValueError` for unknown keys.
 
 **PONG:** Requires `MidiInput::openOutput(port_index)` to be called after
 `MidiInput::open()`. If no output port is open, PING is processed but PONG is

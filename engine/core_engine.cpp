@@ -366,6 +366,21 @@ static const char* partialParamKey(uint8_t id) {
     }
 }
 
+// Master param IDs — ISynthCore global keys (0x01–0x07).
+// CoreEngine and DspChain params (0x10+, 0x20+) are handled inline in SET_MASTER.
+static const char* masterCoreParamKey(uint8_t id) {
+    switch (id) {
+        case 0x01: return "beat_scale";
+        case 0x02: return "noise_level";
+        case 0x03: return "pan_spread";
+        case 0x04: return "stereo_decorr";
+        case 0x05: return "keyboard_spread";
+        case 0x06: return "eq_strength";
+        case 0x07: return "rng_seed";
+        default:   return nullptr;
+    }
+}
+
 std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
     // data is AFTER F0, BEFORE F7
     if (len < 3) return {};
@@ -433,11 +448,49 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
     }
 
     case 0x10: {  // SET_MASTER — param_id value(5)
-        if (payloadLen < 6 || !core_) break;
-        uint8_t     pid   = payload[0];
-        float       value = decodeSysExFloat(payload + 1);
-        const char* key   = noteParamKey(pid);
-        if (key) core_->setParam(key, value);
+        if (payloadLen < 6) break;
+        uint8_t pid   = payload[0];
+        float   value = decodeSysExFloat(payload + 1);
+
+        if (pid <= 0x07) {
+            // ISynthCore global params (beat_scale, noise_level, …)
+            const char* key = masterCoreParamKey(pid);
+            if (key && core_) core_->setParam(key, value);
+
+        } else if (pid >= 0x10 && pid <= 0x13) {
+            // CoreEngine mix params — write directly to atomics
+            switch (pid) {
+            case 0x10:  // master_gain  0.0–2.0
+                master_gain_.store((std::max)(0.f, (std::min)(2.f, value)),
+                                   std::memory_order_relaxed);
+                break;
+            case 0x11: {  // master_pan  -1.0–+1.0
+                float n = (std::max)(-1.f, (std::min)(1.f, value));
+                if (n <= 0.f) { pan_l_.store(1.f);       pan_r_.store(1.f + n); }
+                else          { pan_l_.store(1.f - n);   pan_r_.store(1.f);     }
+                break;
+            }
+            case 0x12:  // lfo_speed  Hz  0.0–2.0
+                lfo_speed_.store((std::max)(0.f, (std::min)(2.f, value)),
+                                 std::memory_order_relaxed);
+                break;
+            case 0x13:  // lfo_depth  0.0–1.0
+                lfo_depth_.store((std::max)(0.f, (std::min)(1.f, value)),
+                                 std::memory_order_relaxed);
+                break;
+            }
+
+        } else if (pid >= 0x20 && pid <= 0x24) {
+            // DspChain params — normalize float 0.0–1.0 → uint8 0–127
+            auto u = (uint8_t)((std::max)(0.f, (std::min)(1.f, value)) * 127.f);
+            switch (pid) {
+            case 0x20: dsp_.setLimiterThreshold(u); break;
+            case 0x21: dsp_.setLimiterRelease(u);   break;
+            case 0x22: dsp_.setLimiterEnabled(u);   break;
+            case 0x23: dsp_.setBBEDefinition(u);    break;
+            case 0x24: dsp_.setBBEBassBoost(u);     break;
+            }
+        }
         break;
     }
 
