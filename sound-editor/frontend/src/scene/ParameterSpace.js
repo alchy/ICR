@@ -96,11 +96,15 @@ export class ParameterSpace {
     }
 
     _initLights() {
-        this._scene.add(new THREE.AmbientLight(0x223344, 1.2));
-        const dir = new THREE.DirectionalLight(0xaaccff, 1.5);
+        this._scene.add(new THREE.AmbientLight(0x6688aa, 2.5));
+        const dir = new THREE.DirectionalLight(0xffffff, 3.0);
         dir.position.set(5, 12, 8);
         dir.castShadow = true;
         this._scene.add(dir);
+        // Fill light from front-below so cards facing camera are lit
+        const fill = new THREE.DirectionalLight(0x88ccff, 1.5);
+        fill.position.set(0, 2, 20);
+        this._scene.add(fill);
     }
 
     _initGrid() {

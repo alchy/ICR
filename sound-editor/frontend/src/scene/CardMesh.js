@@ -16,13 +16,16 @@ const CARD_H  = 0.20;
 const CARD_D  = 0.04;
 
 const MAT_DEFAULT = new THREE.MeshStandardMaterial({
-    color: 0x1a2a3a, roughness: 0.6, metalness: 0.3,
+    color: 0x2a6080, roughness: 0.5, metalness: 0.4,
+    emissive: 0x0a2030, emissiveIntensity: 0.6,
 });
 const MAT_HOVER   = new THREE.MeshStandardMaterial({
-    color: 0x2a4a6a, roughness: 0.4, metalness: 0.5, emissive: 0x0a2030,
+    color: 0x44aadd, roughness: 0.3, metalness: 0.6,
+    emissive: 0x1a5070, emissiveIntensity: 1.0,
 });
 const MAT_ANCHOR  = new THREE.MeshStandardMaterial({
-    color: 0x3a3a10, roughness: 0.4, metalness: 0.4, emissive: 0x111100,
+    color: 0xddaa22, roughness: 0.3, metalness: 0.5,
+    emissive: 0x664400, emissiveIntensity: 0.8,
 });
 const GEOM_CARD   = new THREE.BoxGeometry(CARD_W, CARD_H, CARD_D);
 
