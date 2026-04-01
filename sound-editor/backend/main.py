@@ -94,6 +94,10 @@ class SysExPartialRequest(BaseModel):
     param_key: str
     value:     float
 
+class SysExMasterRequest(BaseModel):
+    param_key: str
+    value:     float
+
 class ExportRequest(BaseModel):
     path: str
 
@@ -423,6 +427,16 @@ def sysex_bank():
     data = json.dumps(store.to_dict()).encode("utf-8")
     bridge.set_bank(data)
     return {"sent": True, "bytes": len(data)}
+
+@app.post("/sysex/master")
+def sysex_master(req: SysExMasterRequest):
+    if not bridge.is_open():
+        raise HTTPException(400, "MIDI port not connected")
+    try:
+        bridge.set_master(req.param_key, req.value)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"sent": True}
 
 @app.post("/sysex/ping")
 def sysex_ping():

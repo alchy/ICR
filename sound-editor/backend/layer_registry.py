@@ -31,6 +31,7 @@ SCALAR_LAYERS = [
     Layer("A_noise",    "Noise Amplitude",   "noise",    None,  0.0,   2.0,    "#fa0"),
     Layer("attack_tau", "Attack τ",          "noise",    None,  0.001, 0.1,    "#f80", True),
     Layer("rms_gain",   "RMS Gain",          "global",   None,  0.0,   0.3,    "#8f8"),
+    Layer("phi_diff",   "Phase Diff φ",      "global",   None,  0.0,   6.2832, "#a8f"),
 ]
 
 # ── Per-partial layers (expanded for k = 1..K_MAX) ───────────────────────────
@@ -45,6 +46,7 @@ _PARTIAL_TEMPLATES = [
     ("tau2",    "τ2[k{k}]",      "envelope", 0.01,   30.0,   "#04a", True),
     ("a1",      "a1[k{k}]",      "envelope", 0.0,    1.0,    "#adf", False),
     ("beat_hz", "beat[k{k}] Hz", "partial",  0.0,    10.0,   "#f4a", False),
+    ("phi",     "φ[k{k}]",       "partial",  0.0,    6.2832, "#d8f", False),
 ]
 
 
