@@ -40,11 +40,11 @@ K_MAX = 60
 _PARTIAL_TEMPLATES = [
     # (param_key, label_fmt, group, min, max, color, log_scale)
     ("f_hz",    "f[k{k}] Hz",    "partial",  10.0,   8000.0, "#7df", True),
-    ("A0",      "A0[k{k}]",      "envelope", 0.0,    50.0,   "#4f4"),
+    ("A0",      "A0[k{k}]",      "envelope", 0.0,    50.0,   "#4f4", False),
     ("tau1",    "τ1[k{k}]",      "envelope", 0.001,  5.0,    "#08f", True),
     ("tau2",    "τ2[k{k}]",      "envelope", 0.01,   30.0,   "#04a", True),
-    ("a1",      "a1[k{k}]",      "envelope", 0.0,    1.0,    "#adf"),
-    ("beat_hz", "beat[k{k}] Hz", "partial",  0.0,    10.0,   "#f4a"),
+    ("a1",      "a1[k{k}]",      "envelope", 0.0,    1.0,    "#adf", False),
+    ("beat_hz", "beat[k{k}] Hz", "partial",  0.0,    10.0,   "#f4a", False),
 ]
 
 
