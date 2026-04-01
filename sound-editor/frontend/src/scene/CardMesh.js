@@ -11,23 +11,22 @@
 
 import * as THREE from "three";
 
-const CARD_W  = 0.55;
-const CARD_H  = 0.20;
-const CARD_D  = 0.04;
+// Sphere radius — small enough that 88 notes don't overlap
+const SPHERE_R = 0.06;
 
 const MAT_DEFAULT = new THREE.MeshStandardMaterial({
-    color: 0x2a6080, roughness: 0.5, metalness: 0.4,
-    emissive: 0x0a2030, emissiveIntensity: 0.6,
+    color: 0x2a6080, roughness: 0.4, metalness: 0.5,
+    emissive: 0x1a4060, emissiveIntensity: 0.8,
 });
 const MAT_HOVER   = new THREE.MeshStandardMaterial({
-    color: 0x44aadd, roughness: 0.3, metalness: 0.6,
-    emissive: 0x1a5070, emissiveIntensity: 1.0,
+    color: 0x66ddff, roughness: 0.2, metalness: 0.6,
+    emissive: 0x33aacc, emissiveIntensity: 1.2,
 });
 const MAT_ANCHOR  = new THREE.MeshStandardMaterial({
-    color: 0xddaa22, roughness: 0.3, metalness: 0.5,
-    emissive: 0x664400, emissiveIntensity: 0.8,
+    color: 0xffcc33, roughness: 0.2, metalness: 0.5,
+    emissive: 0xaa6600, emissiveIntensity: 1.0,
 });
-const GEOM_CARD   = new THREE.BoxGeometry(CARD_W, CARD_H, CARD_D);
+const GEOM_SPHERE = new THREE.SphereGeometry(SPHERE_R, 8, 6);
 
 export class CardMesh {
     /**
@@ -46,7 +45,7 @@ export class CardMesh {
         this.isAnchor = isAnchor;
         this._hovered = false;
 
-        this.mesh = new THREE.Mesh(GEOM_CARD, isAnchor ? MAT_ANCHOR : MAT_DEFAULT);
+        this.mesh = new THREE.Mesh(GEOM_SPHERE, isAnchor ? MAT_ANCHOR : MAT_DEFAULT);
         this.mesh.userData.card = this;
         this.mesh.castShadow    = true;
     }
@@ -71,6 +70,6 @@ export class CardMesh {
     }
 
     dispose() {
-        // Shared geometries/materials — no disposal needed here.
+        // Shared geometry/materials — no disposal needed here.
     }
 }

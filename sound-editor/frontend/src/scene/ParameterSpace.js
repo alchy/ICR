@@ -81,17 +81,17 @@ export class ParameterSpace {
         this._scene.fog = new THREE.Fog(0x080810, 20, 60);
 
         this._camera = new THREE.PerspectiveCamera(
-            55, this._container.clientWidth / this._container.clientHeight, 0.1, 100,
+            60, this._container.clientWidth / this._container.clientHeight, 0.1, 100,
         );
-        this._camera.position.set(0, 5, 16);
-        this._camera.lookAt(0, 4, 0);
+        this._camera.position.set(0, 6, 18);
+        this._camera.lookAt(0, 4, 4);
     }
 
     _initControls() {
         this._controls = new OrbitControls(this._camera, this._renderer.domElement);
         this._controls.enableDamping  = true;
         this._controls.dampingFactor  = 0.08;
-        this._controls.target.set(0, 3, 4);
+        this._controls.target.set(0, 4, 4);
         this._controls.update();
     }
 
