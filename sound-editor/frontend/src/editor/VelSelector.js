@@ -19,14 +19,15 @@ const VEL_COLORS = [
 export class VelSelector {
     /**
      * @param {HTMLElement} container   element to render into
-     * @param {Function}    onChange    ({ selected: Set<int>, coherence, stickiness }) => void
+     * @param {Function}    onChange    ({ selected, coherence, stickiness, keepToggled }) => void
      */
     constructor(container, onChange) {
         this._container = container;
         this._onChange  = onChange;
-        this.selected   = new Set([0, 1, 2, 3, 4, 5, 6, 7]);   // all on by default
+        this.selected   = new Set([0, 1, 2, 3, 4, 5, 6, 7]);
         this.coherence  = 0.0;
         this.stickiness = 3.0;
+        this.kept       = false;   // whether "keep" is active
         this._build();
     }
 
@@ -64,6 +65,11 @@ export class VelSelector {
                     Coherence
                     <input type="range" id="sl-coherence" min="0" max="1" step="0.01" value="0">
                     <span class="val" id="lbl-coherence">0.00</span>
+                    <button id="btn-keep"
+                        style="padding:2px 9px;font-size:11px;background:#0a1a0a;
+                               border:1px solid #4a8a4a;color:#4a8a4a;cursor:pointer;
+                               margin-left:4px;white-space:nowrap;"
+                        title="Commit blended positions as override for export">Keep</button>
                 </div>
                 <div class="vel-ctrl" id="ctrl-stickiness">
                     Stickiness
@@ -103,6 +109,13 @@ export class VelSelector {
             this._emit();
         });
 
+        // Keep button
+        this._container.querySelector("#btn-keep").addEventListener("click", () => {
+            this.kept = !this.kept;
+            this._updateKeepBtn();
+            this._emit();
+        });
+
         this._updateUI();
     }
 
@@ -120,17 +133,34 @@ export class VelSelector {
     }
 
     _updateUI() {
-        // Show stickiness only when exactly one velocity selected
         const single = this.selected.size === 1;
         this._container.querySelector("#ctrl-stickiness").style.display =
             single ? "flex" : "none";
+        this._updateKeepBtn();
+    }
+
+    _updateKeepBtn() {
+        const btn = this._container.querySelector("#btn-keep");
+        if (!btn) return;
+        if (this.kept) {
+            btn.style.background   = "#1a4a1a";
+            btn.style.borderColor  = "#6aca6a";
+            btn.style.color        = "#6aca6a";
+            btn.textContent        = "Keep ✓";
+        } else {
+            btn.style.background   = "#0a1a0a";
+            btn.style.borderColor  = "#4a8a4a";
+            btn.style.color        = "#4a8a4a";
+            btn.textContent        = "Keep";
+        }
     }
 
     _emit() {
         this._onChange({
-            selected:   this.selected,
-            coherence:  this.coherence,
-            stickiness: this.stickiness,
+            selected:    this.selected,
+            coherence:   this.coherence,
+            stickiness:  this.stickiness,
+            keepToggled: this.kept,
         });
     }
 

@@ -101,6 +101,10 @@ class FitAllRequest(BaseModel):
     velocities:  list[int] = list(range(8))   # which vel layers to fit
     coherence:   float = 0.0                   # 0 = independent, 1 = average
 
+class KeepRequest(BaseModel):
+    velocities:  list[int] = list(range(8))
+    coherence:   float = 0.0
+
 
 # ── Params endpoints ──────────────────────────────────────────────────────────
 
@@ -196,6 +200,8 @@ def fit_all_velocities(layer_id: str, req: FitAllRequest):
         fitted   = engine.fit(state, vel_data)
         per_vel[vel] = fitted
 
+    original_per_vel = {v: dict(d) for v, d in per_vel.items()}  # snapshot before blending
+
     # ── Coherence blending ────────────────────────────────────────────────────
     if coherence > 0 and len(vels) > 1:
         midi_keys = sorted(set(m for d in per_vel.values() for m in d))
@@ -208,23 +214,24 @@ def fit_all_velocities(layer_id: str, req: FitAllRequest):
                 ind = per_vel[vel][m]
                 per_vel[vel][m] = ind + coherence * (avg.get(m, ind) - ind)
 
-    # ── Write back + build curve ──────────────────────────────────────────────
+    # ── Build curves — do NOT write to store (preview only) ──────────────────
     result = {}
     x_query = list(np.linspace(21, 108, n_curve))
 
     for vel in vels:
-        fitted = per_vel[vel]
-        store.update_layer_values(layer_id, {
-            f"m{m:03d}_vel{vel}": v for m, v in fitted.items()
-        })
-        # Dense curve via linear interp on fitted discrete values
-        xs = sorted(fitted)
-        ys = [fitted[x] for x in xs]
-        if len(xs) >= 2:
-            y_curve = list(np.interp(x_query, xs, ys))
-        else:
-            y_curve = [0.0] * len(x_query)
-        result[vel] = {"fitted": fitted, "curve": {"x": x_query, "y": y_curve}}
+        orig    = original_per_vel.get(vel, {})
+        blended = per_vel[vel]
+
+        def _curve(d):
+            xs = sorted(d); ys = [d[x] for x in xs]
+            return list(np.interp(x_query, xs, ys)) if len(xs) >= 2 else [0.0] * len(x_query)
+
+        result[vel] = {
+            "fitted":   blended,
+            "original": orig,
+            "curve":    {"x": x_query, "y": _curve(blended)},
+            "curve_original": {"x": x_query, "y": _curve(orig)},
+        }
 
     return result
 
@@ -255,6 +262,61 @@ def remove_point(layer_id: str, midi: int):
     state = _get_spline(layer_id)
     state.remove_point(midi)
     return {"ok": True}
+
+
+# ── Keep / override endpoints ────────────────────────────────────────────────
+
+@app.post("/spline/{layer_id}/keep")
+def keep_layer(layer_id: str, req: KeepRequest):
+    """Commit current blended result as override (persists through export)."""
+    import numpy as np
+
+    all_raw   = store.extract_layer(layer_id)
+    vels      = req.velocities
+    coherence = max(0.0, min(1.0, req.coherence))
+
+    per_vel: dict[int, dict[int, float]] = {}
+    for vel in vels:
+        vel_data = {k: v for k, v in all_raw.items() if k.endswith(f"_vel{vel}")}
+        state    = _get_spline(f"{layer_id}__vel{vel}")
+        per_vel[vel] = engine.fit(state, vel_data)
+
+    if coherence > 0 and len(vels) > 1:
+        midi_keys = sorted(set(m for d in per_vel.values() for m in d))
+        avg = {
+            m: float(np.mean([per_vel[v][m] for v in vels if m in per_vel[v]]))
+            for m in midi_keys
+        }
+        for vel in vels:
+            for m in per_vel[vel]:
+                ind = per_vel[vel][m]
+                per_vel[vel][m] = ind + coherence * (avg.get(m, ind) - ind)
+
+    # Write blended values to override store (keyed per velocity)
+    for vel in vels:
+        override_key = f"{layer_id}__vel{vel}"
+        store.keep_layer(override_key, {
+            f"m{m:03d}_vel{vel}": v for m, v in per_vel[vel].items()
+        })
+
+    return {"kept": [f"{layer_id}__vel{v}" for v in vels]}
+
+@app.delete("/spline/{layer_id}/keep")
+def unkeep_layer(layer_id: str, velocities: str = ""):
+    """Remove override for this layer (restores originals on export)."""
+    removed = []
+    vels = [int(v) for v in velocities.split(",") if v.strip().isdigit()] if velocities else list(range(8))
+    for vel in vels:
+        key = f"{layer_id}__vel{vel}"
+        store.unkeep_layer(key)
+        removed.append(key)
+    return {"removed": removed}
+
+@app.get("/spline/{layer_id}/keep_status")
+def keep_status(layer_id: str):
+    kept = store.kept_layers()
+    vels = [int(k.split("__vel")[1]) for k in kept if k.startswith(f"{layer_id}__vel")]
+    return {"kept_velocities": vels}
 
 
 # ── Soundbank listing + export ───────────────────────────────────────────────

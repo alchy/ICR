@@ -20,9 +20,10 @@ class ParamsStore:
     """
 
     def __init__(self):
-        self._params: dict = {}      # raw notes dict
-        self._meta:   dict = {}      # format, sr, etc.
-        self._path:   Optional[Path] = None
+        self._params:    dict = {}      # raw notes dict  (never modified by preview)
+        self._meta:      dict = {}      # format, sr, etc.
+        self._path:      Optional[Path] = None
+        self._overrides: dict[str, dict[str, float]] = {}  # layer_id → {note_key: value}
 
     # ── Loading ───────────────────────────────────────────────────────────────
 
@@ -113,10 +114,40 @@ class ParamsStore:
             else:
                 note[layer_id] = value
 
+    # ── Keep / override ──────────────────────────────────────────────────────
+
+    def keep_layer(self, layer_id: str, values: dict[str, float]):
+        """Commit blended values as override (used instead of originals on export)."""
+        self._overrides[layer_id] = dict(values)
+
+    def unkeep_layer(self, layer_id: str):
+        self._overrides.pop(layer_id, None)
+
+    def kept_layers(self) -> list[str]:
+        return list(self._overrides)
+
     # ── Export ────────────────────────────────────────────────────────────────
 
     def to_dict(self) -> dict:
-        return {**self._meta, "notes": self._params}
+        """Return soundbank dict, applying overrides on top of originals."""
+        import copy
+        notes = copy.deepcopy(self._params)
+
+        for layer_id, values in self._overrides.items():
+            partial_key, k = _parse_partial_layer(layer_id)
+            for note_key, value in values.items():
+                if note_key not in notes:
+                    continue
+                note = notes[note_key]
+                if k is not None:
+                    partials = note.get("partials", [])
+                    idx = k - 1
+                    if idx < len(partials):
+                        partials[idx][partial_key] = value
+                else:
+                    note[layer_id] = value
+
+        return {**self._meta, "notes": notes}
 
     def save(self, path: str):
         Path(path).write_text(json.dumps(self.to_dict(), indent=2))

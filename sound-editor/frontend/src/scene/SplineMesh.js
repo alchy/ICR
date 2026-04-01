@@ -65,15 +65,23 @@ export class SplineMesh {
             roughness:         0.5,
             metalness:         0.2,
         });
+        this._ghostMat = new THREE.MeshStandardMaterial({
+            color:       0x445566,
+            transparent: true,
+            opacity:     0.28,
+            roughness:   0.8,
+        });
     }
 
     /**
      * Rebuild tube + endpoint rings from curve data.
-     * @param {number[]} xMidi   dense MIDI positions
-     * @param {number[]} yVals   fitted values at those positions
+     * @param {number[]} xMidi        dense MIDI positions (blended)
+     * @param {number[]} yVals        fitted values (blended)
      * @param {THREE.Scene} scene
+     * @param {number[]} [xOrig]      original MIDI positions (ghost)
+     * @param {number[]} [yOrig]      original values (ghost)
      */
-    update(xMidi, yVals, scene) {
+    update(xMidi, yVals, scene, xOrig = null, yOrig = null) {
         this._clear(scene);
         if (!xMidi || xMidi.length < 2) return;
 
@@ -81,7 +89,18 @@ export class SplineMesh {
         const num  = this._vel + 1;   // 1-based display number
         const col  = this._colorHex;
 
-        // ── Tube ─────────────────────────────────────────────────────────────
+        // ── Ghost tube (original, shown when blending active) ─────────────────
+        if (xOrig && yOrig && this._isDifferent(yVals, yOrig)) {
+            const ghostPts = xOrig.map((m, i) =>
+                new THREE.Vector3(this._xFromMidi(m), this._yFromVal(yOrig[i]), z)
+            );
+            const gCurve = new THREE.CatmullRomCurve3(ghostPts);
+            const gGeom  = new THREE.TubeGeometry(gCurve, ghostPts.length, 0.018, 5, false);
+            const ghost  = new THREE.Mesh(gGeom, this._ghostMat);
+            this._add(ghost, scene);
+        }
+
+        // ── Main tube (blended / live) ────────────────────────────────────────
         const points = xMidi.map((m, i) =>
             new THREE.Vector3(this._xFromMidi(m), this._yFromVal(yVals[i]), z)
         );
@@ -127,5 +146,13 @@ export class SplineMesh {
     dispose(scene) {
         this._clear(scene);
         this._mat.dispose();
+        this._ghostMat.dispose();
+    }
+
+    _isDifferent(a, b, tol = 1e-6) {
+        if (a.length !== b.length) return true;
+        for (let i = 0; i < a.length; i++)
+            if (Math.abs(a[i] - b[i]) > tol) return true;
+        return false;
     }
 }

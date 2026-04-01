@@ -19,6 +19,7 @@ export class SplineEditor {
         this._selected   = new Set([0, 1, 2, 3, 4, 5, 6, 7]);
         this._coherence  = 0.0;
         this._stickiness = 3.0;
+        this._kept       = false;
         this._config     = {
             stiffness: 1.0, bass_split: 52,
             bass_stiffness: 1.0, treble_stiffness: 1.0, degree: 3,
@@ -30,12 +31,21 @@ export class SplineEditor {
 
     // ── Called by VelSelector when selection/params change ───────────────────
 
-    onSelectorChange({ selected, coherence, stickiness }) {
+    onSelectorChange({ selected, coherence, stickiness, keepToggled }) {
+        const keepChanged = keepToggled !== this._kept;
         this._selected   = selected;
         this._coherence  = coherence;
         this._stickiness = stickiness;
-        // Re-fit immediately when params change (debounced via requestAnimationFrame)
-        if (this._layerId) this.fitAndRedraw();
+        this._kept       = keepToggled;
+
+        if (!this._layerId) return;
+
+        if (keepChanged) {
+            // Keep was toggled — commit or roll back
+            keepToggled ? this._doKeep() : this._doUnkeep();
+        } else {
+            this.fitAndRedraw();
+        }
     }
 
     // ── Layer activation ─────────────────────────────────────────────────────
@@ -86,18 +96,47 @@ export class SplineEditor {
             );
             this._space.clearSplines();
             for (const [velStr, data] of Object.entries(result)) {
-                const vel = parseInt(velStr);
+                const vel  = parseInt(velStr);
+                const hasGhost = data.curve_original &&
+                    this._isDifferent(data.curve.y, data.curve_original.y);
                 this._space.updateSpline(
                     vel,
-                    data.curve.x,
-                    data.curve.y,
+                    data.curve.x, data.curve.y,
                     VEL_COLORS[vel % VEL_COLORS.length],
+                    hasGhost ? data.curve_original.x : null,
+                    hasGhost ? data.curve_original.y : null,
                 );
             }
             setStatus("Fitted.");
         } catch (err) {
             setStatus(`Fit error: ${err.message}`, true);
         }
+    }
+
+    async _doKeep() {
+        if (!this._layerId) return;
+        setStatus("Keeping…");
+        try {
+            await api.keepLayer(this._layerId, [...this._selected], this._coherence);
+            setStatus("Kept. Export will use blended values.");
+        } catch (err) {
+            setStatus(`Keep error: ${err.message}`, true);
+        }
+        await this.fitAndRedraw();
+    }
+
+    async _doUnkeep() {
+        if (!this._layerId) return;
+        await api.unkeepLayer(this._layerId, [...this._selected]);
+        setStatus("Keep removed. Originals restored for export.");
+        await this.fitAndRedraw();
+    }
+
+    _isDifferent(a, b, tol = 1e-6) {
+        if (!a || !b || a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++)
+            if (Math.abs(a[i] - b[i]) > tol) return true;
+        return false;
     }
 
     // ── Card interaction ─────────────────────────────────────────────────────

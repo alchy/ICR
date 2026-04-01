@@ -42,6 +42,11 @@ export default {
     fitSpline:       (layerId)    => post(`/spline/${layerId}/fit`),
     fitAllVelocities:(layerId, velocities, coherence) =>
         post(`/spline/${layerId}/fit_all`, { velocities, coherence }),
+    keepLayer:       (layerId, velocities, coherence) =>
+        post(`/spline/${layerId}/keep`,    { velocities, coherence }),
+    unkeepLayer:     (layerId, velocities) =>
+        del(`/spline/${layerId}/keep?velocities=${velocities.join(",")}`),
+    keepStatus:      (layerId) => get(`/spline/${layerId}/keep_status`),
     getSplineCurve:  (layerId, n) => post(`/spline/${layerId}/curve?n_points=${n ?? 300}`),
     addAnchor:       (layerId, midi, value, stickiness) =>
         post(`/spline/${layerId}/anchor`, { midi, value, stickiness, is_anchor: true }),
