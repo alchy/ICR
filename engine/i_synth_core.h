@@ -128,6 +128,22 @@ public:
     // Full param list with metadata; snapshot of current values.
     virtual std::vector<CoreParamDesc> describeParams() const         = 0;
 
+    // ── Per-note SysEx updates — called from MIDI callback thread ────────────
+    // setNoteParam: update one scalar field for a (midi, vel) slot.
+    // Returns false if this core does not support per-note updates or key is unknown.
+    virtual bool setNoteParam(int midi, int vel,
+                              const std::string& key, float value) { return false; }
+
+    // setNotePartialParam: update one per-partial field for a (midi, vel, k) slot.
+    // k is 1-based (matches SysEx protocol). Returns false if unsupported or unknown.
+    virtual bool setNotePartialParam(int midi, int vel, int k,
+                                     const std::string& key, float value) { return false; }
+
+    // loadBankJson: replace all note parameters from a JSON string (SET_BANK SysEx).
+    // JSON format must match the file written by export_piano_params.py.
+    // Returns false if JSON is malformed or this core does not support bank loading.
+    virtual bool loadBankJson(const std::string& json_str) { return false; }
+
     // ── Visualization — called from GUI thread, may allocate ─────────────────
     virtual CoreVizState getVizState() const = 0;
 

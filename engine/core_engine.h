@@ -28,6 +28,7 @@
 #include "core_logger.h"
 #include <memory>
 #include <string>
+#include <vector>
 #include <atomic>
 #include <cstdint>
 
@@ -76,6 +77,12 @@ public:
     void setLimiterEnabled  (uint8_t v) noexcept;
     void setBBEDefinition   (uint8_t v) noexcept;
     void setBBEBassBoost    (uint8_t v) noexcept;
+
+    // ── SysEx ─────────────────────────────────────────────────────────────────
+    // Process an incoming SysEx message (called from MidiInput callback thread).
+    // data: bytes AFTER the leading F0, BEFORE the trailing F7.
+    // Returns a PONG response to send, or an empty vector if no response needed.
+    std::vector<uint8_t> handleSysEx(const uint8_t* data, int len);
 
     // ── Accessors ─────────────────────────────────────────────────────────────
     ISynthCore*  core()        noexcept { return core_.get();  }
@@ -139,6 +146,11 @@ private:
     // Last note (written on noteOn, read by GUI)
     std::atomic<uint8_t> last_note_midi_{60};
     std::atomic<uint8_t> last_note_vel_ {80};
+
+    // SET_BANK chunk reassembly state (MIDI callback thread only — not concurrent)
+    std::string bank_chunk_buf_;
+    int         bank_chunk_total_ = 0;
+    int         bank_chunk_recv_  = 0;
 };
 
 // ── Convenience: full startup + interactive loop ──────────────────────────────

@@ -330,6 +330,129 @@ int CoreEngine::activeVoices() const {
     return core_->getVizState().active_voice_count;
 }
 
+// ── SysEx handling (MIDI callback thread) ────────────────────────────────────
+
+static float decodeSysExFloat(const uint8_t* b) {
+    uint32_t bits = 0;
+    for (int i = 0; i < 5; ++i)
+        bits |= (uint32_t)(b[i] & 0x7F) << ((4 - i) * 7);
+    float v;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+static const char* noteParamKey(uint8_t id) {
+    switch (id) {
+        case 0x01: return "f0_hz";
+        case 0x02: return "B";
+        case 0x03: return "attack_tau";
+        case 0x04: return "A_noise";
+        case 0x05: return "rms_gain";
+        case 0x06: return "phi_diff";
+        default:   return nullptr;
+    }
+}
+
+static const char* partialParamKey(uint8_t id) {
+    switch (id) {
+        case 0x10: return "f_hz";
+        case 0x11: return "A0";
+        case 0x12: return "tau1";
+        case 0x13: return "tau2";
+        case 0x14: return "a1";
+        case 0x15: return "beat_hz";
+        case 0x16: return "phi";
+        default:   return nullptr;
+    }
+}
+
+std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
+    // data is AFTER F0, BEFORE F7
+    if (len < 3) return {};
+    if (data[0] != 0x7D || data[1] != 0x01) return {};  // not ICR SysEx
+
+    uint8_t        cmd        = data[2];
+    const uint8_t* payload    = data + 3;
+    int            payloadLen = len - 3;
+
+    switch (cmd) {
+
+    case 0x01: {  // SET_NOTE_PARAM — midi vel param_id value(5)
+        if (payloadLen < 8 || !core_) break;
+        int         midi  = payload[0];
+        int         vel   = payload[1];
+        uint8_t     pid   = payload[2];
+        float       value = decodeSysExFloat(payload + 3);
+        const char* key   = noteParamKey(pid);
+        if (key) core_->setNoteParam(midi, vel, key, value);
+        break;
+    }
+
+    case 0x02: {  // SET_NOTE_PARTIAL — midi vel k param_id value(5)
+        if (payloadLen < 9 || !core_) break;
+        int         midi  = payload[0];
+        int         vel   = payload[1];
+        int         k     = payload[2];
+        uint8_t     pid   = payload[3];
+        float       value = decodeSysExFloat(payload + 4);
+        const char* key   = partialParamKey(pid);
+        if (key) core_->setNotePartialParam(midi, vel, k, key, value);
+        break;
+    }
+
+    case 0x03: {  // SET_BANK — chunk_hi chunk_lo total_hi total_lo data...
+        if (payloadLen < 4 || !core_) break;
+        int chunk_idx    = (payload[0] << 8) | payload[1];
+        int total_chunks = (payload[2] << 8) | payload[3];
+        const uint8_t* chunk_data = payload + 4;
+        int chunk_len = payloadLen - 4;
+
+        if (chunk_idx == 0) {
+            bank_chunk_buf_.clear();
+            bank_chunk_buf_.reserve((size_t)total_chunks * 240);
+            bank_chunk_total_ = total_chunks;
+            bank_chunk_recv_  = 0;
+        }
+        bank_chunk_buf_.append(reinterpret_cast<const char*>(chunk_data),
+                               (size_t)chunk_len);
+        ++bank_chunk_recv_;
+
+        if (bank_chunk_recv_ >= bank_chunk_total_) {
+            if (core_->loadBankJson(bank_chunk_buf_))
+                logger_.log("CoreEngine", LogSeverity::Info,
+                            "SET_BANK: bank applied ("
+                            + std::to_string(bank_chunk_buf_.size()) + " bytes)");
+            else
+                logger_.log("CoreEngine", LogSeverity::Warning,
+                            "SET_BANK: loadBankJson failed");
+            bank_chunk_buf_.clear();
+            bank_chunk_total_ = 0;
+            bank_chunk_recv_  = 0;
+        }
+        break;
+    }
+
+    case 0x10: {  // SET_MASTER — param_id value(5)
+        if (payloadLen < 6 || !core_) break;
+        uint8_t     pid   = payload[0];
+        float       value = decodeSysExFloat(payload + 1);
+        const char* key   = noteParamKey(pid);
+        if (key) core_->setParam(key, value);
+        break;
+    }
+
+    case 0xF0:  // PING → reply with PONG
+        return { 0xF0, 0x7D, 0x01, 0xF1, 0xF7 };
+
+    default:
+        logger_.log("CoreEngine", LogSeverity::Info,
+                    "SysEx: unknown cmd 0x"
+                    + std::to_string((int)cmd));
+        break;
+    }
+    return {};
+}
+
 // ── runCoreEngine — interactive loop ─────────────────────────────────────────
 
 int runCoreEngine(Logger&            logger,

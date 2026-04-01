@@ -30,6 +30,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cmath>
+#include <mutex>
 #include <random>
 #include <vector>
 #include <unordered_map>
@@ -167,6 +168,12 @@ public:
     bool getParam(const std::string& key, float& out) const override;
     std::vector<CoreParamDesc> describeParams()        const override;
 
+    bool setNoteParam(int midi, int vel,
+                      const std::string& key, float value)          override;
+    bool setNotePartialParam(int midi, int vel, int k,
+                             const std::string& key, float value)   override;
+    bool loadBankJson(const std::string& json_str)                  override;
+
     CoreVizState getVizState() const override;
 
     std::string coreName()    const override { return "PianoCore"; }
@@ -200,6 +207,10 @@ private:
     // Last note info for GUI viz
     std::atomic<int>   last_midi_   {-1};
     std::atomic<int>   last_vel_    {0};
+
+    // Protects note_params_ during full bank reload (loadBankJson).
+    // MIDI callbacks are sequential so only needed vs the RT thread's handleNoteOn.
+    mutable std::mutex bank_mutex_;
 
     // Helpers
     void handleNoteOn (uint8_t midi, uint8_t vel) noexcept;
