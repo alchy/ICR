@@ -26,6 +26,14 @@ const MAT_ANCHOR  = new THREE.MeshStandardMaterial({
     color: 0xffcc33, roughness: 0.2, metalness: 0.5,
     emissive: 0xaa6600, emissiveIntensity: 1.0,
 });
+const MAT_GHOST   = new THREE.MeshStandardMaterial({
+    color: 0x334455, roughness: 0.8, metalness: 0.1,
+    transparent: true, opacity: 0.25,
+});
+const MAT_KEPT    = new THREE.MeshStandardMaterial({
+    color: 0x2255ff, roughness: 0.2, metalness: 0.6,
+    emissive: 0x1133cc, emissiveIntensity: 1.0,
+});
 const GEOM_SPHERE = new THREE.SphereGeometry(SPHERE_R, 8, 6);
 
 export class CardMesh {
@@ -44,6 +52,7 @@ export class CardMesh {
         this.label    = label;
         this.isAnchor = isAnchor;
         this._hovered = false;
+        this._ghost   = false;
 
         this.mesh = new THREE.Mesh(GEOM_SPHERE, isAnchor ? MAT_ANCHOR : MAT_DEFAULT);
         this.mesh.userData.card = this;
@@ -58,15 +67,21 @@ export class CardMesh {
     setHover(on) {
         if (this._hovered === on) return;
         this._hovered = on;
-        this.mesh.material = on
+        if (!this._ghost) this.mesh.material = on
             ? MAT_HOVER
             : (this.isAnchor ? MAT_ANCHOR : MAT_DEFAULT);
     }
 
     setAnchor(on) {
         this.isAnchor = on;
-        if (!this._hovered)
+        if (!this._hovered && !this._ghost)
             this.mesh.material = on ? MAT_ANCHOR : MAT_DEFAULT;
+    }
+
+    /** Turn this card into a translucent ghost (Keep active). */
+    setGhost(on) {
+        this._ghost = on;
+        this.mesh.material = on ? MAT_GHOST : (this.isAnchor ? MAT_ANCHOR : MAT_DEFAULT);
     }
 
     dispose() {

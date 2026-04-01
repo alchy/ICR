@@ -117,18 +117,43 @@ export class SplineEditor {
         if (!this._layerId) return;
         setStatus("Keeping…");
         try {
+            // Fit+blend to get final values, commit to overrides
             await api.keepLayer(this._layerId, [...this._selected], this._coherence);
-            setStatus("Kept. Export will use blended values.");
+
+            // Get the same blended values for dot placement
+            const vels   = [...this._selected];
+            const result = await api.fitAllVelocities(
+                this._layerId, vels, this._coherence,
+            );
+
+            // Build velFitted: { vel: { midi: value } }
+            const velFitted = {};
+            for (const [velStr, data] of Object.entries(result)) {
+                velFitted[velStr] = data.fitted;   // { midi: value }
+            }
+
+            this._space.applyKeep(velFitted);
+
+            // Redraw splines without ghost (keep = definitive now)
+            this._space.clearSplines();
+            for (const [velStr, data] of Object.entries(result)) {
+                const vel = parseInt(velStr);
+                this._space.updateSpline(
+                    vel, data.curve.x, data.curve.y,
+                    VEL_COLORS[vel % VEL_COLORS.length],
+                );
+            }
+            setStatus("Kept ✓  Export will use blended values.");
         } catch (err) {
             setStatus(`Keep error: ${err.message}`, true);
         }
-        await this.fitAndRedraw();
     }
 
     async _doUnkeep() {
         if (!this._layerId) return;
         await api.unkeepLayer(this._layerId, [...this._selected]);
-        setStatus("Keep removed. Originals restored for export.");
+        this._space.clearKeep();
+        setStatus("Keep removed — originals restored.");
         await this.fitAndRedraw();
     }
 

@@ -44,6 +44,7 @@ export class ParameterSpace {
         this._container = container;
         this._cards     = new Map();   // noteKey → CardMesh
         this._splines   = new Map();   // vel → SplineMesh
+        this._keptDots  = [];          // THREE.Mesh — blue kept-position spheres
         this._axes      = null;
         this._raycaster = new THREE.Raycaster();
         this._mouse     = new THREE.Vector2();
@@ -201,6 +202,54 @@ export class ParameterSpace {
     clearSplines() {
         for (const sm of this._splines.values()) sm.dispose(this._scene);
         this._splines.clear();
+    }
+
+    /**
+     * Keep activated: gray-out originals, spawn blue kept-position dots.
+     * @param {Object} velFitted  { vel: { midi: value, … }, … }
+     */
+    applyKeep(velFitted) {
+        this._clearKeptDots();
+
+        // Gray out all existing cards
+        for (const card of this._cards.values()) card.setGhost(true);
+
+        // Spawn new blue dots at fitted positions
+        const keptMat = new THREE.MeshStandardMaterial({
+            color: 0x2255ff, roughness: 0.2, metalness: 0.6,
+            emissive: 0x1133cc, emissiveIntensity: 1.0,
+        });
+        const keptGeo = new THREE.SphereGeometry(0.07, 8, 6);
+
+        for (const [velStr, fittedMap] of Object.entries(velFitted)) {
+            const vel = parseInt(velStr);
+            for (const [midiStr, value] of Object.entries(fittedMap)) {
+                const midi = parseInt(midiStr);
+                const dot  = new THREE.Mesh(keptGeo, keptMat);
+                dot.position.set(
+                    xFromMidi(midi),
+                    this._yMapper(value),
+                    vel * 1.2,
+                );
+                this._scene.add(dot);
+                this._keptDots.push(dot);
+            }
+        }
+    }
+
+    /** Keep deactivated: remove blue dots, restore original card colors. */
+    clearKeep() {
+        this._clearKeptDots();
+        for (const card of this._cards.values()) card.setGhost(false);
+    }
+
+    _clearKeptDots() {
+        for (const dot of this._keptDots) {
+            this._scene.remove(dot);
+            dot.geometry?.dispose();
+            dot.material?.dispose();
+        }
+        this._keptDots = [];
     }
 
     // ── Internal ─────────────────────────────────────────────────────────────
