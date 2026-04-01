@@ -146,37 +146,118 @@ Higher stiffness → smaller `s` → spline passes closer to all data points.
 
 ---
 
-## User interaction
+## Camera controls
 
-| Action               | Effect                                               |
-|----------------------|------------------------------------------------------|
-| Left-drag            | Orbit camera                                         |
-| Right-drag / scroll  | Pan / zoom                                           |
-| Click a card         | Pull spline toward that card's current value         |
-| Alt+click / right-click | Toggle anchor point on that (MIDI, vel) slot    |
-| Stiffness slider     | Adjust global spline rigidity, re-fit on Apply       |
-| "Fit spline" button  | Recompute spline and redraw tube                     |
-| × in CP list         | Remove a control point                               |
+| Input                   | Effect                  |
+|-------------------------|-------------------------|
+| Left-drag               | Orbit (rotate view)     |
+| Right-drag              | Pan                     |
+| Scroll wheel            | Zoom                    |
+
+---
+
+## Velocity selector (top bar)
+
+```
+①②③④⑤⑥⑦⑧   Coherence [──i──] 0.00  [Keep]  [Apply]   (Stickiness [──i──] when one vel selected)
+```
+
+Circles **①–⑧** correspond to velocity layers 0–7.  
+Click a circle to toggle it on/off. At least one must stay active.  
+The colour of each circle matches its spline tube in the 3D view.
+
+---
+
+## Spline shaping
+
+| Action                      | Effect                                              |
+|-----------------------------|-----------------------------------------------------|
+| Click a data point (sphere) | Pull all selected splines toward that value         |
+| Alt+click / right-click     | Toggle anchor on that (MIDI, vel) slot              |
+| × in Control Points list    | Remove a control point                              |
+| Stiffness slider + Apply    | Change global smoothing; re-fit immediately         |
+| Fit spline button           | Manual re-fit                                       |
+
+**Coherence** (0.0 – 1.0) blends selected velocity layers toward each other:
+
+| Value | Behaviour                                              |
+|-------|--------------------------------------------------------|
+| 0.0   | Each velocity layer fits its own data independently    |
+| 0.5   | Each layer moves halfway toward the cross-vel average  |
+| 1.0   | All selected layers collapse to a common average curve |
+
+Coherence is a **live preview** — moving the slider back returns splines to their original positions.  
+It never writes to the data store until you press **Keep** or **Apply**.
+
+---
+
+## Non-destructive editing model
+
+The editor has three data states per layer:
+
+```
+Raw originals  (_params)
+      │
+      ├── Keep override  (_overrides)   ← reversible, shown as blue dots
+      │
+      └── Applied baseline (_params)   ← irreversible bake, new originals
+```
+
+### Keep
+
+Press **Keep** to overlay the current blended (coherence-modified) values:
+
+- Original spheres turn **gray and translucent**
+- New **blue spheres** appear at the spline-fitted positions
+- The override is stored separately; `_params` is untouched
+
+Press **Keep ✓** again to **undo Keep** — blue dots disappear, originals restore.
+
+### Apply
+
+Press **Apply** to **bake the current values into the baseline permanently**:
+
+- If Keep is active, its values are baked; override is cleared
+- If Keep is not active, the current spline fit is baked
+- Original spheres move to the new positions (they *are* the new originals)
+- **Irreversible within the session**
+
+Apply enables iterative refinement:
+
+```
+Fit → Keep → inspect → Unkeep → adjust → Keep → Apply → repeat
+```
+
+### Export priority
+
+| State                    | What gets exported                   |
+|--------------------------|--------------------------------------|
+| Keep active + Applied    | Keep override (most recent)          |
+| Keep active, no Apply    | Keep override                        |
+| Applied, Keep off        | Applied baseline (baked _params)     |
+| Neither                  | Raw originals                        |
 
 ---
 
 ## Workflow
 
-1. **Start backend** — `uvicorn main:app --reload --port 8000`
-2. **Start frontend** — `npm run dev`, open `http://localhost:5173`
-3. **Load soundbank** — enter path in the bottom bar and click Load
-4. **Select layer** — click a layer in the left panel (e.g. `tau1_k1`)
-5. **Inspect 3D space** — cards appear at their current values
-6. **Shape spline**:
-   - Click cards to pull the spline toward them
-   - Alt+click key cards to lock them as anchors
-   - Adjust stiffness / degree and click Apply config
-   - Click Fit spline to recompute
-7. **Preview** — send the updated bank live:
-   - Connect MIDI port (right panel)
-   - Click **Send bank →** (SysEx SET_BANK)
-   - Play the synth — hear changes immediately
-8. **Export** — enter an output path and click Save soundbank
+1. `python run-editor.py` — starts backend (:8000) + Vite (:5173), opens browser
+2. Select soundbank from the dropdown (bottom bar) → **Load**
+3. Select a layer from the left panel (e.g. `A_noise`, `tau1_k1`)
+4. Spheres appear in 3D space — one per (MIDI, velocity) data point
+5. **Shape splines:**
+   - Select velocity layers with ①–⑧ circles
+   - Adjust Coherence to blend layers together
+   - Click spheres to pull; Alt+click to anchor
+6. **Preview on synth:**
+   - Connect MIDI loopback port (right panel)
+   - Click **Send bank →** — SysEx SET_BANK streams to ICR
+   - Play — hear changes in real time
+7. **Commit:**
+   - **Keep** → reversible overlay (blue dots visible)
+   - **Apply** → bake into baseline (irreversible)
+8. Repeat for other layers
+9. **Save soundbank** — export path in right panel → saved JSON ready for ICR
 
 ---
 
@@ -204,7 +285,12 @@ Higher stiffness → smaller `s` → spline passes closer to all data points.
 |--------|---------------------------------|-------------------------------|
 | GET    | `/spline/{layer_id}`            | Current spline state          |
 | PUT    | `/spline/{layer_id}/config`     | Update stiffness / degree     |
-| POST   | `/spline/{layer_id}/fit`        | Fit + write values to store   |
+| POST   | `/spline/{layer_id}/fit`        | Fit single velocity (legacy)  |
+| POST   | `/spline/{layer_id}/fit_all`    | Fit all vel layers + coherence (preview, no store write) |
+| POST   | `/spline/{layer_id}/keep`       | Commit blended values as override |
+| DELETE | `/spline/{layer_id}/keep`       | Remove override (restore originals) |
+| POST   | `/spline/{layer_id}/apply`      | Bake override into `_params` permanently |
+| GET    | `/spline/{layer_id}/keep_status`| List which velocities have overrides |
 | POST   | `/spline/{layer_id}/curve`      | Dense curve points for display|
 | POST   | `/spline/{layer_id}/anchor`     | Add / update anchor point     |
 | POST   | `/spline/{layer_id}/pull`       | Add / update pull point       |
