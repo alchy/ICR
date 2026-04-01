@@ -12,6 +12,7 @@ Run:
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +33,13 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ── Soundbank search paths ────────────────────────────────────────────────────
+# Resolved relative to this file: backend/ → repo root → soundbanks/
+_BACKEND_DIR  = Path(__file__).parent
+_REPO_ROOT    = _BACKEND_DIR.parent.parent          # sound-editor/backend → repo root
+_BANKS_DIR    = Path(os.environ.get("ICR_BANKS_DIR", _REPO_ROOT / "soundbanks"))
+
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 
@@ -190,7 +198,27 @@ def remove_point(layer_id: str, midi: int):
     return {"ok": True}
 
 
-# ── Soundbank export ──────────────────────────────────────────────────────────
+# ── Soundbank listing + export ───────────────────────────────────────────────
+
+@app.get("/soundbanks/list")
+def list_soundbanks():
+    """Return all .json files found in the ICR_BANKS_DIR directory."""
+    if not _BANKS_DIR.is_dir():
+        return {"dir": str(_BANKS_DIR), "files": []}
+    files = sorted(
+        p.name for p in _BANKS_DIR.iterdir()
+        if p.suffix.lower() == ".json"
+    )
+    return {"dir": str(_BANKS_DIR), "files": files}
+
+@app.post("/soundbanks/load/{filename}")
+def load_soundbank_by_name(filename: str):
+    """Load a soundbank by filename from the banks directory."""
+    path = _BANKS_DIR / filename
+    if not path.exists():
+        raise HTTPException(404, f"File not found: {path}")
+    n = store.load_file(str(path))
+    return {"loaded": n, "path": str(path)}
 
 @app.get("/soundbank/preview")
 def preview_soundbank():

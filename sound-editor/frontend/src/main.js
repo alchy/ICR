@@ -21,7 +21,8 @@ const browser   = new LayerBrowser(async (layerId, layer) => {
 
 // Expose to inline HTML handlers
 window.app = {
-    loadSoundbank,
+    refreshBanks,
+    loadSelectedBank,
     filterGroup: g => browser.filterGroup(g),
     filterK:     k => browser.filterK(k),
     applySplineConfig: () => editor.applyConfig(),
@@ -39,15 +40,29 @@ document.getElementById("cfg-stiffness").addEventListener("input", e => {
         parseFloat(e.target.value).toFixed(2);
 });
 
-// ── Soundbank loading ─────────────────────────────────────────────────────────
+// ── Soundbank discovery + loading ────────────────────────────────────────────
 
-async function loadSoundbank() {
-    const path = document.getElementById("load-path").value.trim();
-    if (!path) return setStatus("Enter a path first.", true);
+async function refreshBanks() {
     try {
-        setStatus("Loading soundbank…");
-        await api.loadSoundbank(path);
-        setStatus(`Loaded: ${path}`);
+        const { files, dir } = await api.listSoundbanks();
+        const sel = document.getElementById("sel-bank");
+        const prev = sel.value;
+        sel.innerHTML = '<option value="">— select soundbank —</option>' +
+            files.map(f => `<option value="${f}">${f}</option>`).join("");
+        if (prev && files.includes(prev)) sel.value = prev;
+        setStatus(`Banks dir: ${dir}  (${files.length} files)`);
+    } catch (err) {
+        setStatus(`Cannot reach backend: ${err.message}`, true);
+    }
+}
+
+async function loadSelectedBank() {
+    const filename = document.getElementById("sel-bank").value;
+    if (!filename) return setStatus("Select a soundbank first.", true);
+    try {
+        setStatus(`Loading ${filename}…`);
+        const r = await api.loadSoundbankByName(filename);
+        setStatus(`Loaded ${filename}  (${r.loaded} notes)`);
         await browser.load(api);
         setStatus("Ready. Click a layer to edit.");
     } catch (err) {
@@ -113,3 +128,4 @@ function setStatus(msg, isError = false) {
 // ── Startup ───────────────────────────────────────────────────────────────────
 
 refreshMidiPorts();
+refreshBanks();

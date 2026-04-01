@@ -23,6 +23,10 @@ const put  = (path, body)  => _req("PUT",    path, body);
 const del  = (path)        => _req("DELETE", path);
 
 export default {
+    // ── Soundbank discovery ──────────────────────────────────────────────────
+    listSoundbanks:      ()           => get("/soundbanks/list"),
+    loadSoundbankByName: (filename)   => post(`/soundbanks/load/${encodeURIComponent(filename)}`),
+
     // ── Params ──────────────────────────────────────────────────────────────
     getParams:       ()           => get("/params"),
     loadSoundbank:   (path)       => post("/params/load", { path }),

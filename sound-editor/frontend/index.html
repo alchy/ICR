@@ -119,10 +119,15 @@
     <div id="status-bar">
       <span id="status-msg">Ready. Load a soundbank to begin.</span>
       <span style="flex:1"></span>
-      <input id="load-path" type="text" placeholder="soundbank JSON path"
-             style="width:280px;background:#0a0a14;border:1px solid #334;color:#aaa;
-                    padding:2px 6px;font-size:11px;margin-right:6px">
-      <button onclick="app.loadSoundbank()" style="width:auto;padding:2px 10px">Load</button>
+      <select id="sel-bank"
+              style="width:300px;background:#0a0a14;border:1px solid #334;color:#aaa;
+                     padding:2px 6px;font-size:11px;margin-right:4px">
+        <option value="">— select soundbank —</option>
+      </select>
+      <button onclick="app.refreshBanks()" style="width:auto;padding:2px 8px;margin-right:4px"
+              title="Refresh list">↺</button>
+      <button onclick="app.loadSelectedBank()" class="primary"
+              style="width:auto;padding:2px 10px">Load</button>
     </div>
 
     <!-- HUD -->
