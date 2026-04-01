@@ -76,7 +76,12 @@ note = extractor.extract_note("m060-vel3-f44.wav")
         { "f_hz": 261.6, "A0": 13.7, "tau1": 0.41, "tau2": 3.73,
           "a1": 0.82, "beat_hz": 0.17, "mono": False }
       ],
-      "A_noise": 0.78, "tau_noise": 0.012, "centroid_noise_hz": 2400.0,
+      "noise": {
+        "attack_tau": 0.012,       # shodný klíč s PianoCore / SYSEX_PROTOCOL
+        "A_noise": 0.78,
+        "centroid_hz": 2400.0,
+        "spectral_slope_db_oct": -3.0
+      },
       "duration_s": 3.0
     }
   }
