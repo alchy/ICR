@@ -53,6 +53,7 @@ struct PianoBiquadCoeffs {
 };
 
 struct PianoPartialParam {
+    int   k        = 0;     // partial index, 1-based; used for B recomputation
     float f_hz     = 0.f;
     float A0       = 0.f;
     float tau1     = 0.f;

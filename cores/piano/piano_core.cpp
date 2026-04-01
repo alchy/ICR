@@ -98,6 +98,7 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
         for (int ki = 0; ki < K; ki++) {
             const auto& p = partials[ki];
             PianoPartialParam& pp = np.partials[ki];
+            pp.k       = p.value("k", ki + 1);   // v2 soundbanks store k; v1 fallback ki+1
             pp.f_hz    = p["f_hz"].get<float>();
             pp.A0      = p["A0"].get<float>();
             pp.tau1    = p["tau1"].get<float>();
@@ -498,9 +499,10 @@ bool PianoCore::setNoteParam(int midi, int vel,
     if (key == "B") {
         np.B = value;
         // Recompute per-partial f_hz = k * f0 * sqrt(1 + B*k^2)
+        // Uses stored pp.k (correct for longitudinal partials too)
         const float f0 = np.f0_hz;
         for (int ki = 0; ki < np.K; ki++) {
-            int k = ki + 1;
+            const int k = np.partials[ki].k > 0 ? np.partials[ki].k : ki + 1;
             np.partials[ki].f_hz = (float)(k * f0 * std::sqrt(1.0 + (double)value * k * k));
         }
         return true;
@@ -558,6 +560,7 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
         for (int ki = 0; ki < K; ki++) {
             const auto& p = partials[ki];
             PianoPartialParam& pp = np.partials[ki];
+            pp.k       = p.value("k", ki + 1);
             pp.f_hz    = p["f_hz"].get<float>();
             pp.A0      = p["A0"].get<float>();
             pp.tau1    = p["tau1"].get<float>();

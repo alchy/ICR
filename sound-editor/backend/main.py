@@ -24,6 +24,7 @@ from params_store   import ParamsStore
 from spline_engine  import SplineEngine, SplineState, SplineConfig, ControlPoint
 from sysex_bridge   import SysExBridge, list_output_ports
 from layer_registry import get_all_layers, group_layers, get_layer
+from eq_editor      import refit_biquads
 
 app = FastAPI(title="ICR Sound Editor", version="0.1.0")
 
@@ -97,6 +98,10 @@ class SysExPartialRequest(BaseModel):
 class SysExMasterRequest(BaseModel):
     param_key: str
     value:     float
+
+class EqUpdateRequest(BaseModel):
+    freqs_hz:  list[float]
+    gains_db:  list[float]
 
 class ExportRequest(BaseModel):
     path: str
@@ -381,6 +386,52 @@ def preview_soundbank():
 def export_soundbank(req: ExportRequest):
     store.save(req.path)
     return {"saved": req.path}
+
+
+# ── EQ editor endpoints ───────────────────────────────────────────────────────
+
+@app.get("/eq/{midi}/{vel}")
+def get_eq(midi: int, vel: int):
+    """
+    Return the spectral EQ curve and current biquads for one note.
+
+    Response:
+        {
+          "freqs_hz":  [...],   # frequency grid (from spectral_eq or default)
+          "gains_db":  [...],   # gains (dB)
+          "eq_biquads": [...]   # current biquad coefficients
+        }
+    """
+    note = store.get_note(midi, vel)
+    if note is None:
+        raise HTTPException(404, f"Note m{midi:03d}_vel{vel} not found")
+
+    spectral_eq = note.get("spectral_eq", {})
+    return {
+        "freqs_hz":   spectral_eq.get("freqs_hz", []),
+        "gains_db":   spectral_eq.get("gains_db", []),
+        "eq_biquads": note.get("eq_biquads", []),
+    }
+
+@app.post("/eq/{midi}/{vel}")
+def update_eq(midi: int, vel: int, req: EqUpdateRequest):
+    """
+    Replace the EQ curve for one note, recompute biquads, update the store.
+
+    The new biquads take effect for the next /sysex/bank push.
+    Does not automatically send SysEx — call /sysex/bank afterwards.
+    """
+    note = store.get_note(midi, vel)
+    if note is None:
+        raise HTTPException(404, f"Note m{midi:03d}_vel{vel} not found")
+
+    sr = store._meta.get("sr", 44100)
+    new_biquads = refit_biquads(req.freqs_hz, req.gains_db, sr=sr)
+
+    note["spectral_eq"] = {"freqs_hz": req.freqs_hz, "gains_db": req.gains_db}
+    note["eq_biquads"]  = new_biquads
+
+    return {"ok": True, "n_biquads": len(new_biquads)}
 
 
 # ── MIDI / SysEx endpoints ────────────────────────────────────────────────────
