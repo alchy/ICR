@@ -70,5 +70,12 @@ export default {
     sysexPartial:    (midi, vel, k, paramKey, value) =>
         post("/sysex/partial", { midi, vel, k, param_key: paramKey, value }),
     sysexBank:       ()           => post("/sysex/bank"),
+    sysexMaster:     (paramKey, value) =>
+        post("/sysex/master", { param_key: paramKey, value }),
     sysexPing:       ()           => post("/sysex/ping"),
+
+    // ── EQ editor ────────────────────────────────────────────────────────────
+    getEq:           (midi, vel)                      => get(`/eq/${midi}/${vel}`),
+    updateEq:        (midi, vel, freqs_hz, gains_db)  =>
+        post(`/eq/${midi}/${vel}`, { freqs_hz, gains_db }),
 };
