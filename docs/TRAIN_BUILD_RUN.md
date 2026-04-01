@@ -657,8 +657,11 @@ cmake --build build-mingw
 ### GUI (doporučeno)
 
 ```bat
-build\bin\Release\ICRGUI.exe --core PianoCore --params training/params-piano-soundbank.json
+build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-piano-soundbank.json
 ```
+
+> Bundled soundbank `soundbanks/params-piano-soundbank.json` je součástí repozitáře.
+> Byl fitován z KS Grand nahrávek a obsahuje per-note spektrální EQ.
 
 **CLI argumenty:**
 
@@ -694,7 +697,7 @@ Sloupec **SPECTRAL EQ** zobrazuje odezvu **specifickou pro konkrétní notu a ve
 ### Headless CLI
 
 ```bat
-build\bin\Release\ICR.exe --core PianoCore --params training/params-piano-soundbank.json [midi_port]
+build\bin\Release\ICR.exe --core PianoCore --params soundbanks\params-piano-soundbank.json [midi_port]
 ```
 
 `midi_port` — index MIDI vstupu (výchozí: 0). Dostupné porty jsou vypsány při startu.

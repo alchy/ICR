@@ -28,8 +28,11 @@ Binaries: `build/bin/Release/ICRGUI.exe` (GUI), `build/bin/Release/ICR.exe` (CLI
 ### Run
 
 ```bat
-build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-ks-grand-ft.json
+build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-piano-soundbank.json
 ```
+
+A bundled soundbank (`soundbanks/params-piano-soundbank.json`) is included in the repository.
+It was fitted from KS Grand recordings and includes per-note spectral EQ.
 
 ### Train (full pipeline)
 
