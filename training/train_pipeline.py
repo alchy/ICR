@@ -27,6 +27,13 @@ from __future__ import annotations
 
 import argparse
 import sys
+from pathlib import Path
+
+# Ensure ICR root is on sys.path so `training.*` imports work when the
+# script is invoked directly (python training/train_pipeline.py ...)
+_ROOT = str(Path(__file__).parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
 
 # Windows: force UTF-8 output
 if hasattr(sys.stdout, "reconfigure"):
