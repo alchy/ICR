@@ -287,7 +287,7 @@ Per scale: Spectral Convergence + Log-Magnitude loss.
 
 **Soubor:** `training/modules/exporter.py`
 
-Exportuje JSON soundbanku ve formátu `piano-core-v1` načitatelném
+Exportuje JSON soundbanku ve formátu `piano-core-v2` načitatelném
 C++ `PianoCore::load()`.
 
 ### API
@@ -318,8 +318,34 @@ Pro každou (midi, vel) kombinaci:
 1. Sanitizace parciálů (ořez τ, validace beat_hz)
 2. Výpočet RMS gain z amplitud parciálů + noise power
 3. Převod `spectral_eq` křivky → 5 biquad sekcí (`EQFitter.params_to_biquads`)
-4. Generování φ (phase) per parcial — seedováno midi+vel pro reprodukovatelnost
+4. Generování φ (phase) per parciál — seedováno midi+vel pro reprodukovatelnost
 5. Zápis do `notes["m{midi:03d}_vel{vel}"]`
+
+### Soundbank v2 — přidané klíče
+
+Od formátu `piano-core-v2` jsou v soundbanku uloženy i editovatelné zdrojové hodnoty:
+
+```json
+{
+  "midi": 60, "vel": 3,
+  "f0_hz": 261.63,
+  "B": 0.00041,
+  "K_valid": 48,
+  "partials": [
+    { "k": 1, "f_hz": 261.6, "A0": 13.7, "tau1": 0.41, "tau2": 3.73,
+      "a1": 0.82, "beat_hz": 0.17, "phi": 1.23 },
+    ...
+  ],
+  "eq_biquads": [...],
+  "spectral_eq": { "freqs_hz": [...], "gains_db": [...] }
+}
+```
+
+| Klíč | v1 | v2 | Účel |
+|------|----|----|------|
+| `B` | – | ✓ | inharmonicita; změna via SysEx přepočítá `f_hz[k]` |
+| `k` v parciálu | – | ✓ | skutečný index parciálu (1-based), nutný pro SysEx B |
+| `spectral_eq` | – | ✓ | zdrojová EQ křivka; editor ji může znovu fitovat |
 
 ---
 

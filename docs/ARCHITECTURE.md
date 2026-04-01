@@ -222,10 +222,10 @@ output port is open, PING is processed but PONG is silently dropped.
 
 ### `B` (inharmonicity)
 
-SysEx param ID `0x02` (`B`) in SET_NOTE_PARAM is **not runtime-settable** in
-`PianoCore`: inharmonicity is baked into per-partial frequencies at export time.
-`setNoteParam(..., "B", ...)` returns `false`. To change inharmonicity,
-re-export the soundbank and reload via `SET_BANK`.
+SysEx param ID `0x02` (`B`) in SET_NOTE_PARAM **is runtime-settable**.
+`PianoCore` stores `B` per note (soundbank v2) and `setNoteParam("B", value)`
+immediately recomputes all `f_hz[k] = k · f0 · √(1 + B·k²)` using the stored
+`PianoPartialParam::k` index (correct even for longitudinal partials where k ≠ ki+1).
 
 ## Build targets
 
