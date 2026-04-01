@@ -1,19 +1,20 @@
 /**
  * src/editor/SplineEditor.js
  * ──────────────────────────
- * Orchestrates multi-velocity spline interaction.
- * Tracks per-layer state (kept, visible) and syncs badges in LayerBrowser.
+ * Orchestrates multi-velocity spline interaction + layer visibility ghosts.
+ *
+ * Visibility rules:
+ *   Active layer  + dotsOn    → full-color CardMesh spheres
+ *   Active layer  + splinesOn → full-color SplineMesh tubes
+ *   Inactive layer + dotsOn   → gray ghost Points cloud
+ *   Inactive layer + splinesOn→ gray ghost Line per velocity
+ *   Active layer = green highlight in browser, last clicked
  */
 
 import api from "../comms/ApiClient.js";
 import { VEL_COLORS } from "./VelSelector.js";
 
 export class SplineEditor {
-    /**
-     * @param {import("../scene/ParameterSpace.js").ParameterSpace} space
-     * @param {import("./LayerBrowser.js").LayerBrowser}            browser
-     * @param {import("./VelSelector.js").VelSelector}              velSelector
-     */
     constructor(space, browser, velSelector) {
         this._space       = space;
         this._browser     = browser;
@@ -27,80 +28,145 @@ export class SplineEditor {
             stiffness: 1.0, bass_split: 52,
             bass_stiffness: 1.0, treble_stiffness: 1.0, degree: 3,
         };
-        // Per-layer state: layerId → { kept: bool, visible: bool }
-        this._states = new Map();
+
+        // Per-layer cache for ghost rendering
+        this._layerValues = new Map();   // layerId → {noteKey: value}
+        this._layerCurves = new Map();   // layerId → { vel: {x,y} }
+        this._layerMeta   = new Map();   // layerId → layer object
 
         space.onCardClick     = c => this._onCardClick(c);
         space.onCardAltClick  = c => this._onCardAltClick(c);
     }
 
-    // ── Per-layer state ───────────────────────────────────────────────────────
-
-    _getState(layerId) {
-        if (!this._states.has(layerId))
-            this._states.set(layerId, { kept: false, visible: true });
-        return this._states.get(layerId);
-    }
-
-    _setState(layerId, patch) {
-        const s = this._getState(layerId);
-        Object.assign(s, patch);
-        this._browser.setLayerState(layerId, s);
-    }
-
     // ── VelSelector callback ──────────────────────────────────────────────────
 
     onSelectorChange({ selected, coherence, stickiness, keepToggled, applyPressed }) {
-        const prevKept   = this._getState(this._layerId ?? "").kept;
+        const prevKept    = this._browser.getLayerState(this._layerId ?? "").kept;
         const keepChanged = keepToggled !== prevKept;
-
-        this._selected   = selected;
-        this._coherence  = coherence;
-        this._stickiness = stickiness;
+        this._selected    = selected;
+        this._coherence   = coherence;
+        this._stickiness  = stickiness;
 
         if (!this._layerId) return;
 
-        if (applyPressed) {
-            this._doApply();
-        } else if (keepChanged) {
-            keepToggled ? this._doKeep() : this._doUnkeep();
-        } else {
-            this.fitAndRedraw();
-        }
+        if (applyPressed)       this._doApply();
+        else if (keepChanged)   keepToggled ? this._doKeep() : this._doUnkeep();
+        else                    this.fitAndRedraw();
     }
 
-    // ── Layer activation ─────────────────────────────────────────────────────
+    // ── Layer activation ──────────────────────────────────────────────────────
 
     async activateLayer(layerId, layer) {
+        const prevId = this._layerId;
         this._layerId = layerId;
         this._layer   = layer;
+        this._layerMeta.set(layerId, layer);
 
         document.getElementById("active-layer-name").textContent =
             `${layer.label}  [${layerId}]`;
 
-        // Restore Keep button to match this layer's kept state
-        const state = this._getState(layerId);
+        // Convert previous active layer to ghost (if it had visibility on)
+        if (prevId && prevId !== layerId) {
+            await this._refreshGhostsFor(prevId);
+        }
+
+        // Remove ghosts for newly activated layer (will show full color)
+        this._space.removeGhostLayer(layerId);
+
+        // Restore Keep button
+        const state = this._browser.getLayerState(layerId);
         this._velSelector.setKept(state.kept);
 
+        // Load dots if dotsOn
         const values = await api.getLayerValues(layerId);
-        this._space.loadLayer(values, layer);
+        this._layerValues.set(layerId, values);
 
-        // Restore ghost dots if this layer was kept
-        if (state.kept) {
-            const vels   = [...this._selected];
-            const result = await api.fitAllVelocities(layerId, vels, this._coherence);
-            const velFitted = {};
-            for (const [v, d] of Object.entries(result)) velFitted[v] = d.fitted;
-            this._space.applyKeep(velFitted);
+        if (state.dotsOn) {
+            this._space.loadLayer(values, layer);
+            if (state.kept) {
+                const r = await api.fitAllVelocities(layerId, [...this._selected], this._coherence);
+                const vf = {};
+                for (const [v, d] of Object.entries(r)) vf[v] = d.fitted;
+                this._space.applyKeep(vf);
+            }
+        } else {
+            this._space.clearLayer();
         }
 
         const splineState = await api.getSpline(layerId);
         this._applyStateToUI(splineState);
 
-        await this.fitAndRedraw();
+        // Fit + show splines if splinesOn
+        if (state.splinesOn) {
+            await this.fitAndRedraw();
+        } else {
+            this._space.clearSplines();
+        }
     }
 
-    // ── Config ───────────────────────────────────────────────────────────────
+    // ── Dot / spline visibility toggles (from LayerBrowser checkboxes) ────────
+
+    async onToggleDots(layerId, on) {
+        this._browser.setLayerState(layerId, { dotsOn: on });
+        if (layerId === this._layerId) {
+            // Active layer
+            if (on) {
+                const values = this._layerValues.get(layerId)
+                    ?? await api.getLayerValues(layerId);
+                this._layerValues.set(layerId, values);
+                this._space.loadLayer(values, this._layer);
+            } else {
+                this._space.clearLayer();
+            }
+        } else {
+            // Inactive layer → ghost
+            await this._refreshGhostsFor(layerId);
+        }
+    }
+
+    async onToggleSplines(layerId, on) {
+        this._browser.setLayerState(layerId, { splinesOn: on });
+        if (layerId === this._layerId) {
+            if (on) await this.fitAndRedraw();
+            else    this._space.clearSplines();
+        } else {
+            await this._refreshGhostsFor(layerId);
+        }
+    }
+
+    // ── Ghost refresh for a specific layer ────────────────────────────────────
+
+    async _refreshGhostsFor(layerId) {
+        const state = this._browser.getLayerState(layerId);
+        const layer = this._layerMeta.get(layerId);
+        if (!layer) return;
+
+        this._space.removeGhostLayer(layerId);
+
+        if (state.dotsOn) {
+            let values = this._layerValues.get(layerId);
+            if (!values) {
+                values = await api.getLayerValues(layerId);
+                this._layerValues.set(layerId, values);
+            }
+            this._space.addGhostDots(layerId, values, layer);
+        }
+
+        if (state.splinesOn) {
+            let curves = this._layerCurves.get(layerId);
+            if (!curves) {
+                const result = await api.fitAllVelocities(layerId, [0,1,2,3,4,5,6,7], 0);
+                curves = {};
+                for (const [v, d] of Object.entries(result)) curves[v] = d.curve;
+                this._layerCurves.set(layerId, curves);
+            }
+            for (const [velStr, curve] of Object.entries(curves)) {
+                this._space.addGhostSpline(layerId, parseInt(velStr), curve.x, curve.y, layer);
+            }
+        }
+    }
+
+    // ── Config ────────────────────────────────────────────────────────────────
 
     readConfigFromUI() {
         this._config.stiffness  = parseFloat(document.getElementById("cfg-stiffness").value);
@@ -116,16 +182,24 @@ export class SplineEditor {
         setStatus("Config updated.");
     }
 
-    // ── Fit ──────────────────────────────────────────────────────────────────
+    // ── Fit ───────────────────────────────────────────────────────────────────
 
     async fitAndRedraw() {
         if (!this._layerId) return;
+        const state = this._browser.getLayerState(this._layerId);
+        if (!state.splinesOn) return;   // don't fit if splines are off
+
         setStatus("Fitting…");
         try {
             const vels   = [...this._selected];
             const result = await api.fitAllVelocities(
                 this._layerId, vels, this._coherence,
             );
+            // Cache curves for potential ghost use later
+            const cached = {};
+            for (const [v, d] of Object.entries(result)) cached[v] = d.curve;
+            this._layerCurves.set(this._layerId, cached);
+
             this._space.clearSplines();
             for (const [velStr, data] of Object.entries(result)) {
                 const vel = parseInt(velStr);
@@ -153,18 +227,22 @@ export class SplineEditor {
             );
             const velFitted = {};
             for (const [v, d] of Object.entries(result)) velFitted[v] = d.fitted;
-            this._space.applyKeep(velFitted);
 
-            this._space.clearSplines();
-            for (const [velStr, data] of Object.entries(result)) {
-                const vel = parseInt(velStr);
-                this._space.updateSpline(
-                    vel, data.curve.x, data.curve.y,
-                    VEL_COLORS[vel % VEL_COLORS.length],
-                );
+            const state = this._browser.getLayerState(this._layerId);
+            if (state.dotsOn) this._space.applyKeep(velFitted);
+
+            if (state.splinesOn) {
+                this._space.clearSplines();
+                for (const [velStr, data] of Object.entries(result)) {
+                    const vel = parseInt(velStr);
+                    this._space.updateSpline(
+                        vel, data.curve.x, data.curve.y,
+                        VEL_COLORS[vel % VEL_COLORS.length],
+                    );
+                }
             }
 
-            this._setState(this._layerId, { kept: true });
+            this._browser.setLayerState(this._layerId, { kept: true });
             setStatus("Kept ✓");
         } catch (err) {
             setStatus(`Keep error: ${err.message}`, true);
@@ -175,7 +253,7 @@ export class SplineEditor {
         if (!this._layerId) return;
         await api.unkeepLayer(this._layerId, [...this._selected]);
         this._space.clearKeep();
-        this._setState(this._layerId, { kept: false });
+        this._browser.setLayerState(this._layerId, { kept: false });
         setStatus("Keep removed.");
         await this.fitAndRedraw();
     }
@@ -187,26 +265,19 @@ export class SplineEditor {
             await api.applyLayer(this._layerId, [...this._selected], this._coherence);
 
             this._space.clearKeep();
-            this._setState(this._layerId, { kept: false });
             this._velSelector.setKept(false);
+            this._browser.setLayerState(this._layerId, { kept: false });
 
             const values = await api.getLayerValues(this._layerId);
-            this._space.loadLayer(values, this._layer);
+            this._layerValues.set(this._layerId, values);
+
+            const state = this._browser.getLayerState(this._layerId);
+            if (state.dotsOn) this._space.loadLayer(values, this._layer);
 
             await this.fitAndRedraw();
             setStatus("Applied ✓");
         } catch (err) {
             setStatus(`Apply error: ${err.message}`, true);
-        }
-    }
-
-    // ── Visible toggle (from LayerBrowser badge) ──────────────────────────────
-
-    onToggleVisible(layerId, visible) {
-        this._setState(layerId, { visible });
-        // If it's the active layer, hide/show splines
-        if (layerId === this._layerId) {
-            this._space.setSplineVisibility(visible);
         }
     }
 

@@ -42,10 +42,11 @@ export function makeYMapper(minVal, maxVal, worldH = 8) {
 export class ParameterSpace {
     constructor(container) {
         this._container = container;
-        this._cards     = new Map();   // noteKey → CardMesh
-        this._splines   = new Map();   // vel → SplineMesh
-        this._keptDots  = [];          // THREE.Mesh — blue kept-position spheres
-        this._axes      = null;
+        this._cards      = new Map();   // noteKey → CardMesh  (active layer)
+        this._splines    = new Map();   // vel → SplineMesh    (active layer)
+        this._keptDots   = [];          // THREE.Mesh[]        (blue kept spheres)
+        this._ghosts     = new Map();   // layerId → { dots: THREE.Points, lines: THREE.Line[] }
+        this._axes       = null;
         this._raycaster = new THREE.Raycaster();
         this._mouse     = new THREE.Vector2();
         this._hoveredCard = null;
@@ -257,7 +258,98 @@ export class ParameterSpace {
         this._keptDots = [];
     }
 
+    // ── Ghost layers (inactive layers with visibility on) ─────────────────────
+
+    /**
+     * Add ghost dots for an inactive layer (gray Points cloud).
+     * @param {string} layerId
+     * @param {Object} layerValues  { noteKey: value }
+     * @param {Object} layer        Layer registry entry
+     */
+    addGhostDots(layerId, layerValues, layer) {
+        this._removeGhostDots(layerId);
+        const yMapper = makeYMapper(layer.min_val, layer.max_val);
+        const positions = [];
+        for (const [noteKey, value] of Object.entries(layerValues)) {
+            const midi = parseInt(noteKey.slice(1, 4));
+            const vel  = parseInt(noteKey.split("_vel")[1]);
+            positions.push(xFromMidi(midi), yMapper(value), vel * 1.2);
+        }
+        if (!positions.length) return;
+
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute("position", new THREE.Float32BufferAttribute(positions, 3));
+        const mat  = new THREE.PointsMaterial({ color: 0x445566, size: 0.12, transparent: true, opacity: 0.35 });
+        const pts  = new THREE.Points(geo, mat);
+        this._scene.add(pts);
+
+        const entry = this._ghosts.get(layerId) ?? { dots: null, lines: [] };
+        entry.dots = pts;
+        this._ghosts.set(layerId, entry);
+    }
+
+    /**
+     * Add ghost spline lines for an inactive layer.
+     * @param {string}   layerId
+     * @param {number}   vel
+     * @param {number[]} xMidi
+     * @param {number[]} yVals
+     * @param {Object}   layer
+     */
+    addGhostSpline(layerId, vel, xMidi, yVals, layer) {
+        const yMapper = makeYMapper(layer.min_val, layer.max_val);
+        const z = vel * 1.2;
+        const pts = xMidi.map((m, i) =>
+            new THREE.Vector3(xFromMidi(m), yMapper(yVals[i]), z)
+        );
+        const geo  = new THREE.BufferGeometry().setFromPoints(pts);
+        const mat  = new THREE.LineBasicMaterial({ color: 0x334455, transparent: true, opacity: 0.4 });
+        const line = new THREE.Line(geo, mat);
+        this._scene.add(line);
+
+        const entry = this._ghosts.get(layerId) ?? { dots: null, lines: [] };
+        entry.lines.push(line);
+        this._ghosts.set(layerId, entry);
+    }
+
+    /** Remove all ghosts for a layer. */
+    removeGhostLayer(layerId) {
+        this._removeGhostDots(layerId);
+        this._removeGhostLines(layerId);
+        this._ghosts.delete(layerId);
+    }
+
+    /** Remove ALL ghost layers. */
+    clearAllGhosts() {
+        for (const id of [...this._ghosts.keys()]) this.removeGhostLayer(id);
+    }
+
+    _removeGhostDots(layerId) {
+        const entry = this._ghosts.get(layerId);
+        if (!entry?.dots) return;
+        this._scene.remove(entry.dots);
+        entry.dots.geometry?.dispose();
+        entry.dots.material?.dispose();
+        entry.dots = null;
+    }
+
+    _removeGhostLines(layerId) {
+        const entry = this._ghosts.get(layerId);
+        if (!entry) return;
+        for (const l of entry.lines) {
+            this._scene.remove(l);
+            l.geometry?.dispose();
+            l.material?.dispose();
+        }
+        entry.lines = [];
+    }
+
     // ── Internal ─────────────────────────────────────────────────────────────
+
+    /** Clear active-layer dots (called when dotsOn toggled off). */
+    clearLayer() {
+        this._clearCards();
+    }
 
     _clearCards() {
         for (const c of this._cards.values()) {

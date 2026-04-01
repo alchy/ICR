@@ -19,7 +19,8 @@ const velBarEl    = document.getElementById("vel-bar-container");
 const velSelector = new VelSelector(velBarEl, params => editor.onSelectorChange(params));
 const browser     = new LayerBrowser(
     async (layerId, layer) => editor.activateLayer(layerId, layer),
-    (layerId, visible)     => editor.onToggleVisible(layerId, visible),
+    (layerId, on)          => editor.onToggleDots(layerId, on),
+    (layerId, on)          => editor.onToggleSplines(layerId, on),
 );
 const editor      = new SplineEditor(space, browser, velSelector);
 
