@@ -482,7 +482,7 @@ def _detect_beating(times, amps, i_peak) -> dict:
 
 
 def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
-    result = {"attack_tau_s": 0.05, "A_noise": 0.001,
+    result = {"attack_tau": 0.05, "A_noise": 0.001,
               "centroid_hz": 2000.0, "spectral_slope_db_oct": -3.0}
 
     if len(audio) < sr*0.1:
@@ -533,7 +533,7 @@ def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
                 popt, _ = curve_fit(
                     lambda t, tau: a_dec[0]*np.exp(-t/tau),
                     t_dec, a_dec, p0=[0.05], bounds=([0.003],[1.0]), maxfev=2000)
-                result["attack_tau_s"] = float(popt[0])
+                result["attack_tau"] = float(popt[0])
             except Exception:
                 pass
 

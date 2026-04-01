@@ -186,7 +186,7 @@ class SoundbankExporter:
 
         # Noise params (cap attack_tau at tau1 of k=1 partial)
         noise          = sample.get("noise", {})
-        attack_tau_raw = float(noise.get("attack_tau_s", 0.05) or 0.05)
+        attack_tau_raw = float(noise.get("attack_tau", 0.05) or 0.05)
         A_noise        = float(noise.get("A_noise", 0.04) or 0.04)
         tau1_k1        = (partials_out[0]["tau1"] if partials_out else 3.0)
         attack_tau     = min(attack_tau_raw, tau1_k1)

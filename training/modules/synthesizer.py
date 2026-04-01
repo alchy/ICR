@@ -322,7 +322,7 @@ def _synthesize_note(
 
     # Attack noise (independent L/R)
     noise_p  = params.get("noise", {})
-    taun_raw = noise_p.get("attack_tau_s", 0.05) or 0.05
+    taun_raw = noise_p.get("attack_tau", 0.05) or 0.05
     cent     = noise_p.get("centroid_hz", 3000.0) or 3000.0
     A_noise  = (noise_p.get("A_noise", 0.06) or 0.06)*noise_level
     tau1_k1  = next((p.get("tau1", 3.0) for p in partials

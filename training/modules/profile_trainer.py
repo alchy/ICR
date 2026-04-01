@@ -287,7 +287,7 @@ def build_dataset(samples: dict) -> dict:
                     eq_data.append((mf, freq_feat(float(fhz)), float(g)))
 
         noise    = s.get("noise") or {}
-        atk_tau  = noise.get("attack_tau_s") or 0
+        atk_tau  = noise.get("attack_tau") or 0
         centroid = noise.get("centroid_hz") or 0
         A_noise  = noise.get("A_noise") or noise.get("floor_rms") or 0
         if atk_tau > 0.001 and centroid > 50 and A_noise > 0.001:
@@ -547,7 +547,7 @@ def generate_profile(
 
                 noise_pred = model.forward_noise(mf, vf).squeeze(0)
                 noise_out  = {
-                    "attack_tau_s": round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
+                    "attack_tau": round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
                     "centroid_hz":  round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
                     "A_noise":      round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
                 }
