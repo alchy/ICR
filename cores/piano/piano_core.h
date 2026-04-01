@@ -70,6 +70,7 @@ struct PianoNoteParam {
     float A_noise    = 0.04f;
     float rms_gain   = 1.f;
     float f0_hz      = 440.f;
+    float B          = 0.f;   // inharmonicity; kept so setNoteParam("B") can recompute f_hz[k]
     // Spectral EQ: min-phase IIR fitted from soundbank spectral_eq curve
     int              n_biquad = 0;
     PianoBiquadCoeffs eq[PIANO_N_BIQUAD];

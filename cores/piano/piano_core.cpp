@@ -89,6 +89,7 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
         np.A_noise   = s["A_noise"].get<float>();
         np.rms_gain  = s["rms_gain"].get<float>();
         np.f0_hz     = s["f0_hz"].get<float>();
+        np.B         = s.value("B", 0.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
@@ -494,8 +495,16 @@ bool PianoCore::setNoteParam(int midi, int vel,
     if (key == "A_noise")    { np.A_noise    = value; return true; }
     if (key == "rms_gain")   { np.rms_gain   = value; return true; }
     if (key == "phi_diff")   { np.phi_diff   = value; return true; }
-    // "B" (inharmonicity) is baked into partial frequencies at export time;
-    // it is not a runtime field in PianoNoteParam.
+    if (key == "B") {
+        np.B = value;
+        // Recompute per-partial f_hz = k * f0 * sqrt(1 + B*k^2)
+        const float f0 = np.f0_hz;
+        for (int ki = 0; ki < np.K; ki++) {
+            int k = ki + 1;
+            np.partials[ki].f_hz = (float)(k * f0 * std::sqrt(1.0 + (double)value * k * k));
+        }
+        return true;
+    }
     return false;
 }
 
@@ -541,6 +550,7 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
         np.A_noise    = s["A_noise"].get<float>();
         np.rms_gain   = s["rms_gain"].get<float>();
         np.f0_hz      = s["f0_hz"].get<float>();
+        np.B          = s.value("B", 0.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);

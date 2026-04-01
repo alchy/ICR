@@ -147,7 +147,7 @@ class SoundbankExporter:
         duration: float, rng_seed: int,
     ) -> dict:
         return {
-            "format":     "piano_core_v1",
+            "format":     "piano-core-v2",
             "source":     source,
             "sr":         sr,
             "target_rms": target_rms,
@@ -169,7 +169,7 @@ class SoundbankExporter:
         target_rms: float,
         rng_seed:   int,
     ) -> dict:
-        """Convert one sample entry into a piano_core_v1 note dict."""
+        """Convert one sample entry into a piano_core_v2 note dict."""
         seed   = rng_seed + midi*256 + vel_idx
         rng    = np.random.default_rng(seed)
 
@@ -180,7 +180,7 @@ class SoundbankExporter:
         phis     = rng.uniform(0, 2*math.pi, K).astype(np.float32)
 
         partials_out = [
-            self._build_partial(partials_raw[ki], float(phis[ki]))
+            self._build_partial(partials_raw[ki], float(phis[ki]), ki)
             for ki in range(K)
         ]
 
@@ -200,10 +200,12 @@ class SoundbankExporter:
         # EQ biquads (may be absent for NN-generated samples without EQ)
         eq_biquads = self._fit_eq_biquads(sample, sr)
 
-        return {
+        # Preserve editabe source data alongside baked values
+        note: dict = {
             "midi":       midi,
             "vel":        vel_idx,
             "f0_hz":      float(sample.get("f0_fitted_hz") or sample.get("f0_nominal_hz", 440.0)),
+            "B":          float(sample.get("B") or 0.0),
             "K_valid":    K,
             "phi_diff":   phi_diff,
             "attack_tau": attack_tau,
@@ -212,8 +214,14 @@ class SoundbankExporter:
             "partials":   partials_out,
             "eq_biquads": eq_biquads,
         }
+        # spectral_eq: raw freq/gain curve used to compute eq_biquads;
+        # stored so the editor can re-fit biquads after curve edits.
+        spectral_eq = sample.get("spectral_eq")
+        if spectral_eq:
+            note["spectral_eq"] = spectral_eq
+        return note
 
-    def _build_partial(self, p: dict, phi: float) -> dict:
+    def _build_partial(self, p: dict, phi: float, k_idx: int = 0) -> dict:
         """Sanitise and convert one raw partial dict."""
         beat = float(p.get("beat_hz", 0.0) or 0.0)
         if p.get("mono", False):
@@ -232,6 +240,7 @@ class SoundbankExporter:
             a1 = 1.0
 
         return {
+            "k":       int(p.get("k", k_idx + 1)),
             "f_hz":    float(p["f_hz"]),
             "A0":      float(p["A0"]),
             "tau1":    tau1,

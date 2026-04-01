@@ -344,7 +344,7 @@ static float decodeSysExFloat(const uint8_t* b) {
 static const char* noteParamKey(uint8_t id) {
     switch (id) {
         case 0x01: return "f0_hz";
-        case 0x02: return "B";
+        case 0x02: return "B";          // recomputes all partial f_hz = k*f0*sqrt(1+B*k²)
         case 0x03: return "attack_tau";
         case 0x04: return "A_noise";
         case 0x05: return "rms_gain";
