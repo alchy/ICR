@@ -15,7 +15,8 @@ from training.modules.exporter       import SoundbankExporter
 
 
 def run(bank_dir: str, out_path: str,
-        workers: int = None, skip_eq: bool = False) -> str:
+        workers: int = None, skip_eq: bool = False,
+        sr_tag: str = "f44") -> str:
     """
     Simple pipeline: Extract → filter outliers → fit EQ → export soundbank.
 
@@ -24,11 +25,12 @@ def run(bank_dir: str, out_path: str,
         out_path:  Output JSON soundbank path.
         workers:   Parallel worker count (None = auto).
         skip_eq:   Skip spectral EQ step (faster, no body resonance).
+        sr_tag:    Sample-rate tag suffix, e.g. "f44" or "f48".
 
     Returns:
         out_path (echoed for chaining).
     """
-    params = ParamExtractor().extract_bank(bank_dir, workers)
+    params = ParamExtractor().extract_bank(bank_dir, workers, sr_tag=sr_tag)
     params = OutlierFilter().filter(params)
 
     if not skip_eq:

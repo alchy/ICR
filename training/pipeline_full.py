@@ -18,7 +18,7 @@ from training.modules.exporter        import SoundbankExporter
 
 def run(bank_dir: str, out_path: str,
         epochs: int = 1800, ft_epochs: int = 200,
-        workers: int = None) -> tuple:
+        workers: int = None, sr_tag: str = "f44") -> tuple:
     """
     Full pipeline: Extract → filter → EQ → train NN → finetune → export hybrid.
 
@@ -28,11 +28,12 @@ def run(bank_dir: str, out_path: str,
         epochs:     NN training epochs.
         ft_epochs:  MRSTFT fine-tuning epochs.
         workers:    Parallel worker count (None = auto).
+        sr_tag:     Sample-rate tag suffix, e.g. "f44" or "f48".
 
     Returns:
         (model, out_path) — trained InstrumentProfile and path to soundbank JSON.
     """
-    params = ParamExtractor().extract_bank(bank_dir, workers)
+    params = ParamExtractor().extract_bank(bank_dir, workers, sr_tag=sr_tag)
     params = OutlierFilter().filter(params)
     params = EQFitter().fit_bank(params, bank_dir, workers)
     model  = ProfileTrainer().train(params, epochs=epochs)

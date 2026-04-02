@@ -64,6 +64,8 @@ def _build_parser() -> argparse.ArgumentParser:
                         help="Parallel workers (default: CPU count)")
     simple.add_argument("--skip-eq",  action="store_true",
                         help="Skip spectral EQ step")
+    simple.add_argument("--sr-tag",   default="f44",
+                        help="SR suffix in filenames: f44 or f48 (default: f44)")
 
     # ── full ──────────────────────────────────────────────────────────────────
     full = sub.add_parser(
@@ -78,6 +80,8 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="NN training epochs (default: 1800)")
     full.add_argument("--ft-epochs",  type=int, default=200,
                       help="MRSTFT fine-tuning epochs (default: 200)")
+    full.add_argument("--sr-tag",     default="f44",
+                      help="SR suffix in filenames: f44 or f48 (default: f44)")
 
     return root
 
@@ -96,6 +100,7 @@ def main() -> int:
             out_path=args.out,
             workers=args.workers,
             skip_eq=args.skip_eq,
+            sr_tag=args.sr_tag,
         )
         print(f"\nDone → {out}")
 
@@ -107,6 +112,7 @@ def main() -> int:
             epochs=args.epochs,
             ft_epochs=args.ft_epochs,
             workers=args.workers,
+            sr_tag=args.sr_tag,
         )
         print(f"\nDone → {out}")
 

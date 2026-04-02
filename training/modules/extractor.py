@@ -43,14 +43,25 @@ class ParamExtractor:
     # as accidentally kicked (and keep the previous extraction instead).
     KICK_THRESHOLD = 0.70
 
-    def extract_bank(self, bank_dir: str, workers: int = None) -> dict:
+    def extract_bank(self, bank_dir: str, workers: int = None,
+                     sr_tag: str = "f44") -> dict:
         """
         Extract all WAV files in bank_dir in parallel.
+
+        Args:
+            bank_dir:  Directory with WAV files named m{midi}-vel{v}-{sr_tag}.wav
+            workers:   Parallel worker count (None = auto).
+            sr_tag:    Sample-rate tag in filename, e.g. "f44" (44 100 Hz) or
+                       "f48" (48 000 Hz).  Banks that contain both variants use
+                       this to avoid duplicate (midi, vel) keys.
 
         Returns the full params dict (keys: bank_dir, n_samples, summary, samples).
         """
         bank_path = Path(bank_dir)
-        wav_files = sorted(bank_path.glob("m*-vel*-f*.wav"))
+        wav_files = sorted(bank_path.glob(f"m*-vel*-{sr_tag}.wav"))
+        if not wav_files:
+            # Fallback: try any SR tag (single-SR banks)
+            wav_files = sorted(bank_path.glob("m*-vel*-f*.wav"))
         if not wav_files:
             raise FileNotFoundError(f"No WAV files found in {bank_dir}")
 
