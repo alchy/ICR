@@ -22,10 +22,23 @@ Průvodce od WAV banky po zvuk ze syntetizátoru.
 ### Python
 
 ```bash
+# Simple pipeline (bez NN) — minimální install:
+pip install numpy scipy soundfile
+
+# Full pipeline (NN trénink) — přidej torch:
+pip install torch
+
+# Nebo vše najednou:
 pip install -r training/requirements.txt
 ```
 
-Hlavní závislosti: `torch`, `numpy`, `scipy >= 1.10`, `soundfile`.
+| Balíček | Simple | Full |
+|---------|--------|------|
+| `numpy` | ✓ | ✓ |
+| `scipy` | ✓ | ✓ |
+| `soundfile` | ✓ | ✓ |
+| `torch` | — | ✓ |
+| `matplotlib` | — | volitelný |
 
 ### WAV banka
 
