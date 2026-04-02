@@ -368,6 +368,95 @@ export class SplineEditor {
         await this.fitAndRedraw();
         this._refreshCPList();
     }
+
+    // ── Anchor text-input helpers ─────────────────────────────────────────────
+
+    _isGlobalAnchors() {
+        return document.getElementById("anchor-global")?.checked ?? false;
+    }
+
+    async setAnchorsFromInput() {
+        if (!this._layerId) return;
+        const raw = document.getElementById("anchor-input")?.value ?? "";
+        const midis = raw.split(/[\s,;]+/)
+            .map(s => parseInt(s.trim()))
+            .filter(n => !isNaN(n) && n >= 21 && n <= 108);
+        if (!midis.length) { setStatus("No valid MIDI numbers entered."); return; }
+
+        const layerIds = this._isGlobalAnchors()
+            ? this._browser.allLayerIds()
+            : [this._layerId];
+
+        setStatus(`Setting ${midis.length} anchor(s) on ${layerIds.length} layer(s)…`);
+        try {
+            for (const layerId of layerIds) {
+                // Ensure values are loaded for this layer
+                let values = this._layerValues.get(layerId);
+                if (!values) {
+                    values = await api.getLayerValues(layerId);
+                    this._layerValues.set(layerId, values);
+                }
+                for (const vel of this._selected) {
+                    const sid = `${layerId}__vel${vel}`;
+                    for (const midi of midis) {
+                        const noteKey = `m${String(midi).padStart(3,"0")}_vel${vel}`;
+                        const value   = values[noteKey];
+                        if (value === undefined) continue;
+                        await api.addAnchor(sid, midi, value, this._stickiness);
+                    }
+                }
+            }
+            // Refresh visuals only for active layer (others aren't visible)
+            await this._refreshAnchorVisuals();
+            await this.fitAndRedraw();
+            this._refreshCPList();
+            setStatus(`${midis.length} anchor(s) set on ${layerIds.length} layer(s) ✓`);
+        } catch (err) {
+            setStatus(`Anchor error: ${err.message}`, true);
+        }
+    }
+
+    async clearAnchors() {
+        if (!this._layerId) return;
+        const layerIds = this._isGlobalAnchors()
+            ? this._browser.allLayerIds()
+            : [this._layerId];
+
+        setStatus(`Clearing anchors on ${layerIds.length} layer(s)…`);
+        try {
+            for (const layerId of layerIds) {
+                for (const vel of this._selected) {
+                    const sid   = `${layerId}__vel${vel}`;
+                    const state = await api.getSpline(sid);
+                    for (const cp of (state.control_points ?? []))
+                        if (cp.is_anchor) await api.removePoint(sid, cp.midi);
+                }
+            }
+            await this._refreshAnchorVisuals();
+            await this.fitAndRedraw();
+            this._refreshCPList();
+            setStatus(`Anchors cleared on ${layerIds.length} layer(s) ✓`);
+        } catch (err) {
+            setStatus(`Clear error: ${err.message}`, true);
+        }
+    }
+
+    /** Sync anchor highlight on all cards from current spline state. */
+    async _refreshAnchorVisuals() {
+        // Collect anchor MIDIs across selected velocities
+        const anchorMidis = new Set();
+        for (const vel of this._selected) {
+            const state = await api.getSpline(`${this._layerId}__vel${vel}`);
+            for (const cp of (state.control_points ?? []))
+                if (cp.is_anchor) anchorMidis.add(cp.midi);
+        }
+        // Update every card for this layer
+        const values = this._layerValues.get(this._layerId) ?? {};
+        for (const noteKey of Object.keys(values)) {
+            const midi = parseInt(noteKey.slice(1, 4));
+            this._space.setCardAnchor(noteKey, anchorMidis.has(midi));
+        }
+    }
 }
 
 function setStatus(msg, isError = false) {

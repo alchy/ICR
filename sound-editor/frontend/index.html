@@ -109,6 +109,20 @@
 
       <div class="sep"></div>
       <h3>Control Points</h3>
+      <div style="display:flex;gap:4px;margin-bottom:4px;">
+        <input id="anchor-input" type="text" placeholder="MIDI: 44, 54, 56 …"
+               style="flex:1;background:#111;border:1px solid #334;color:#ccc;
+                      padding:3px 5px;font-size:11px;"
+               title="Comma- or space-separated MIDI numbers to set as anchors">
+        <button onclick="app.setAnchorsFromInput()"
+                style="padding:2px 7px;font-size:11px;white-space:nowrap;">Set</button>
+        <button onclick="app.clearAnchors()"
+                style="padding:2px 7px;font-size:11px;white-space:nowrap;color:#f88;">Clear</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#889;margin-bottom:4px;cursor:pointer;">
+        <input type="checkbox" id="anchor-global" style="accent-color:#4af;">
+        global anchors (all layers)
+      </label>
       <div id="cp-list"></div>
 
       <div class="sep"></div>

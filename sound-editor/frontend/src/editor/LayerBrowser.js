@@ -102,6 +102,14 @@ export class LayerBrowser {
         return this._schema[this._dimension] || [];
     }
 
+    /** All layer IDs that have splines (scalar + per_partial, not eq). */
+    allLayerIds() {
+        return [
+            ...(this._schema.scalar      ?? []),
+            ...(this._schema.per_partial ?? []),
+        ].map(l => l.id);
+    }
+
     _render() {
         const list = document.getElementById("layer-list");
         list.innerHTML = "";

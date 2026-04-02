@@ -36,6 +36,8 @@ window.app = {
     applySplineConfig: () => editor.applyConfig(),
     fitSpline:         () => editor.fitAndRedraw(),
     removeCP:          m => editor.removeCP(m),
+    setAnchorsFromInput: () => editor.setAnchorsFromInput(),
+    clearAnchors:        () => editor.clearAnchors(),
     connectMidi,
     sysexBank,
     exportSoundbank,
