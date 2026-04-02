@@ -447,12 +447,12 @@ def _render_differentiable(
     vf_b   = vf.unsqueeze(0).expand(K, -1)
 
     # Inharmonicity B → partial frequencies
-    B      = torch.exp(model.forward_B(mf).clamp(max=0.0)).squeeze()
+    B      = torch.exp(model.forward_B(mf, vf).clamp(max=0.0)).squeeze()
     f_hzs  = k_vals*f0*torch.sqrt(1.0 + B*k_vals**2)
     valid  = ((f_hzs < sr*0.495) & torch.isfinite(f_hzs)).float().unsqueeze(1)
 
     # Beat frequencies
-    log_df  = model.forward_df(mf_b, kf_b).squeeze(-1)
+    log_df  = model.forward_df(mf_b, kf_b, vf_b).squeeze(-1)
     beat_hz = torch.exp(log_df).clamp(min=1e-4)
     if isinstance(beat_scale, torch.Tensor):
         beat_hz = beat_hz*beat_scale
@@ -461,7 +461,7 @@ def _render_differentiable(
 
     # Decay times
     tau1_k1    = torch.exp(model.forward_tau1_k1(mf, vf)).squeeze()
-    log_ratios = model.tau_ratio_net(torch.cat([mf_b, kf_b], dim=-1)).squeeze(-1)
+    log_ratios = model.forward_tau_ratio(mf_b, kf_b, vf_b).squeeze(-1)
     log_k_bias = -0.3*torch.log(k_vals)
     log_ratios = torch.minimum(log_ratios, torch.zeros_like(log_ratios))
     log_ratios = torch.maximum(log_ratios, log_k_bias-2.0)
@@ -469,11 +469,11 @@ def _render_differentiable(
 
     # Amplitudes
     A0s = torch.exp(
-        model.A0_net(torch.cat([mf_b, kf_b, vf_b], dim=-1)).squeeze(-1)
+        model.forward_A0(mf_b, kf_b, vf_b).squeeze(-1)
     ).clamp(min=1e-6)
 
     # Bi-exponential parameters
-    biexp       = model.biexp_net(torch.cat([mf_b, kf_b, vf_b], dim=-1))
+    biexp       = model.forward_biexp(mf_b, kf_b, vf_b)
     a1s         = torch.sigmoid(biexp[:,0]).clamp(0.05, 0.99)
     tau2_ratios = torch.exp(biexp[:,1]).clamp(min=3.0)
     tau2s       = tau1s*tau2_ratios

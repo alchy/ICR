@@ -175,6 +175,7 @@ public:
     bool setNotePartialParam(int midi, int vel, int k,
                              const std::string& key, float value)   override;
     bool loadBankJson(const std::string& json_str)                  override;
+    bool exportBankJson(const std::string& path)                    override;
 
     CoreVizState getVizState() const override;
 

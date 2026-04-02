@@ -89,7 +89,7 @@ class SampleGenerator:
                     eq_strength=eq_strength, target_rms=target_rms,
                 )
 
-                wav_file = out_path / f"m{midi:03d}_vel{vel}.wav"
+                wav_file = out_path / f"m{midi:03d}-vel{vel}-f{sr//1000}.wav"
                 self._write_wav(wav_file, audio, sr)
 
                 done += 1
@@ -144,12 +144,14 @@ class SampleGenerator:
         If source is a params dict, look up the key directly.
         If source is an InstrumentProfile, run NN inference.
         """
-        # Duck-type: params dict has a "samples" key
-        if isinstance(source, dict) and "samples" in source:
-            key = f"m{midi:03d}_vel{vel}"
-            if key not in source["samples"]:
-                raise KeyError(f"Key {key} not found in params dict")
-            return source["samples"][key]
+        # Duck-type: internal params dict uses "samples"; exported soundbank uses "notes"
+        if isinstance(source, dict):
+            notes = source.get("samples") or source.get("notes")
+            if notes is not None:
+                key = f"m{midi:03d}_vel{vel}"
+                if key not in notes:
+                    raise KeyError(f"Key {key} not found in params (midi={midi} vel={vel})")
+                return notes[key]
 
         # Otherwise assume InstrumentProfile (torch.nn.Module)
         return self._nn_predict(source, midi, vel, sr)

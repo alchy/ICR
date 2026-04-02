@@ -25,8 +25,9 @@ All multi-byte values are encoded in **7-bit SysEx-safe bytes** (no byte ≥ 0x8
 | 0x02 | SET_NOTE_PARTIAL  | Editor → Synth |
 | 0x03 | SET_BANK          | Editor → Synth |
 | 0x10 | SET_MASTER        | Editor → Synth |
-| 0xF0 | PING              | Editor → Synth |
-| 0xF1 | PONG              | Synth → Editor |
+| 0x70 | PING              | Editor → Synth |
+| 0x71 | PONG              | Synth → Editor |
+| 0x72 | EXPORT_BANK       | Editor → Synth |
 
 ---
 
@@ -116,16 +117,16 @@ F0 7D 01  02  <midi>  <vel>  <k>  <param_id>  <v0 v1 v2 v3 v4>  F7
 Send the full soundbank as chunked JSON.
 
 ```
-F0 7D 01  03  <chunk_hi> <chunk_lo>  <total_hi> <total_lo>  <data…>  F7
-              └─────────────────────────────────────────────┘
-              chunk index (2 bytes BE) + total chunks (2 bytes BE)
+F0 7D 01  03  <ci2> <ci1> <ci0>  <tc2> <tc1> <tc0>  <data…>  F7
+              └── chunk index ──┘  └── total chunks ──┘
+              each value encoded as 3 × 7-bit bytes (big-endian, 21-bit range)
 ```
 
-| Field         | Bytes | Description                           |
-|---------------|-------|---------------------------------------|
-| chunk index   | 2     | 0-based, big-endian                   |
-| total chunks  | 2     | total number of chunks, big-endian    |
-| data          | ≤240  | raw JSON bytes (UTF-8)                |
+| Field         | Bytes | Description                                       |
+|---------------|-------|---------------------------------------------------|
+| chunk index   | 3     | 0-based; 7-bit bytes: `(idx>>14)&7F (idx>>7)&7F idx&7F` |
+| total chunks  | 3     | same encoding; supports up to 2 M chunks (≈480 MB)|
+| data          | ≤240  | raw JSON bytes (ASCII, all < 0x80)                |
 
 - Chunk size is 240 bytes max (safe SysEx limit).
 - 2 ms inter-chunk delay to allow the synthesizer to buffer.
@@ -176,14 +177,39 @@ param_id uses its own table (separate from SET_NOTE_PARAM):
 
 ---
 
-## 0xF0 / 0xF1 — PING / PONG
+## 0x70 / 0x71 — PING / PONG
 
 ```
-F0 7D 01  F0  F7     # PING (editor → synth)
-F0 7D 01  F1  F7     # PONG (synth → editor)
+F0 7D 01  70  F7     # PING (editor → synth)
+F0 7D 01  71  F7     # PONG (synth → editor)
 ```
 
 Used to verify MIDI connectivity before sending a bank.
+
+---
+
+## 0xF2 — EXPORT_BANK
+
+Ask ICR to serialize its current in-memory bank to a JSON file.
+
+```
+F0 7D 01  F2  <path bytes…>  F7
+              └── ASCII file path on the ICR host machine
+```
+
+| Field | Bytes | Description                                  |
+|-------|-------|----------------------------------------------|
+| path  | 1–240 | Absolute file path, raw ASCII (no 0x80+ bytes) |
+
+- ICR writes a JSON file at `path` in the same format as the soundbank loaded by `SET_BANK`.
+- The file can be pulled back by the editor and compared with the original params JSON to validate the SysEx round-trip.
+- No reply is sent; success/failure is visible in the ICR log.
+
+### Python usage
+
+```python
+bridge.export_bank("C:/tmp/icr-exported.json")
+```
 
 ---
 
@@ -222,6 +248,7 @@ The protocol is fully implemented. Entry points:
 | `cores/piano/piano_core.cpp` | `PianoCore::setNoteParam` | Writes one scalar field |
 | `cores/piano/piano_core.cpp` | `PianoCore::setNotePartialParam` | Writes one partial field |
 | `cores/piano/piano_core.cpp` | `PianoCore::loadBankJson` | Full bank swap |
+| `cores/piano/piano_core.cpp` | `PianoCore::exportBankJson` | Serialize bank to JSON file |
 
 ### Dispatch (CoreEngine::handleSysEx)
 
@@ -237,7 +264,8 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
     case 0x02:  // SET_NOTE_PARTIAL
     case 0x03:  // SET_BANK (chunk reassembly → loadBankJson when complete)
     case 0x10:  // SET_MASTER → core->setParam(key, value)
-    case 0xF0:  // PING → returns {F0 7D 01 F1 F7}
+    case 0x70:  // PING → returns {F0 7D 01 71 F7}
+    case 0x72:  // EXPORT_BANK → core->exportBankJson(path)
     }
     return {};
 }

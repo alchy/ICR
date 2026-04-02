@@ -597,6 +597,66 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
     return true;
 }
 
+bool PianoCore::exportBankJson(const std::string& path) {
+    json notes = json::array();
+
+    std::lock_guard<std::mutex> lk(bank_mutex_);
+    for (int m = 0; m < 128; m++) {
+        for (int v = 0; v < 8; v++) {
+            const PianoNoteParam& np = note_params_[m][v];
+            if (!np.valid) continue;
+
+            json note;
+            note["midi"]       = m;
+            note["vel"]        = v;
+            note["phi_diff"]   = np.phi_diff;
+            note["attack_tau"] = np.attack_tau;
+            note["A_noise"]    = np.A_noise;
+            note["rms_gain"]   = np.rms_gain;
+            note["f0_hz"]      = np.f0_hz;
+            note["B"]          = np.B;
+
+            json partials = json::array();
+            for (int ki = 0; ki < np.K; ki++) {
+                const PianoPartialParam& pp = np.partials[ki];
+                json p;
+                p["k"]       = pp.k;
+                p["f_hz"]    = pp.f_hz;
+                p["A0"]      = pp.A0;
+                p["tau1"]    = pp.tau1;
+                p["tau2"]    = pp.tau2;
+                p["a1"]      = pp.a1;
+                p["beat_hz"] = pp.beat_hz;
+                p["phi"]     = pp.phi;
+                partials.push_back(p);
+            }
+            note["partials"] = partials;
+
+            if (np.n_biquad > 0) {
+                json biquads = json::array();
+                for (int bi = 0; bi < np.n_biquad; bi++) {
+                    const PianoBiquadCoeffs& c = np.eq[bi];
+                    json bq;
+                    bq["b"] = {c.b0, c.b1, c.b2};
+                    bq["a"] = {c.a1, c.a2};
+                    biquads.push_back(bq);
+                }
+                note["eq_biquads"] = biquads;
+            }
+
+            notes.push_back(note);
+        }
+    }
+
+    json root;
+    root["notes"] = notes;
+
+    std::ofstream f(path);
+    if (!f.is_open()) return false;
+    f << root.dump(2);
+    return f.good();
+}
+
 // ── Visualization (GUI thread) ────────────────────────────────────────────────
 
 CoreVizState PianoCore::getVizState() const {

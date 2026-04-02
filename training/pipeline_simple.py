@@ -3,7 +3,7 @@ training/pipeline_simple.py
 ─────────────────────────────
 Extract → filter outliers → fit EQ → export soundbank.
 
-Call via train_pipeline.py or import directly:
+Call via run-training.py or import directly:
     from training.pipeline_simple import run
     out_path = run(bank_dir, out_path, workers=4)
 """

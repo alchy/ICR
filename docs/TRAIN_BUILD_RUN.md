@@ -93,7 +93,7 @@ soundbanka je hybrid: reálná data kde existují, NN predikce pro zbytek.
 ### Simple pipeline
 
 ```bash
-python training/train_pipeline.py simple \
+python run-training.py simple \
     --bank "C:/SoundBanks/IthacaPlayer/vv-rhodes"
 # → soundbanks/params-vv-rhodes-simple.json
 ```
@@ -113,7 +113,7 @@ Lze přepsat pomocí `--out`.
 ### Full pipeline
 
 ```bash
-python training/train_pipeline.py full \
+python run-training.py full \
     --bank "C:/SoundBanks/IthacaPlayer/vv-rhodes"
 # → soundbanks/params-vv-rhodes-full.json
 ```
@@ -138,62 +138,52 @@ build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-ks-gran
 
 ## 4. Generování sample banky
 
-`generate.py` renderuje WAV soubory ze soundbanky nebo naučeného modelu.
+`run-generate.py` renderuje WAV soubory ze soundbanky nebo naučeného modelu.
 Hodí se pro poslech parametrické varianty, augmentaci dat nebo export
-nástrojové banky.
+nástrojové banky. Výstup jde do `generated/{banka}/`, existující soubory jsou přepsány.
 
 ### Celá banka z modelu (NN predikce)
 
 ```bash
-python training/generate.py \
-    --source  training/profile-ks-grand.pt \
-    --out-dir generated/ks-grand/
+python run-generate.py --source training/profile-ks-grand.pt --full-bank
+# → generated/profile-ks-grand/
 ```
-
-Vygeneruje `m021-vel0-f44.wav` … `m108-vel7-f44.wav` (704 souborů).
 
 ### Celá banka ze soundbank JSON (reálná fyzika)
 
 ```bash
-python training/generate.py \
-    --source  soundbanks/params-ks-grand.json \
-    --out-dir generated/ks-grand-raw/
+python run-generate.py --source soundbanks/params-ks-grand-simple.json --full-bank
+# → generated/ks-grand/
 ```
 
 ### Jednotlivá nota
 
 ```bash
-python training/generate.py \
-    --source     soundbanks/params-ks-grand.json \
-    --out-dir    generated/single/ \
-    --midi-range 60-60 \
-    --vel-count  1
+python run-generate.py --source soundbanks/params-ks-grand-simple.json \
+    --midi-note 60 --velocity 3
 ```
 
 ### Rozsah not s vlastní parametrizací syntézy
 
 ```bash
-python training/generate.py \
-    --source       training/profile-ks-grand.pt \
-    --out-dir      generated/bright/ \
-    --midi-range   48-72 \
-    --vel-count    4 \
-    --beat-scale   2.0 \
-    --noise-level  0.5 \
-    --eq-strength  0.8 \
-    --duration     4.0
+python run-generate.py --source soundbanks/params-ks-grand-simple.json \
+    --midi-range 48-72 --vel-count 4 \
+    --beat-scale 2.0 --noise-level 0.5 --eq-strength 0.8 --duration 4.0
 ```
 
-### Všechny přepínače generate.py
+### Všechny přepínače run-generate.py
 
 | Přepínač | Výchozí | Popis |
 |----------|---------|-------|
 | `--source` | povinný | Cesta k `.pt` modelu nebo params `.json` |
-| `--out-dir` | povinný | Výstupní adresář pro WAV soubory |
-| `--midi-range` | `21-108` | Rozsah MIDI not (včetně), formát `lo-hi` |
-| `--vel-count` | `8` | Počet velocity bands (1–8) |
+| `--out-dir` | auto | Výstupní adresář (default: `generated/{banka}/`) |
+| `--full-bank` | — | Celá banka: MIDI 21–108, všechny velocity vrstvy |
+| `--midi-note N` | — | Jednotlivá nota (vyžaduje `--velocity`) |
+| `--midi-range LO-HI` | — | Rozsah not, např. `48-72` |
+| `--vel-count` | `8` | Počet velocity bands |
+| `--velocity` | — | Velocity index 0–7 (pro `--midi-note`) |
+| `--freq` | `48` | Sample rate: `44` = 44100 Hz, `48` = 48000 Hz |
 | `--duration` | `3.0` | Délka každého WAV v sekundách |
-| `--sr` | `44100` | Sample rate |
 | `--beat-scale` | `1.0` | Škálování beat_hz (1.0 = dle banky) |
 | `--noise-level` | `1.0` | Škálování amplitudy šumu |
 | `--eq-strength` | `1.0` | Blend spektrálního EQ (0 = bypass) |

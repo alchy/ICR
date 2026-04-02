@@ -144,6 +144,10 @@ public:
     // Returns false if JSON is malformed or this core does not support bank loading.
     virtual bool loadBankJson(const std::string& json_str) { return false; }
 
+    // exportBankJson: serialize current in-memory bank to a JSON file at path.
+    // Returns false if this core does not support export or the write fails.
+    virtual bool exportBankJson(const std::string& path) { return false; }
+
     // ── Visualization — called from GUI thread, may allocate ─────────────────
     virtual CoreVizState getVizState() const = 0;
 

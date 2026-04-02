@@ -84,6 +84,19 @@ public:
     // Returns a PONG response to send, or an empty vector if no response needed.
     std::vector<uint8_t> handleSysEx(const uint8_t* data, int len);
 
+    // ── Offline batch render ───────────────────────────────────────────────────
+    // Render a list of notes to mono int16 WAV files without starting the audio
+    // device.  Call after initialize() but instead of start().
+    //
+    // batch_json_path: JSON array [{midi, vel_idx, duration_s}, ...] (vel_idx 0-7)
+    // out_dir:         Directory for output WAVs  (m060_vel3.wav, ...)
+    // sr:              Sample rate for render (default 48000)
+    //
+    // Returns number of notes successfully rendered; logs progress via logger_.
+    int renderBatch(const std::string& batch_json_path,
+                    const std::string& out_dir,
+                    int                sr = 48000);
+
     // ── Accessors ─────────────────────────────────────────────────────────────
     ISynthCore*  core()        noexcept { return core_.get();  }
     DspChain*    getDspChain() noexcept { return &dsp_;        }

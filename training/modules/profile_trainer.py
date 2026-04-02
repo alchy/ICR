@@ -116,17 +116,17 @@ class InstrumentProfile(nn.Module):
         nn.init.constant_(self.biexp_net[-1].bias[1],  1.10)  # tau2 ≈ 3×tau1
         nn.init.constant_(self.phi_net[-1].bias, 0.0)
 
-    def forward_B(self, mf):               return self.B_net(mf)
-    def forward_dur(self, mf):             return self.dur_net(mf)
-    def forward_tau1_k1(self, mf, vf):     return self.tau1_k1_net(torch.cat([mf, vf], -1))
-    def forward_tau_ratio(self, mf, kf):   return self.tau_ratio_net(torch.cat([mf, kf], -1))
-    def forward_A0(self, mf, kf, vf):      return self.A0_net(torch.cat([mf, kf, vf], -1))
-    def forward_df(self, mf, kf):          return self.df_net(torch.cat([mf, kf], -1))
-    def forward_eq(self, mf, ff):          return self.eq_net(torch.cat([mf, ff], -1))
-    def forward_wf(self, mf):              return self.wf_net(mf)
-    def forward_noise(self, mf, vf):       return self.noise_net(torch.cat([mf, vf], -1))
-    def forward_biexp(self, mf, kf, vf):   return self.biexp_net(torch.cat([mf, kf, vf], -1))
-    def forward_phi(self, mf, vf):         return self.phi_net(torch.cat([mf, vf], -1))
+    def forward_B(self, mf, vf=None):               return self.B_net(mf)
+    def forward_dur(self, mf, vf=None):             return self.dur_net(mf)
+    def forward_tau1_k1(self, mf, vf):              return self.tau1_k1_net(torch.cat([mf, vf], -1))
+    def forward_tau_ratio(self, mf, kf, vf=None):   return self.tau_ratio_net(torch.cat([mf, kf], -1))
+    def forward_A0(self, mf, kf, vf):               return self.A0_net(torch.cat([mf, kf, vf], -1))
+    def forward_df(self, mf, kf, vf=None):          return self.df_net(torch.cat([mf, kf], -1))
+    def forward_eq(self, mf, ff, vf=None):          return self.eq_net(torch.cat([mf, ff], -1))
+    def forward_wf(self, mf, vf=None):              return self.wf_net(mf)
+    def forward_noise(self, mf, vf):                return self.noise_net(torch.cat([mf, vf], -1))
+    def forward_biexp(self, mf, kf, vf):            return self.biexp_net(torch.cat([mf, kf, vf], -1))
+    def forward_phi(self, mf, vf):                  return self.phi_net(torch.cat([mf, vf], -1))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

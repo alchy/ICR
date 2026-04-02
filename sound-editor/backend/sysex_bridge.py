@@ -12,8 +12,9 @@ Commands:
   02  SET_NOTE_PARTIAL  midi vel k param_id value_f32
   03  SET_BANK          <chunked JSON>
   10  SET_MASTER        param_id value_f32
-  F0  PING
-  F1  PONG
+  70  PING
+  71  PONG
+  72  EXPORT_BANK       <ASCII path bytes>
 """
 
 import struct
@@ -36,8 +37,9 @@ CMD_SET_NOTE_PARAM   = 0x01
 CMD_SET_NOTE_PARTIAL = 0x02
 CMD_SET_BANK         = 0x03
 CMD_SET_MASTER       = 0x10
-CMD_PING             = 0xF0
-CMD_PONG             = 0xF1
+CMD_PING             = 0x70
+CMD_PONG             = 0x71
+CMD_EXPORT_BANK      = 0x72
 
 # Scalar param IDs — per-note fields (commands 0x01 SET_NOTE_PARAM)
 PARAM_IDS = {
@@ -134,14 +136,18 @@ class SysExBridge:
         self._send(CMD_SET_NOTE_PARTIAL, data)
 
     def set_bank(self, json_bytes: bytes):
-        """Send full soundbank JSON (chunked)."""
+        """Send full soundbank JSON (chunked).
+
+        Header encoding (6 bytes, all 7-bit safe):
+          chunk_idx   as 3 × 7-bit bytes (big-endian, supports up to 2M chunks)
+          total_chunks as 3 × 7-bit bytes
+        """
         chunks = [json_bytes[i:i+CHUNK_SIZE]
                   for i in range(0, len(json_bytes), CHUNK_SIZE)]
         total = len(chunks)
         for idx, chunk in enumerate(chunks):
-            # Header: chunk_index(2), total_chunks(2), data
-            header = struct.pack(">HH", idx, total)
-            self._send(CMD_SET_BANK, list(header) + list(chunk))
+            header = _encode_int21(idx) + _encode_int21(total)
+            self._send(CMD_SET_BANK, header + list(chunk))
             time.sleep(0.002)   # give ICR time to buffer
 
     def set_master(self, param_key: str, value: float):
@@ -156,6 +162,16 @@ class SysExBridge:
         """Send PING; returns True if sent (no ACK over SysEx yet)."""
         self._send(CMD_PING, [])
         return True
+
+    def export_bank(self, path: str):
+        """
+        Ask ICR to export its current in-memory bank to *path* (absolute path
+        on the machine running ICR).  ICR writes a JSON file identical in
+        format to the soundbank loaded via set_bank().
+
+        The path is sent as raw ASCII bytes — keep it to ASCII characters only.
+        """
+        self._send(CMD_EXPORT_BANK, list(path.encode("ascii")))
 
     # ── Low-level ─────────────────────────────────────────────────────────────
 
@@ -176,6 +192,11 @@ def list_output_ports() -> list[str]:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _encode_int21(value: int) -> list[int]:
+    """Encode a non-negative integer as 3 × 7-bit SysEx-safe bytes (big-endian)."""
+    return [(value >> 14) & 0x7F, (value >> 7) & 0x7F, value & 0x7F]
+
 
 def _f32_to_sysex_bytes(value: float) -> list[int]:
     """
