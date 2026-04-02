@@ -1,0 +1,27 @@
+# ICR — Python dependencies
+# Install from repo root: pip install -r requirements.txt
+#
+# Sections:
+#   [training-core]   simple pipeline (extract → EQ → export)
+#   [training-full]   full pipeline adds NN training
+#   [sound-editor]    FastAPI backend for the sound editor
+#   [optional]        visualisation / analysis scripts
+
+# ── Training core (simple pipeline) ──────────────────────────────────────────
+numpy>=1.24.0
+scipy>=1.10.0
+soundfile>=0.12.0
+
+# ── Training full (NN + MRSTFT fine-tuning) ───────────────────────────────────
+torch>=2.6.0
+
+# ── Sound editor backend ──────────────────────────────────────────────────────
+fastapi>=0.111.0
+uvicorn[standard]>=0.29.0
+websockets>=12.0
+mido>=1.3.0
+python-rtmidi>=1.5.0
+python-multipart>=0.0.9
+
+# ── Optional (generate.py, analysis notebooks) ────────────────────────────────
+matplotlib>=3.7.0

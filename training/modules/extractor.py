@@ -43,14 +43,27 @@ class ParamExtractor:
     # as accidentally kicked (and keep the previous extraction instead).
     KICK_THRESHOLD = 0.70
 
-    def extract_bank(self, bank_dir: str, workers: int = None) -> dict:
+    def extract_bank(self, bank_dir: str, workers: int = None,
+                     sr_tag: str = "f48") -> dict:
         """
         Extract all WAV files in bank_dir in parallel.
+
+        Args:
+            bank_dir:  Directory with WAV files named m{midi}-vel{v}-{sr_tag}.wav
+            workers:   Parallel worker count (None = auto).
+            sr_tag:    Preferred sample-rate tag, e.g. "f48" (48 000 Hz, default)
+                       or "f44" (44 100 Hz).  Falls back to the other tag, then
+                       to any f* pattern for single-SR banks.
 
         Returns the full params dict (keys: bank_dir, n_samples, summary, samples).
         """
         bank_path = Path(bank_dir)
-        wav_files = sorted(bank_path.glob("m*-vel*-f*.wav"))
+        wav_files = sorted(bank_path.glob(f"m*-vel*-{sr_tag}.wav"))
+        if not wav_files:
+            fallback = "f44" if sr_tag == "f48" else "f48"
+            wav_files = sorted(bank_path.glob(f"m*-vel*-{fallback}.wav"))
+        if not wav_files:
+            wav_files = sorted(bank_path.glob("m*-vel*-f*.wav"))
         if not wav_files:
             raise FileNotFoundError(f"No WAV files found in {bank_dir}")
 
@@ -482,7 +495,7 @@ def _detect_beating(times, amps, i_peak) -> dict:
 
 
 def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
-    result = {"attack_tau_s": 0.05, "A_noise": 0.001,
+    result = {"attack_tau": 0.05, "A_noise": 0.001,
               "centroid_hz": 2000.0, "spectral_slope_db_oct": -3.0}
 
     if len(audio) < sr*0.1:
@@ -533,7 +546,7 @@ def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
                 popt, _ = curve_fit(
                     lambda t, tau: a_dec[0]*np.exp(-t/tau),
                     t_dec, a_dec, p0=[0.05], bounds=([0.003],[1.0]), maxfev=2000)
-                result["attack_tau_s"] = float(popt[0])
+                result["attack_tau"] = float(popt[0])
             except Exception:
                 pass
 

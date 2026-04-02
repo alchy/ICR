@@ -68,6 +68,8 @@ static void printHelp(const char* argv0) {
         "Usage:\n"
         "  %s --core <name> [--params <file>] [--config <file>]\n"
         "             [--core-param key=value ...] [--port <N>]\n"
+        "  %s --core <name> --params <file> --render-batch <batch.json>\n"
+        "             --out-dir <dir> [--sr <hz>]\n"
         "  %s --list-cores\n"
         "  %s --help\n"
         "\n"
@@ -80,21 +82,29 @@ static void printHelp(const char* argv0) {
         "  --list-cores           List registered cores and exit\n"
         "  --help                 Show this message\n"
         "\n"
+        "Offline batch render mode (no audio device):\n"
+        "  --render-batch <json>  JSON array [{midi,vel_idx,duration_s},...]\n"
+        "  --out-dir <dir>        Output directory for WAV files\n"
+        "  --sr <hz>              Sample rate (default: 48000)\n"
+        "\n"
         "Keyboard fallback (no MIDI hardware):\n"
         "  a s d f g h j k  ->  C4 D4 E4 F4 G4 A4 B4 C5\n"
         "  z                ->  sustain (toggle)\n"
         "  q                ->  quit\n",
-        argv0, argv0, argv0);
+        argv0, argv0, argv0, argv0);
 }
 
 int main(int argc, char* argv[]) {
     ICR_ENABLE_FTZ();  // prevent denormal stalls in biquad / IIR filters
     setvbuf(stdout, nullptr, _IONBF, 0);
 
-    std::string core_name   = "SineCore";
+    std::string core_name    = "SineCore";
     std::string params_json;
     std::string config_json;
-    int         midi_port   = 0;
+    int         midi_port    = 0;
+    std::string render_batch;   // --render-batch <json>
+    std::string render_out_dir; // --out-dir <dir>
+    int         render_sr    = 48000;
     std::vector<std::pair<std::string,float>> core_params;  // --core-param key=value
 
     for (int i = 1; i < argc; ++i) {
@@ -128,6 +138,12 @@ int main(int argc, char* argv[]) {
             }
         } else if (a == "--port" && i + 1 < argc) {
             midi_port = std::atoi(argv[++i]);
+        } else if (a == "--render-batch" && i + 1 < argc) {
+            render_batch = argv[++i];
+        } else if (a == "--out-dir" && i + 1 < argc) {
+            render_out_dir = argv[++i];
+        } else if (a == "--sr" && i + 1 < argc) {
+            render_sr = std::atoi(argv[++i]);
         } else {
             std::fprintf(stderr, "Unknown option: %s\n\n", a.c_str());
             printHelp(argv[0]);
@@ -149,6 +165,17 @@ int main(int argc, char* argv[]) {
                 logger.log("main", LogSeverity::Warning,
                            "Unknown core param: " + kv.first);
             }
+        }
+
+        // ── Offline batch render mode ─────────────────────────────────────────
+        if (!render_batch.empty()) {
+            if (render_out_dir.empty()) {
+                logger.log("main", LogSeverity::Error,
+                           "--render-batch requires --out-dir");
+                return 1;
+            }
+            int n = engine->renderBatch(render_batch, render_out_dir, render_sr);
+            return (n > 0) ? 0 : 1;
         }
 
         if (!engine->start()) return 1;

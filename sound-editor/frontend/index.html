@@ -42,6 +42,9 @@
     button.primary { background: #1a3a5a; border-color: #4af; color: #4af; }
     button.danger  { background: #3a1a1a; border-color: #f44; color: #f44; }
     .sep { border-top: 1px solid #223; margin: 8px 0; }
+    .dim-tab { background:#111; border:1px solid #334; color:#556; cursor:pointer; border-radius:3px; }
+    .dim-tab:hover { background:#1a1a2a; color:#88a; }
+    .dim-tab.active-tab { background:#1a2a3a; border-color:#4af; color:#4af; }
     .layer-item { padding: 3px 6px; font-size: 11px; cursor: pointer;
                   border-left: 3px solid transparent; margin: 1px 0; }
     .layer-item:hover { background: #1a1a2a; }
@@ -61,17 +64,24 @@
     <!-- Left panel: layer browser -->
     <div id="panel-left">
       <h3>Layers</h3>
-      <select id="sel-group" onchange="app.filterGroup(this.value)">
-        <option value="">All groups</option>
-        <option value="global">Global</option>
-        <option value="noise">Noise</option>
-        <option value="envelope">Envelope</option>
-        <option value="partial">Partial</option>
-      </select>
-      <select id="sel-partial-k" style="margin-top:4px" onchange="app.filterK(parseInt(this.value)||0)">
+      <!-- Dimension tabs -->
+      <div id="dim-tabs" style="display:flex;gap:3px;margin-bottom:6px;">
+        <button id="tab-scalar"      class="dim-tab active-tab"
+                onclick="app.setDimension('scalar')"
+                style="flex:1;font-size:10px;padding:3px 0;">Scalar</button>
+        <button id="tab-per_partial" class="dim-tab"
+                onclick="app.setDimension('per_partial')"
+                style="flex:1;font-size:10px;padding:3px 0;">Per-partial</button>
+        <button id="tab-eq"          class="dim-tab"
+                onclick="app.setDimension('eq')"
+                style="flex:1;font-size:10px;padding:3px 0;">EQ</button>
+      </div>
+      <!-- k-filter (visible only in per_partial tab) -->
+      <select id="sel-partial-k" style="display:none;margin-bottom:4px;"
+              onchange="app.filterK(parseInt(this.value)||0)">
         <option value="0">All partials</option>
       </select>
-      <div id="layer-list" style="margin-top:8px"></div>
+      <div id="layer-list"></div>
     </div>
 
     <!-- Right panel: spline inspector -->
@@ -99,7 +109,25 @@
 
       <div class="sep"></div>
       <h3>Control Points</h3>
+      <div style="display:flex;gap:4px;margin-bottom:4px;">
+        <input id="anchor-input" type="text" placeholder="MIDI: 44, 54, 56 …"
+               style="flex:1;background:#111;border:1px solid #334;color:#ccc;
+                      padding:3px 5px;font-size:11px;"
+               title="Comma- or space-separated MIDI numbers to set as anchors">
+        <button onclick="app.setAnchorsFromInput()"
+                style="padding:2px 7px;font-size:11px;white-space:nowrap;">Set</button>
+        <button onclick="app.clearAnchors()"
+                style="padding:2px 7px;font-size:11px;white-space:nowrap;color:#f88;">Clear</button>
+      </div>
+      <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:#889;margin-bottom:4px;cursor:pointer;">
+        <input type="checkbox" id="anchor-global" style="accent-color:#4af;">
+        global anchors (all layers)
+      </label>
       <div id="cp-list"></div>
+
+      <div class="sep"></div>
+      <h3>Note Inspector</h3>
+      <div id="note-inspector-container"></div>
 
       <div class="sep"></div>
       <h3>MIDI / SysEx</h3>

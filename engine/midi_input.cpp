@@ -11,7 +11,7 @@
  *   0xB0 CC 91   LFO depth (Reverb)
  *   0xB0 CC 93   LFO speed (Chorus)
  *   0xB0 CC 74   Limiter threshold
- *   0xF0         SysEx — TODO: map to core->setParam() when protocol is defined
+ *   0xF0         SysEx → CoreEngine::handleSysEx (ICR protocol: F0 7D 01 ...)
  */
 
 #include "midi_input.h"
@@ -93,6 +93,57 @@ void MidiInput::close() {
         delete midi_;
         midi_ = nullptr;
     }
+    closeOutput();
+}
+
+// ── MIDI output (for SysEx PONG responses) ────────────────────────────────────
+
+std::vector<std::string> MidiInput::listOutputPorts() {
+    std::vector<std::string> names;
+    try {
+        RtMidiOut midi;
+        unsigned int n = midi.getPortCount();
+        for (unsigned int i = 0; i < n; i++)
+            names.push_back(midi.getPortName(i));
+    } catch (...) {}
+    return names;
+}
+
+bool MidiInput::openOutput(int port_index) {
+    closeOutput();
+    try {
+        midi_out_ = new RtMidiOut();
+        unsigned int n = midi_out_->getPortCount();
+        if (n == 0) { delete midi_out_; midi_out_ = nullptr; return false; }
+        int idx = (port_index < 0 || port_index >= (int)n) ? 0 : port_index;
+        midi_out_->openPort(idx);
+        if (engine_)
+            engine_->getLogger().log("MIDI", LogSeverity::Info,
+                "Output opened: " + midi_out_->getPortName(idx));
+        return true;
+    } catch (RtMidiError& e) {
+        if (engine_)
+            engine_->getLogger().log("MIDI", LogSeverity::Error,
+                "Output error: " + e.getMessage());
+        delete midi_out_; midi_out_ = nullptr;
+        return false;
+    }
+}
+
+void MidiInput::closeOutput() {
+    if (midi_out_) {
+        if (midi_out_->isPortOpen()) midi_out_->closePort();
+        delete midi_out_;
+        midi_out_ = nullptr;
+    }
+}
+
+void MidiInput::sendRaw(const std::vector<uint8_t>& bytes) {
+    if (!midi_out_ || bytes.empty()) return;
+    try {
+        std::vector<unsigned char> msg(bytes.begin(), bytes.end());
+        midi_out_->sendMessage(&msg);
+    } catch (...) {}
 }
 
 // ── MIDI callback (called from RtMidi's background thread) ───────────────────
@@ -112,11 +163,18 @@ void MidiInput::callback(double /*ts*/,
     uint64_t t = nowMs();
     self->activity_.any_ms.store(t, std::memory_order_relaxed);
 
-    // SysEx — TODO: implement generic setParam routing when core SysEx protocol defined
+    // SysEx — route to CoreEngine::handleSysEx (ICR protocol: F0 7D 01 <cmd> ...)
     if (status == 0xF0) {
         self->activity_.sysex_ms.store(t, std::memory_order_relaxed);
-        self->engine_->getLogger().log("MIDI", LogSeverity::Info,
-            "SysEx received (" + std::to_string(msg->size()) + " bytes) — not yet handled");
+        // RtMidi delivers: [F0, ...payload..., F7]
+        // handleSysEx expects payload WITHOUT the F0/F7 frame bytes.
+        if (msg->size() >= 3) {
+            const uint8_t* inner = msg->data() + 1;           // skip F0
+            int inner_len = (int)msg->size() - 2;             // strip F0 + F7
+            auto response = self->engine_->handleSysEx(inner, inner_len);
+            if (!response.empty())
+                self->sendRaw(response);
+        }
         return;
     }
 

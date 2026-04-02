@@ -131,7 +131,7 @@ set(IMGUI_SOURCES
 )
 
 add_executable(ICRGUI
-    gui_main.cpp
+    main_gui.cpp
     gui/resonator_gui.cpp
     ${ENGINE_SOURCES}
     ${CORE_SOURCES}

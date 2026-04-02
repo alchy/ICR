@@ -34,6 +34,7 @@ export default {
 
     // ── Layers ──────────────────────────────────────────────────────────────
     getLayers:       ()           => get("/layers"),
+    getSchema:       ()           => get("/schema"),
     getLayerValues:  (layerId)    => get(`/layers/${layerId}/values`),
 
     // ── Splines ─────────────────────────────────────────────────────────────
@@ -47,7 +48,9 @@ export default {
     unkeepLayer:     (layerId, velocities) =>
         del(`/spline/${layerId}/keep?velocities=${velocities.join(",")}`),
     applyLayer:      (layerId, velocities, coherence) =>
-        post(`/spline/${layerId}/apply`,   { velocities, coherence }),
+        post(`/spline/${layerId}/apply`,        { velocities, coherence }),
+    fillMissing:     (layerId, velocities, coherence) =>
+        post(`/spline/${layerId}/fill_missing`, { velocities, coherence }),
     keepStatus:      (layerId) => get(`/spline/${layerId}/keep_status`),
     getSplineCurve:  (layerId, n) => post(`/spline/${layerId}/curve?n_points=${n ?? 300}`),
     addAnchor:       (layerId, midi, value, stickiness) =>
@@ -70,5 +73,12 @@ export default {
     sysexPartial:    (midi, vel, k, paramKey, value) =>
         post("/sysex/partial", { midi, vel, k, param_key: paramKey, value }),
     sysexBank:       ()           => post("/sysex/bank"),
+    sysexMaster:     (paramKey, value) =>
+        post("/sysex/master", { param_key: paramKey, value }),
     sysexPing:       ()           => post("/sysex/ping"),
+
+    // ── EQ editor ────────────────────────────────────────────────────────────
+    getEq:           (midi, vel)                      => get(`/eq/${midi}/${vel}`),
+    updateEq:        (midi, vel, freqs_hz, gains_db)  =>
+        post(`/eq/${midi}/${vel}`, { freqs_hz, gains_db }),
 };

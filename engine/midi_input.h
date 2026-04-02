@@ -35,6 +35,7 @@ public:
 
     // List available MIDI input ports (for user selection)
     static std::vector<std::string> listPorts();
+    static std::vector<std::string> listOutputPorts();
 
     // Open port by index (0 = first available). Returns false if none found.
     bool open(CoreEngine& engine, int port_index = 0);
@@ -46,6 +47,12 @@ public:
     bool isOpen() const { return midi_ && midi_->isPortOpen(); }
     std::string portName() const { return port_name_; }
 
+    // Open a MIDI output port for sending PONG responses.
+    // Call after open(). Optional: PONG is silently dropped if no output is open.
+    bool openOutput(int port_index = 0);
+    void closeOutput();
+    bool isOutputOpen() const { return midi_out_ != nullptr; }
+
     // Activity timestamps — read from any thread (GUI, main)
     const MidiActivity& activity() const { return activity_; }
 
@@ -54,8 +61,11 @@ private:
                          std::vector<unsigned char>* msg,
                          void* user_data);
 
-    RtMidiIn*   midi_    = nullptr;
-    CoreEngine* engine_  = nullptr;
+    void sendRaw(const std::vector<uint8_t>& bytes);
+
+    RtMidiIn*   midi_     = nullptr;
+    RtMidiOut*  midi_out_ = nullptr;
+    CoreEngine* engine_   = nullptr;
     std::string port_name_;
     MidiActivity activity_;
 };

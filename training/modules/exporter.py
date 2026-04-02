@@ -37,7 +37,7 @@ RNG_SEED_DEFAULT   = 0
 
 class SoundbankExporter:
     """
-    Write piano_core_v1 JSON soundbanks from extracted params or NN model.
+    Write ICR soundbank JSON from extracted params or NN model.
 
     Usage:
         # Export only real extracted data
@@ -116,11 +116,29 @@ class SoundbankExporter:
         # Build dataset only to get eq_freqs
         ds = build_dataset(measured)
 
-        # Generate full 88×8 profile; measured samples are preserved verbatim
-        all_samples = generate_profile(
-            model, ds, midi_from=21, midi_to=108, sr=sr,
-            orig_samples=measured,
-        )
+        # Generate full 88×8 profile; measured samples are preserved verbatim.
+        # Use generate_profile_exp for EncExp models (forward_dur requires vf).
+        try:
+            from training.modules.profile_trainer_exp import (
+                InstrumentProfileEncExp, generate_profile_exp,
+                build_dataset_exp,
+            )
+            if isinstance(model, InstrumentProfileEncExp):
+                ds_exp = build_dataset_exp(measured)
+                all_samples = generate_profile_exp(
+                    model, ds_exp, midi_from=21, midi_to=108, sr=sr,
+                    orig_samples=measured,
+                )
+            else:
+                all_samples = generate_profile(
+                    model, ds, midi_from=21, midi_to=108, sr=sr,
+                    orig_samples=measured,
+                )
+        except ImportError:
+            all_samples = generate_profile(
+                model, ds, midi_from=21, midi_to=108, sr=sr,
+                orig_samples=measured,
+            )
 
         out = self._make_header("nn-hybrid:model", sr, target_rms, duration, rng_seed)
 
@@ -147,7 +165,6 @@ class SoundbankExporter:
         duration: float, rng_seed: int,
     ) -> dict:
         return {
-            "format":     "piano_core_v1",
             "source":     source,
             "sr":         sr,
             "target_rms": target_rms,
@@ -169,7 +186,7 @@ class SoundbankExporter:
         target_rms: float,
         rng_seed:   int,
     ) -> dict:
-        """Convert one sample entry into a piano_core_v1 note dict."""
+        """Convert one sample entry into a piano_core_v2 note dict."""
         seed   = rng_seed + midi*256 + vel_idx
         rng    = np.random.default_rng(seed)
 
@@ -180,13 +197,13 @@ class SoundbankExporter:
         phis     = rng.uniform(0, 2*math.pi, K).astype(np.float32)
 
         partials_out = [
-            self._build_partial(partials_raw[ki], float(phis[ki]))
+            self._build_partial(partials_raw[ki], float(phis[ki]), ki)
             for ki in range(K)
         ]
 
         # Noise params (cap attack_tau at tau1 of k=1 partial)
         noise          = sample.get("noise", {})
-        attack_tau_raw = float(noise.get("attack_tau_s", 0.05) or 0.05)
+        attack_tau_raw = float(noise.get("attack_tau", 0.05) or 0.05)
         A_noise        = float(noise.get("A_noise", 0.04) or 0.04)
         tau1_k1        = (partials_out[0]["tau1"] if partials_out else 3.0)
         attack_tau     = min(attack_tau_raw, tau1_k1)
@@ -200,10 +217,12 @@ class SoundbankExporter:
         # EQ biquads (may be absent for NN-generated samples without EQ)
         eq_biquads = self._fit_eq_biquads(sample, sr)
 
-        return {
+        # Preserve editabe source data alongside baked values
+        note: dict = {
             "midi":       midi,
             "vel":        vel_idx,
             "f0_hz":      float(sample.get("f0_fitted_hz") or sample.get("f0_nominal_hz", 440.0)),
+            "B":          float(sample.get("B") or 0.0),
             "K_valid":    K,
             "phi_diff":   phi_diff,
             "attack_tau": attack_tau,
@@ -212,8 +231,14 @@ class SoundbankExporter:
             "partials":   partials_out,
             "eq_biquads": eq_biquads,
         }
+        # spectral_eq: raw freq/gain curve used to compute eq_biquads;
+        # stored so the editor can re-fit biquads after curve edits.
+        spectral_eq = sample.get("spectral_eq")
+        if spectral_eq:
+            note["spectral_eq"] = spectral_eq
+        return note
 
-    def _build_partial(self, p: dict, phi: float) -> dict:
+    def _build_partial(self, p: dict, phi: float, k_idx: int = 0) -> dict:
         """Sanitise and convert one raw partial dict."""
         beat = float(p.get("beat_hz", 0.0) or 0.0)
         if p.get("mono", False):
@@ -232,6 +257,7 @@ class SoundbankExporter:
             a1 = 1.0
 
         return {
+            "k":       int(p.get("k", k_idx + 1)),
             "f_hz":    float(p["f_hz"]),
             "A0":      float(p["A0"]),
             "tau1":    tau1,

@@ -116,17 +116,17 @@ class InstrumentProfile(nn.Module):
         nn.init.constant_(self.biexp_net[-1].bias[1],  1.10)  # tau2 ≈ 3×tau1
         nn.init.constant_(self.phi_net[-1].bias, 0.0)
 
-    def forward_B(self, mf):               return self.B_net(mf)
-    def forward_dur(self, mf):             return self.dur_net(mf)
-    def forward_tau1_k1(self, mf, vf):     return self.tau1_k1_net(torch.cat([mf, vf], -1))
-    def forward_tau_ratio(self, mf, kf):   return self.tau_ratio_net(torch.cat([mf, kf], -1))
-    def forward_A0(self, mf, kf, vf):      return self.A0_net(torch.cat([mf, kf, vf], -1))
-    def forward_df(self, mf, kf):          return self.df_net(torch.cat([mf, kf], -1))
-    def forward_eq(self, mf, ff):          return self.eq_net(torch.cat([mf, ff], -1))
-    def forward_wf(self, mf):              return self.wf_net(mf)
-    def forward_noise(self, mf, vf):       return self.noise_net(torch.cat([mf, vf], -1))
-    def forward_biexp(self, mf, kf, vf):   return self.biexp_net(torch.cat([mf, kf, vf], -1))
-    def forward_phi(self, mf, vf):         return self.phi_net(torch.cat([mf, vf], -1))
+    def forward_B(self, mf, vf=None):               return self.B_net(mf)
+    def forward_dur(self, mf, vf=None):             return self.dur_net(mf)
+    def forward_tau1_k1(self, mf, vf):              return self.tau1_k1_net(torch.cat([mf, vf], -1))
+    def forward_tau_ratio(self, mf, kf, vf=None):   return self.tau_ratio_net(torch.cat([mf, kf], -1))
+    def forward_A0(self, mf, kf, vf):               return self.A0_net(torch.cat([mf, kf, vf], -1))
+    def forward_df(self, mf, kf, vf=None):          return self.df_net(torch.cat([mf, kf], -1))
+    def forward_eq(self, mf, ff, vf=None):          return self.eq_net(torch.cat([mf, ff], -1))
+    def forward_wf(self, mf, vf=None):              return self.wf_net(mf)
+    def forward_noise(self, mf, vf):                return self.noise_net(torch.cat([mf, vf], -1))
+    def forward_biexp(self, mf, kf, vf):            return self.biexp_net(torch.cat([mf, kf, vf], -1))
+    def forward_phi(self, mf, vf):                  return self.phi_net(torch.cat([mf, vf], -1))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -152,40 +152,49 @@ class ProfileTrainer:
 
     def train(
         self,
-        params:  dict,
-        epochs:  int   = 1800,
-        hidden:  int   = 64,
-        lr:      float = 0.003,
-        verbose: bool  = True,
+        params:   dict,
+        epochs:   int   = 1800,
+        hidden:   int   = 64,
+        lr:       float = 0.003,
+        val_frac: float = 0.15,
+        verbose:  bool  = True,
     ) -> InstrumentProfile:
         """
         Train an InstrumentProfile from extracted physics params.
 
         Args:
-            params:  Params dict (keys: samples, …) from ParamExtractor.
-            epochs:  Training epochs.
-            hidden:  MLP hidden layer width.
-            lr:      Learning rate (Adam + cosine LR schedule).
-            verbose: Print loss every 100 epochs.
+            params:   Params dict (keys: samples, …) from ParamExtractor.
+            epochs:   Training epochs.
+            hidden:   MLP hidden layer width.
+            lr:       Learning rate (Adam + cosine LR schedule).
+            val_frac: Fraction of MIDI notes held out for validation
+                      (every N-th MIDI, deterministic). Default 0.15.
+            verbose:  Print loss every 100 epochs.
 
         Returns:
-            Trained InstrumentProfile (eval mode).
+            Trained InstrumentProfile (best val-loss checkpoint, eval mode).
         """
         samples  = params["samples"]
         measured = {k: v for k, v in samples.items()
                     if not v.get("_interpolated")}
 
-        print(f"ProfileTrainer: {len(measured)} measured samples available.")
-        print("Building training dataset …")
+        train_s, val_s = _split_val_midis(measured, val_frac)
+        val_midis = sorted({s["midi"] for s in val_s.values()})
+        print(f"ProfileTrainer: {len(measured)} measured samples  "
+              f"→  train={len(train_s)}  val={len(val_s)} "
+              f"(MIDI {val_midis[0]}–{val_midis[-1]}, every ~{len(measured)//max(len(val_s),1)}th)")
 
-        ds    = build_dataset(measured)
-        model = InstrumentProfile(hidden=hidden)
+        print("Building datasets …")
+        train_ds = build_dataset(train_s)
+        val_ds   = build_dataset(val_s)
+        model    = InstrumentProfile(hidden=hidden)
 
         n_p = sum(p.numel() for p in model.parameters())
         print(f"Model parameters: {n_p:,}")
         print(f"Training {epochs} epochs …")
 
-        _run_training(model, ds, epochs=epochs, lr=lr, verbose=verbose)
+        _run_training(model, train_ds, val_ds=val_ds,
+                      epochs=epochs, lr=lr, verbose=verbose)
         model.eval()
         return model
 
@@ -245,6 +254,22 @@ class ProfileTrainer:
 # Dataset construction (from train_instrument_profile.build_dataset)
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _split_val_midis(samples: dict, val_frac: float) -> tuple:
+    """
+    Split samples into (train, val) by holding out every N-th MIDI note.
+
+    Deterministic: val notes are evenly spaced across the MIDI range,
+    starting at step//2 to avoid always picking edge notes.
+    """
+    midis = sorted({s["midi"] for s in samples.values()})
+    n_val = max(1, round(len(midis) * val_frac))
+    step  = max(1, len(midis) // n_val)
+    val_set = set(midis[i] for i in range(step // 2, len(midis), step))
+    train = {k: v for k, v in samples.items() if v["midi"] not in val_set}
+    val   = {k: v for k, v in samples.items() if v["midi"] in val_set}
+    return train, val
+
+
 def build_dataset(samples: dict) -> dict:
     """Extract training tensors from raw params dict."""
     B_data, dur_data, wf_data = [], [], []
@@ -287,7 +312,7 @@ def build_dataset(samples: dict) -> dict:
                     eq_data.append((mf, freq_feat(float(fhz)), float(g)))
 
         noise    = s.get("noise") or {}
-        atk_tau  = noise.get("attack_tau_s") or 0
+        atk_tau  = noise.get("attack_tau") or 0
         centroid = noise.get("centroid_hz") or 0
         A_noise  = noise.get("A_noise") or noise.get("floor_rms") or 0
         if atk_tau > 0.001 and centroid > 50 and A_noise > 0.001:
@@ -411,65 +436,79 @@ def build_dataset(samples: dict) -> dict:
 # Training loop
 # ─────────────────────────────────────────────────────────────────────────────
 
+def _compute_data_loss(model: InstrumentProfile, b: dict) -> torch.Tensor:
+    """Data-fit loss terms only (no smoothness penalty). Used for train and val."""
+    terms = []
+
+    if "B_mf"   in b:
+        terms.append(nn.functional.mse_loss(
+            model.forward_B(b["B_mf"]).squeeze(-1), b["B_y"]))
+
+    if "dur_mf" in b:
+        pred  = model.forward_dur(b["dur_mf"]).squeeze(-1)
+        dur_w = torch.exp(b["dur_y"]*0.1); dur_w /= dur_w.mean()
+        terms.append((dur_w*(pred-b["dur_y"])**2).mean())
+
+    if "wf_mf"  in b:
+        terms.append(nn.functional.mse_loss(
+            model.forward_wf(b["wf_mf"]).squeeze(-1), b["wf_y"]))
+
+    if "tk1_mf" in b:
+        pred = model.forward_tau1_k1(b["tk1_mf"], b["tk1_vf"]).squeeze(-1)
+        terms.append(2.0 * nn.functional.mse_loss(pred, b["tk1_y"]))
+
+    if "tau_mf" in b:
+        pred = model.forward_tau_ratio(b["tau_mf"], b["tau_kf"]).squeeze(-1)
+        terms.append((b["tau_w"] * nn.functional.huber_loss(
+            pred, b["tau_y"], delta=0.3, reduction="none")).mean())
+
+    if "a0_mf"  in b:
+        terms.append(nn.functional.mse_loss(
+            model.forward_A0(b["a0_mf"], b["a0_kf"], b["a0_vf"]).squeeze(-1),
+            b["a0_y"]))
+
+    if "df_mf"  in b:
+        terms.append(nn.functional.mse_loss(
+            model.forward_df(b["df_mf"], b["df_kf"]).squeeze(-1), b["df_y"]))
+
+    if "eq_mf"  in b:
+        terms.append(0.1 * nn.functional.mse_loss(
+            model.forward_eq(b["eq_mf"], b["eq_ff"]).squeeze(-1), b["eq_y"]))
+
+    if "noise_mf" in b:
+        terms.append(nn.functional.mse_loss(
+            model.forward_noise(b["noise_mf"], b["noise_vf"]), b["noise_y"]))
+
+    if "biexp_mf" in b:
+        terms.append(nn.functional.mse_loss(
+            model.forward_biexp(b["biexp_mf"], b["biexp_kf"], b["biexp_vf"]),
+            b["biexp_y"]))
+
+    return sum(terms)/len(terms) if terms else torch.tensor(0.0)
+
+
 def _run_training(
-    model:   InstrumentProfile,
-    ds:      dict,
-    epochs:  int   = 800,
-    lr:      float = 3e-3,
-    verbose: bool  = True,
+    model:      InstrumentProfile,
+    ds:         dict,
+    val_ds:     dict  = None,
+    epochs:     int   = 800,
+    lr:         float = 3e-3,
+    eval_every: int   = 100,
+    verbose:    bool  = True,
 ) -> list:
     opt   = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-4)
     sched = optim.lr_scheduler.CosineAnnealingLR(opt, T_max=epochs, eta_min=lr*0.01)
     b     = ds["batches"]
     losses = []
 
+    best_val   = float("inf")
+    best_state = copy.deepcopy(model.state_dict())
+
     for epoch in range(1, epochs+1):
+        model.train()
         opt.zero_grad()
-        terms = []
 
-        if "B_mf"   in b:
-            terms.append(nn.functional.mse_loss(
-                model.forward_B(b["B_mf"]).squeeze(-1), b["B_y"]))
-
-        if "dur_mf" in b:
-            pred  = model.forward_dur(b["dur_mf"]).squeeze(-1)
-            dur_w = torch.exp(b["dur_y"]*0.1); dur_w /= dur_w.mean()
-            terms.append((dur_w*(pred-b["dur_y"])**2).mean())
-
-        if "wf_mf"  in b:
-            terms.append(nn.functional.mse_loss(
-                model.forward_wf(b["wf_mf"]).squeeze(-1), b["wf_y"]))
-
-        if "tk1_mf" in b:
-            pred = model.forward_tau1_k1(b["tk1_mf"], b["tk1_vf"]).squeeze(-1)
-            terms.append(2.0 * nn.functional.mse_loss(pred, b["tk1_y"]))
-
-        if "tau_mf" in b:
-            pred = model.forward_tau_ratio(b["tau_mf"], b["tau_kf"]).squeeze(-1)
-            terms.append((b["tau_w"] * nn.functional.huber_loss(
-                pred, b["tau_y"], delta=0.3, reduction="none")).mean())
-
-        if "a0_mf"  in b:
-            terms.append(nn.functional.mse_loss(
-                model.forward_A0(b["a0_mf"], b["a0_kf"], b["a0_vf"]).squeeze(-1),
-                b["a0_y"]))
-
-        if "df_mf"  in b:
-            terms.append(nn.functional.mse_loss(
-                model.forward_df(b["df_mf"], b["df_kf"]).squeeze(-1), b["df_y"]))
-
-        if "eq_mf"  in b:
-            terms.append(0.1 * nn.functional.mse_loss(
-                model.forward_eq(b["eq_mf"], b["eq_ff"]).squeeze(-1), b["eq_y"]))
-
-        if "noise_mf" in b:
-            terms.append(nn.functional.mse_loss(
-                model.forward_noise(b["noise_mf"], b["noise_vf"]), b["noise_y"]))
-
-        if "biexp_mf" in b:
-            terms.append(nn.functional.mse_loss(
-                model.forward_biexp(b["biexp_mf"], b["biexp_kf"], b["biexp_vf"]),
-                b["biexp_y"]))
+        loss = _compute_data_loss(model, b)
 
         # Smoothness penalty on a fixed MIDI grid (every 5 epochs)
         if epoch % 5 == 0:
@@ -485,15 +524,33 @@ def _run_training(
                       + (tau_g[1:]-tau_g[:-1]).pow(2).mean()
                       + (a0_g[1:]-a0_g[:-1]).pow(2).mean()
                       + (n_g[1:]-n_g[:-1]).pow(2).mean())
-            terms.append(0.3*smooth)
+            loss = loss + 0.3*smooth
 
-        loss = sum(terms)/len(terms) if terms else torch.tensor(0.0)
         loss.backward(); opt.step(); sched.step()
-
         losses.append(float(loss.detach()))
-        if verbose and epoch % 100 == 0:
+
+        # Validation
+        if val_ds and (epoch % eval_every == 0 or epoch == epochs):
+            model.eval()
+            with torch.no_grad():
+                val_loss = _compute_data_loss(model, val_ds["batches"]).item()
+            if val_loss < best_val:
+                best_val   = val_loss
+                best_state = copy.deepcopy(model.state_dict())
+                improved   = " ✓"
+            else:
+                improved   = ""
+            if verbose:
+                print(f"  epoch {epoch:4d}/{epochs}  "
+                      f"train={loss.item():.4f}  val={val_loss:.4f}"
+                      f"  lr={sched.get_last_lr()[0]:.2e}{improved}")
+        elif verbose and epoch % eval_every == 0:
             print(f"  epoch {epoch:4d}/{epochs}  loss={loss.item():.6f}  "
                   f"lr={sched.get_last_lr()[0]:.2e}")
+
+    if val_ds:
+        model.load_state_dict(best_state)
+        print(f"  Restored best checkpoint (val={best_val:.4f})")
 
     return losses
 
@@ -547,7 +604,7 @@ def generate_profile(
 
                 noise_pred = model.forward_noise(mf, vf).squeeze(0)
                 noise_out  = {
-                    "attack_tau_s": round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
+                    "attack_tau": round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
                     "centroid_hz":  round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
                     "A_noise":      round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
                 }

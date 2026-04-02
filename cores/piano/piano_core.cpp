@@ -89,6 +89,7 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
         np.A_noise   = s["A_noise"].get<float>();
         np.rms_gain  = s["rms_gain"].get<float>();
         np.f0_hz     = s["f0_hz"].get<float>();
+        np.B         = s.value("B", 0.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
@@ -97,6 +98,7 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
         for (int ki = 0; ki < K; ki++) {
             const auto& p = partials[ki];
             PianoPartialParam& pp = np.partials[ki];
+            pp.k       = p["k"].get<int>();
             pp.f_hz    = p["f_hz"].get<float>();
             pp.A0      = p["A0"].get<float>();
             pp.tau1    = p["tau1"].get<float>();
@@ -181,6 +183,12 @@ void PianoCore::allNotesOff() {
 }
 
 void PianoCore::handleNoteOn(uint8_t midi, uint8_t vel) noexcept {
+    // bank_mutex_ guards against concurrent loadBankJson memcpy.
+    // try_to_lock: if a bank load is in progress, skip this noteOn rather than
+    // blocking the RT audio thread.
+    std::unique_lock<std::mutex> lk(bank_mutex_, std::try_to_lock);
+    if (!lk.owns_lock()) return;
+
     int vel_idx = midiVelToIdx(vel);
     // Fall back to nearest available vel if exact not present
     if (!note_params_[midi][vel_idx].valid) {
@@ -475,6 +483,178 @@ std::vector<CoreParamDesc> PianoCore::describeParams() const {
         { "eq_strength",     "EQ Strength",      "Timbre",  "×",   eq_strength_    .load(), 0.f,    1.f,      false },
         { "rng_seed",        "RNG Seed",         "Debug",   "",    (float)rng_seed_.load(), 0.f,    9999.f,   true  },
     };
+}
+
+// ── Per-note SysEx updates (MIDI callback thread) ─────────────────────────────
+
+bool PianoCore::setNoteParam(int midi, int vel,
+                              const std::string& key, float value) {
+    if (midi < 0 || midi > 127 || vel < 0 || vel > 7) return false;
+    PianoNoteParam& np = note_params_[midi][vel];
+    if (key == "f0_hz")      { np.f0_hz      = value; return true; }
+    if (key == "attack_tau") { np.attack_tau = value; return true; }
+    if (key == "A_noise")    { np.A_noise    = value; return true; }
+    if (key == "rms_gain")   { np.rms_gain   = value; return true; }
+    if (key == "phi_diff")   { np.phi_diff   = value; return true; }
+    if (key == "B") {
+        np.B = value;
+        // Recompute per-partial f_hz = k * f0 * sqrt(1 + B*k^2)
+        // Uses stored pp.k (correct for longitudinal partials too)
+        const float f0 = np.f0_hz;
+        for (int ki = 0; ki < np.K; ki++) {
+            const int k = np.partials[ki].k;
+            np.partials[ki].f_hz = (float)(k * f0 * std::sqrt(1.0 + (double)value * k * k));
+        }
+        return true;
+    }
+    return false;
+}
+
+bool PianoCore::setNotePartialParam(int midi, int vel, int k,
+                                     const std::string& key, float value) {
+    if (midi < 0 || midi > 127 || vel < 0 || vel > 7) return false;
+    PianoNoteParam& np = note_params_[midi][vel];
+    if (k < 1 || k > np.K) return false;
+    PianoPartialParam& pp = np.partials[k - 1];  // k is 1-based in protocol
+    if (key == "f_hz")    { pp.f_hz    = value; return true; }
+    if (key == "A0")      { pp.A0      = value; return true; }
+    if (key == "tau1")    { pp.tau1    = value; return true; }
+    if (key == "tau2")    { pp.tau2    = value; return true; }
+    if (key == "a1")      { pp.a1      = value; return true; }
+    if (key == "beat_hz") { pp.beat_hz = value; return true; }
+    if (key == "phi")     { pp.phi     = value; return true; }
+    return false;
+}
+
+bool PianoCore::loadBankJson(const std::string& json_str) {
+    json root;
+    try {
+        root = json::parse(json_str);
+    } catch (const std::exception&) {
+        return false;
+    }
+    if (!root.contains("notes")) return false;
+
+    // Parse into a temporary heap buffer — keeps the lock window minimal.
+    auto tmp = std::make_unique<PianoNoteParam[]>(128 * 8);
+
+    const auto& notes = root["notes"];
+    for (auto it = notes.begin(); it != notes.end(); ++it) {
+        const auto& s = it.value();
+        int midi    = s["midi"].get<int>();
+        int vel_idx = s["vel"].get<int>();
+        if (midi < 0 || midi > 127 || vel_idx < 0 || vel_idx > 7) continue;
+
+        PianoNoteParam& np = tmp[midi * 8 + vel_idx];
+        np.valid      = true;
+        np.phi_diff   = s["phi_diff"].get<float>();
+        np.attack_tau = s["attack_tau"].get<float>();
+        np.A_noise    = s["A_noise"].get<float>();
+        np.rms_gain   = s["rms_gain"].get<float>();
+        np.f0_hz      = s["f0_hz"].get<float>();
+        np.B          = s.value("B", 0.f);
+
+        const auto& partials = s["partials"];
+        int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
+        np.K = K;
+        for (int ki = 0; ki < K; ki++) {
+            const auto& p = partials[ki];
+            PianoPartialParam& pp = np.partials[ki];
+            pp.k       = p["k"].get<int>();
+            pp.f_hz    = p["f_hz"].get<float>();
+            pp.A0      = p["A0"].get<float>();
+            pp.tau1    = p["tau1"].get<float>();
+            pp.tau2    = p["tau2"].get<float>();
+            pp.a1      = p["a1"].get<float>();
+            pp.beat_hz = p["beat_hz"].get<float>();
+            pp.phi     = p["phi"].get<float>();
+        }
+
+        np.n_biquad = 0;
+        if (s.contains("eq_biquads")) {
+            const auto& bqs = s["eq_biquads"];
+            int nB = std::min((int)bqs.size(), PIANO_N_BIQUAD);
+            for (int bi = 0; bi < nB; bi++) {
+                const auto& bq = bqs[bi];
+                PianoBiquadCoeffs& c = np.eq[bi];
+                c.b0 = bq["b"][0].get<float>();
+                c.b1 = bq["b"][1].get<float>();
+                c.b2 = bq["b"][2].get<float>();
+                c.a1 = bq["a"][0].get<float>();
+                c.a2 = bq["a"][1].get<float>();
+            }
+            np.n_biquad = nB;
+        }
+    }
+
+    // Apply atomically: lock is held only for the memcpy, not during parsing.
+    {
+        std::lock_guard<std::mutex> lk(bank_mutex_);
+        for (int m = 0; m < 128; m++)
+            for (int v = 0; v < 8; v++)
+                note_params_[m][v] = tmp[m * 8 + v];
+    }
+    return true;
+}
+
+bool PianoCore::exportBankJson(const std::string& path) {
+    json notes = json::array();
+
+    std::lock_guard<std::mutex> lk(bank_mutex_);
+    for (int m = 0; m < 128; m++) {
+        for (int v = 0; v < 8; v++) {
+            const PianoNoteParam& np = note_params_[m][v];
+            if (!np.valid) continue;
+
+            json note;
+            note["midi"]       = m;
+            note["vel"]        = v;
+            note["phi_diff"]   = np.phi_diff;
+            note["attack_tau"] = np.attack_tau;
+            note["A_noise"]    = np.A_noise;
+            note["rms_gain"]   = np.rms_gain;
+            note["f0_hz"]      = np.f0_hz;
+            note["B"]          = np.B;
+
+            json partials = json::array();
+            for (int ki = 0; ki < np.K; ki++) {
+                const PianoPartialParam& pp = np.partials[ki];
+                json p;
+                p["k"]       = pp.k;
+                p["f_hz"]    = pp.f_hz;
+                p["A0"]      = pp.A0;
+                p["tau1"]    = pp.tau1;
+                p["tau2"]    = pp.tau2;
+                p["a1"]      = pp.a1;
+                p["beat_hz"] = pp.beat_hz;
+                p["phi"]     = pp.phi;
+                partials.push_back(p);
+            }
+            note["partials"] = partials;
+
+            if (np.n_biquad > 0) {
+                json biquads = json::array();
+                for (int bi = 0; bi < np.n_biquad; bi++) {
+                    const PianoBiquadCoeffs& c = np.eq[bi];
+                    json bq;
+                    bq["b"] = {c.b0, c.b1, c.b2};
+                    bq["a"] = {c.a1, c.a2};
+                    biquads.push_back(bq);
+                }
+                note["eq_biquads"] = biquads;
+            }
+
+            notes.push_back(note);
+        }
+    }
+
+    json root;
+    root["notes"] = notes;
+
+    std::ofstream f(path);
+    if (!f.is_open()) return false;
+    f << root.dump(2);
+    return f.good();
 }
 
 // ── Visualization (GUI thread) ────────────────────────────────────────────────

@@ -25,8 +25,9 @@ All multi-byte values are encoded in **7-bit SysEx-safe bytes** (no byte ≥ 0x8
 | 0x02 | SET_NOTE_PARTIAL  | Editor → Synth |
 | 0x03 | SET_BANK          | Editor → Synth |
 | 0x10 | SET_MASTER        | Editor → Synth |
-| 0xF0 | PING              | Editor → Synth |
-| 0xF1 | PONG              | Synth → Editor |
+| 0x70 | PING              | Editor → Synth |
+| 0x71 | PONG              | Synth → Editor |
+| 0x72 | EXPORT_BANK       | Editor → Synth |
 
 ---
 
@@ -116,16 +117,16 @@ F0 7D 01  02  <midi>  <vel>  <k>  <param_id>  <v0 v1 v2 v3 v4>  F7
 Send the full soundbank as chunked JSON.
 
 ```
-F0 7D 01  03  <chunk_hi> <chunk_lo>  <total_hi> <total_lo>  <data…>  F7
-              └─────────────────────────────────────────────┘
-              chunk index (2 bytes BE) + total chunks (2 bytes BE)
+F0 7D 01  03  <ci2> <ci1> <ci0>  <tc2> <tc1> <tc0>  <data…>  F7
+              └── chunk index ──┘  └── total chunks ──┘
+              each value encoded as 3 × 7-bit bytes (big-endian, 21-bit range)
 ```
 
-| Field         | Bytes | Description                           |
-|---------------|-------|---------------------------------------|
-| chunk index   | 2     | 0-based, big-endian                   |
-| total chunks  | 2     | total number of chunks, big-endian    |
-| data          | ≤240  | raw JSON bytes (UTF-8)                |
+| Field         | Bytes | Description                                       |
+|---------------|-------|---------------------------------------------------|
+| chunk index   | 3     | 0-based; 7-bit bytes: `(idx>>14)&7F (idx>>7)&7F idx&7F` |
+| total chunks  | 3     | same encoding; supports up to 2 M chunks (≈480 MB)|
+| data          | ≤240  | raw JSON bytes (ASCII, all < 0x80)                |
 
 - Chunk size is 240 bytes max (safe SysEx limit).
 - 2 ms inter-chunk delay to allow the synthesizer to buffer.
@@ -135,25 +136,80 @@ F0 7D 01  03  <chunk_hi> <chunk_lo>  <total_hi> <total_lo>  <data…>  F7
 
 ## 0x10 — SET_MASTER
 
-Update a global synthesis parameter.
+Update a global or engine-level parameter.
 
 ```
 F0 7D 01  10  <param_id>  <v0 v1 v2 v3 v4>  F7
 ```
 
-Uses the same Scalar Param IDs table as SET_NOTE_PARAM.
-Master parameters affect all notes simultaneously (e.g. global `beat_scale`, `noise_level`).
+param_id uses its own table (separate from SET_NOTE_PARAM):
+
+### ISynthCore global params (0x01–0x07)
+
+| id   | key               | Range      | Description                    |
+|------|-------------------|------------|--------------------------------|
+| 0x01 | `beat_scale`      | 0.0–4.0    | Scales all beat_hz values      |
+| 0x02 | `noise_level`     | 0.0–4.0    | Noise amplitude multiplier     |
+| 0x03 | `pan_spread`      | 0.0–π rad  | Within-note string spread      |
+| 0x04 | `stereo_decorr`   | 0.0–2.0    | Schroeder all-pass strength    |
+| 0x05 | `keyboard_spread` | 0.0–π rad  | L–R spread across keyboard     |
+| 0x06 | `eq_strength`     | 0.0–1.0    | Spectral EQ wet/dry blend      |
+| 0x07 | `rng_seed`        | 0–9999     | Base RNG seed (applied at noteOn) |
+
+### CoreEngine mix params (0x10–0x13)
+
+| id   | key           | Range       | Description                   |
+|------|---------------|-------------|-------------------------------|
+| 0x10 | `master_gain` | 0.0–2.0     | Output gain (1.0 = unity)     |
+| 0x11 | `master_pan`  | −1.0–+1.0   | Stereo pan (0 = centre)       |
+| 0x12 | `lfo_speed`   | 0.0–2.0 Hz  | LFO panning rate              |
+| 0x13 | `lfo_depth`   | 0.0–1.0     | LFO panning depth             |
+
+### DspChain params (0x20–0x24) — normalised 0.0–1.0
+
+| id   | key                  | 0.0         | 1.0       |
+|------|----------------------|-------------|-----------|
+| 0x20 | `limiter_threshold`  | −40 dB      | 0 dB      |
+| 0x21 | `limiter_release`    | 10 ms       | 2000 ms   |
+| 0x22 | `limiter_enabled`    | off         | on (≥0.5) |
+| 0x23 | `bbe_definition`     | 0 dB shelf  | +12 dB    |
+| 0x24 | `bbe_bass_boost`     | 0 dB shelf  | +10 dB    |
 
 ---
 
-## 0xF0 / 0xF1 — PING / PONG
+## 0x70 / 0x71 — PING / PONG
 
 ```
-F0 7D 01  F0  F7     # PING (editor → synth)
-F0 7D 01  F1  F7     # PONG (synth → editor)
+F0 7D 01  70  F7     # PING (editor → synth)
+F0 7D 01  71  F7     # PONG (synth → editor)
 ```
 
 Used to verify MIDI connectivity before sending a bank.
+
+---
+
+## 0xF2 — EXPORT_BANK
+
+Ask ICR to serialize its current in-memory bank to a JSON file.
+
+```
+F0 7D 01  F2  <path bytes…>  F7
+              └── ASCII file path on the ICR host machine
+```
+
+| Field | Bytes | Description                                  |
+|-------|-------|----------------------------------------------|
+| path  | 1–240 | Absolute file path, raw ASCII (no 0x80+ bytes) |
+
+- ICR writes a JSON file at `path` in the same format as the soundbank loaded by `SET_BANK`.
+- The file can be pulled back by the editor and compared with the original params JSON to validate the SysEx round-trip.
+- No reply is sent; success/failure is visible in the ICR log.
+
+### Python usage
+
+```python
+bridge.export_bank("C:/tmp/icr-exported.json")
+```
 
 ---
 
@@ -181,45 +237,95 @@ bridge.close()
 
 ---
 
-## C++ receiver skeleton (ICR side)
+## C++ receiver — implemented (ICR side)
+
+The protocol is fully implemented. Entry points:
+
+| File | Symbol | Role |
+|------|--------|------|
+| `engine/midi_input.cpp` | `MidiInput::callback` | Strips F0/F7, calls `handleSysEx`, sends PONG |
+| `engine/core_engine.cpp` | `CoreEngine::handleSysEx` | Dispatch + SET_BANK reassembly |
+| `cores/piano/piano_core.cpp` | `PianoCore::setNoteParam` | Writes one scalar field |
+| `cores/piano/piano_core.cpp` | `PianoCore::setNotePartialParam` | Writes one partial field |
+| `cores/piano/piano_core.cpp` | `PianoCore::loadBankJson` | Full bank swap |
+| `cores/piano/piano_core.cpp` | `PianoCore::exportBankJson` | Serialize bank to JSON file |
+
+### Dispatch (CoreEngine::handleSysEx)
 
 ```cpp
-void ICRSynth::handleSysEx(const uint8_t* data, int len) {
-    // data starts AFTER F0, ends BEFORE F7
-    if (len < 3) return;
-    if (data[0] != 0x7D || data[1] != 0x01) return;  // not ICR
-
+// data: bytes AFTER F0, BEFORE F7
+std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
+    if (len < 3 || data[0] != 0x7D || data[1] != 0x01) return {};
     uint8_t cmd = data[2];
     const uint8_t* payload = data + 3;
     int payloadLen = len - 3;
-
     switch (cmd) {
     case 0x01:  // SET_NOTE_PARAM
-        if (payloadLen < 8) return;
-        handleSetNoteParam(payload);
-        break;
     case 0x02:  // SET_NOTE_PARTIAL
-        if (payloadLen < 9) return;
-        handleSetNotePartial(payload);
-        break;
-    case 0x03:  // SET_BANK
-        handleBankChunk(payload, payloadLen);
-        break;
-    case 0x10:  // SET_MASTER
-        if (payloadLen < 6) return;
-        handleSetMaster(payload);
-        break;
-    case 0xF0:  // PING → reply with PONG
-        sendPong();
-        break;
+    case 0x03:  // SET_BANK (chunk reassembly → loadBankJson when complete)
+    case 0x10:  // SET_MASTER → core->setParam(key, value)
+    case 0x70:  // PING → returns {F0 7D 01 71 F7}
+    case 0x72:  // EXPORT_BANK → core->exportBankJson(path)
     }
+    return {};
 }
+```
 
-float decodeSysExFloat(const uint8_t* b) {
+### Float decoding (core_engine.cpp)
+
+```cpp
+static float decodeSysExFloat(const uint8_t* b) {
     uint32_t bits = 0;
     for (int i = 0; i < 5; ++i)
         bits |= (uint32_t)(b[i] & 0x7F) << ((4 - i) * 7);
-    float v; memcpy(&v, &bits, 4);
+    float v;
+    std::memcpy(&v, &bits, sizeof(v));
     return v;
 }
 ```
+
+### param_id → key mapping (core_engine.cpp)
+
+```cpp
+// Scalar note params (commands 0x01 and 0x10)
+static const char* noteParamKey(uint8_t id) {
+    switch (id) {
+        case 0x01: return "f0_hz";
+        case 0x02: return "B";          // recomputes all partial f_hz = k*f0*sqrt(1+B*k²)
+        case 0x03: return "attack_tau";
+        case 0x04: return "A_noise";
+        case 0x05: return "rms_gain";
+        case 0x06: return "phi_diff";
+        default:   return nullptr;
+    }
+}
+
+// Per-partial params (command 0x02)
+static const char* partialParamKey(uint8_t id) {
+    switch (id) {
+        case 0x10: return "f_hz";
+        case 0x11: return "A0";
+        case 0x12: return "tau1";
+        case 0x13: return "tau2";
+        case 0x14: return "a1";
+        case 0x15: return "beat_hz";
+        case 0x16: return "phi";
+        default:   return nullptr;
+    }
+}
+```
+
+### Notes and limitations
+
+**`B` (inharmonicity, 0x02):** Defined in the protocol but `PianoCore::setNoteParam`
+returns `false` for this key — inharmonicity is baked into partial frequencies at
+export time. To change `B`, re-export the soundbank and push it via `SET_BANK`.
+
+**SET_MASTER param ID ranges:** IDs 0x01–0x07 route to `ISynthCore::setParam`;
+0x10–0x13 write directly to `CoreEngine` atomics; 0x20–0x24 write to `DspChain`
+(normalised 0.0–1.0 → uint8 0–127). On the Python side, use `MASTER_PARAM_IDS`
+dict in `sysex_bridge.py` — `set_master()` raises `ValueError` for unknown keys.
+
+**PONG:** Requires `MidiInput::openOutput(port_index)` to be called after
+`MidiInput::open()`. If no output port is open, PING is processed but PONG is
+dropped. Port index must be selected manually (no auto-pairing with the input port).

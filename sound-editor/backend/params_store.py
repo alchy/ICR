@@ -3,7 +3,7 @@ sound-editor/backend/params_store.py
 ──────────────────────────────────────
 In-memory store for the active params dict.
 
-Loaded from a soundbank JSON (piano-core-v1 format).
+Loaded from a soundbank JSON.
 Provides per-note / per-partial access and layer extraction.
 """
 
@@ -28,7 +28,7 @@ class ParamsStore:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load_file(self, path: str) -> int:
-        """Load a piano-core-v1 JSON. Returns number of notes loaded."""
+        """Load a soundbank JSON. Returns number of notes loaded."""
         p = Path(path)
         with open(p) as f:
             data = json.load(f)
@@ -91,6 +91,14 @@ class ParamsStore:
                 pass
 
         return result
+
+    def missing_notes(self, layer_id: str) -> set[str]:
+        """
+        Return note keys that exist in the store but have no value for layer_id.
+        Works for both scalar and per-partial layers.
+        """
+        existing = set(self.extract_layer(layer_id).keys())
+        return {k for k in self._params if k not in existing}
 
     # ── Layer update ─────────────────────────────────────────────────────────
 

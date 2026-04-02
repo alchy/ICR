@@ -56,6 +56,9 @@ docs/          Documentation
 | `describeParams()` | GUI | Returns slider metadata |
 | `getVizState()` | GUI | Snapshot for visualization panel |
 | `coreName / coreVersion / isLoaded` | any | Metadata |
+| `setNoteParam(midi, vel, key, value)` | MIDI cb | Per-slot scalar update (SysEx 0x01) |
+| `setNotePartialParam(midi, vel, k, key, value)` | MIDI cb | Per-partial update (SysEx 0x02) |
+| `loadBankJson(json_str)` | MIDI cb | Full bank reload (SysEx 0x03) |
 
 ### Registration macro
 
@@ -144,13 +147,22 @@ post:         5-section biquad EQ cascade (independent L/R state)
 GUI thread:   setParam / getParam / describeParams / getVizState
               MIDI callbacks → CoreEngine::pushMidiEvt (ring buffer write)
 
+MIDI cb thread:  CoreEngine::handleSysEx
+                 ├─ SET_NOTE_PARAM / SET_NOTE_PARTIAL → ISynthCore::setNoteParam/setNotePartialParam
+                 │  (individual float writes; safe on x86 per codebase convention)
+                 ├─ SET_BANK → ISynthCore::loadBankJson
+                 │  (parse outside lock; memcpy under bank_mutex_; PianoCore::handleNoteOn
+                 │   uses try_to_lock so the RT thread never blocks on a bank load)
+                 ├─ SET_MASTER → ISynthCore::setParam
+                 └─ PING → MidiInput::sendRaw (PONG via optional RtMidiOut)
+
 RT thread:    CoreEngine audio callback
               ├─ drain MIDI ring → ISynthCore::noteOn/Off/etc.
               ├─ ISynthCore::processBlock
               └─ DspChain (limiter, BBE)
 ```
 
-No locks on the RT path. MIDI ring buffer is sized 1024 events; full buffer
+No locks on the RT path. MIDI ring buffer is sized 256 events; full buffer
 drops incoming events gracefully. FTZ/DAZ denormal flush enabled at startup.
 
 ## DspChain
@@ -162,6 +174,58 @@ Post-processing on the stereo mix:
 - **BBE exciter**: high-frequency harmonic enhancement
 
 Both stages are bypass-able at runtime.
+
+## SysEx — Sound Editor integration
+
+The ICR SysEx protocol (`docs/SYSEX_PROTOCOL.md`) is fully implemented on the
+C++ side. The flow from Sound Editor to synthesis engine:
+
+```
+Sound Editor (Python)
+  └─ sysex_bridge.py  ──MIDI loopback──▶  MidiInput::callback
+                                               │
+                                               ▼
+                                         CoreEngine::handleSysEx
+                                           ├─ 0x01 SET_NOTE_PARAM
+                                           │    └▶ PianoCore::setNoteParam
+                                           ├─ 0x02 SET_NOTE_PARTIAL
+                                           │    └▶ PianoCore::setNotePartialParam
+                                           ├─ 0x03 SET_BANK (chunked)
+                                           │    └▶ PianoCore::loadBankJson
+                                           ├─ 0x10 SET_MASTER
+                                           │    └▶ ISynthCore::setParam
+                                           └─ 0xF0 PING
+                                                └▶ MidiInput::sendRaw (PONG)
+```
+
+### SET_BANK thread safety
+
+`loadBankJson` parses the JSON string without holding any lock (potentially
+several ms for a full soundbank), then performs a brief `memcpy` under
+`bank_mutex_` to swap in the new `note_params_[128][8]`. `handleNoteOn` uses
+`std::unique_lock(bank_mutex_, std::try_to_lock)` — if the lock is busy it
+skips the noteOn rather than blocking the RT audio thread.
+
+### PONG (optional)
+
+To send PONG responses, call `MidiInput::openOutput(port_index)` after
+`MidiInput::open()`. The output port is separate from the input port. If no
+output port is open, PING is processed but PONG is silently dropped.
+
+### SET_MASTER param ranges
+
+| ID range  | Target              | How                                          |
+|-----------|---------------------|----------------------------------------------|
+| 0x01–0x07 | ISynthCore globals  | `core_->setParam(key, value)`                |
+| 0x10–0x13 | CoreEngine mix      | Direct atomic write (`master_gain_`, `pan_l_/r_`, `lfo_*`) |
+| 0x20–0x24 | DspChain            | `dsp_.set*()` via uint8 normalisation        |
+
+### `B` (inharmonicity)
+
+SysEx param ID `0x02` (`B`) in SET_NOTE_PARAM **is runtime-settable**.
+`PianoCore` stores `B` per note (soundbank v2) and `setNoteParam("B", value)`
+immediately recomputes all `f_hz[k] = k · f0 · √(1 + B·k²)` using the stored
+`PianoPartialParam::k` index (correct even for longitudinal partials where k ≠ ki+1).
 
 ## Build targets
 

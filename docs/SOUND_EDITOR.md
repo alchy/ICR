@@ -17,7 +17,7 @@ sound-editor/
 │   ├── spline_engine.py  Weighted smoothing spline (scipy)
 │   ├── sysex_bridge.py   MIDI SysEx output (mido + python-rtmidi)
 │   ├── layer_registry.py Parameter layer definitions
-│   └── requirements.txt
+│   └── eq_editor.py      EQ curve re-fitting (wraps training/_eq_to_biquads)
 └── frontend/             Three.js + Vite  (port 5173)
     ├── index.html        Single-page app + CSS
     └── src/
@@ -28,7 +28,8 @@ sound-editor/
         │   └── SplineMesh.js         Fitted spline (tube geometry)
         ├── editor/
         │   ├── SplineEditor.js       Interaction: pull / anchor / fit
-        │   └── LayerBrowser.js       Left panel layer list
+        │   ├── LayerBrowser.js       Left panel layer list
+        │   └── NoteInspector.js      Per-note B slider + EQ curve editor
         └── comms/
             └── ApiClient.js          Fetch wrapper for backend REST
 ```
@@ -40,8 +41,10 @@ sound-editor/
 ### Backend
 
 ```bash
-cd sound-editor/backend
+# Z rootu projektu (jednorázově):
 pip install -r requirements.txt
+
+cd sound-editor/backend
 uvicorn main:app --reload --port 8000
 ```
 
@@ -93,6 +96,7 @@ A **layer** is one parameter across all (MIDI, velocity) slots.
 | `A_noise`   | Noise Amplitude    | 0 – 2.0         |
 | `attack_tau`| Attack τ           | 0.001 – 0.1     |
 | `rms_gain`  | RMS Gain           | 0 – 0.3         |
+| `phi_diff`  | Phase Diff φ       | 0 – 2π          |
 
 ### Per-partial layers (expanded for k = 1..60)
 
@@ -106,8 +110,9 @@ Each template is instantiated 60 times, giving layer IDs like `tau1_k1`, `tau1_k
 | `tau2`      | τ2[k]        | 0.01 – 30.0   |
 | `a1`        | a1[k]        | 0 – 1.0       |
 | `beat_hz`   | beat[k] Hz   | 0 – 10.0      |
+| `phi`       | φ[k]         | 0 – 2π        |
 
-Total: 5 scalar + 60 × 6 partial = **365 layers**.
+Total: 6 scalar + 60 × 7 partial = **426 layers**.
 
 ---
 
@@ -239,6 +244,39 @@ Fit → Keep → inspect → Unkeep → adjust → Keep → Apply → repeat
 
 ---
 
+## Note Inspector
+
+The **Note Inspector** (right panel) provides direct per-note editing of parameters
+that are baked at export time and need fine-tuning by ear.
+
+### B — inharmonicity
+
+The `B` coefficient controls string stiffness (`f_k = k·f0·√(1 + B·k²)`).
+It is normally fitted from audio during extraction but may be inaccurate.
+
+1. Enter MIDI note (21–108) and velocity (0–7) → **Load**
+2. Drag the **B slider** (0 – 0.005)
+3. Click **Send B via SysEx** → the synth immediately recomputes all `f_hz[k]` for that note
+4. Audition in real time; repeat until correct
+5. Click **Apply EQ** (or use the spline layer `B`) to persist the value
+
+### EQ curve
+
+The EQ curve is the spectral correction fitted from the original recording.
+The canvas shows `spectral_eq` (freq/gain) stored alongside `eq_biquads` in the soundbank.
+
+1. Load a note as above
+2. **Drag points** up/down to adjust gain at specific frequencies (±12 dB)
+3. The curve is log-spaced on X (20 Hz – 22 kHz)
+4. Click **Apply EQ** → backend re-fits 5 biquad sections from the edited curve, updates store
+5. Click **Reset** to undo all canvas edits since last load or Apply
+6. Click **Send bank →** in the MIDI section to push the updated biquads to the synth
+
+> EQ changes require a full bank reload (`/sysex/bank`), not a per-note SysEx —
+> biquad coefficients are not individually addressable via protocol.
+
+---
+
 ## Workflow
 
 1. `python run-editor.py` — starts backend (:8000) + Vite (:5173), opens browser
@@ -249,15 +287,19 @@ Fit → Keep → inspect → Unkeep → adjust → Keep → Apply → repeat
    - Select velocity layers with ①–⑧ circles
    - Adjust Coherence to blend layers together
    - Click spheres to pull; Alt+click to anchor
-6. **Preview on synth:**
+6. **Tune individual notes** (Note Inspector):
+   - Enter MIDI + vel → Load
+   - Drag B slider → Send B via SysEx (live audition)
+   - Drag EQ points → Apply EQ (stores new biquads)
+7. **Preview on synth:**
    - Connect MIDI loopback port (right panel)
    - Click **Send bank →** — SysEx SET_BANK streams to ICR
    - Play — hear changes in real time
-7. **Commit:**
+8. **Commit:**
    - **Keep** → reversible overlay (blue dots visible)
    - **Apply** → bake into baseline (irreversible)
-8. Repeat for other layers
-9. **Save soundbank** — export path in right panel → saved JSON ready for ICR
+9. Repeat for other layers
+10. **Save soundbank** — export path in right panel → saved JSON ready for ICR
 
 ---
 
@@ -303,6 +345,15 @@ Fit → Keep → inspect → Unkeep → adjust → Keep → Apply → repeat
 | GET    | `/soundbank/preview`  | Current soundbank as JSON|
 | POST   | `/soundbank/export`   | Save to file             |
 
+### EQ editor
+
+| Method | Path            | Body / Response                                                  |
+|--------|-----------------|------------------------------------------------------------------|
+| GET    | `/eq/{midi}/{vel}` | Returns `{freqs_hz, gains_db, eq_biquads}` for one note       |
+| POST   | `/eq/{midi}/{vel}` | Body `{freqs_hz, gains_db}` → refits biquads, updates store   |
+
+`POST /eq` does **not** push to the synth automatically — call `/sysex/bank` afterwards.
+
 ### MIDI / SysEx
 
 | Method | Path              | Description                      |
@@ -311,9 +362,10 @@ Fit → Keep → inspect → Unkeep → adjust → Keep → Apply → repeat
 | POST   | `/midi/connect`   | Open a MIDI port                 |
 | DELETE | `/midi/disconnect`| Close current port               |
 | GET    | `/midi/status`    | Connection status                |
-| POST   | `/sysex/note`     | Send SET_NOTE_PARAM              |
+| POST   | `/sysex/note`     | Send SET_NOTE_PARAM (incl. B)    |
 | POST   | `/sysex/partial`  | Send SET_NOTE_PARTIAL            |
 | POST   | `/sysex/bank`     | Send full bank (chunked)         |
+| POST   | `/sysex/master`   | Send SET_MASTER global param     |
 | POST   | `/sysex/ping`     | Send PING                        |
 
 ---

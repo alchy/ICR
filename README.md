@@ -40,14 +40,10 @@ It was fitted from KS Grand recordings and includes per-note spectral EQ.
 pip install -r training/requirements.txt
 
 # Simple (no NN, ~15 min)
-python training/train_pipeline.py simple \
-    --bank "C:/SoundBanks/IthacaPlayer/ks-grand" \
-    --out  soundbanks/params-ks-grand.json
+python run-training.py simple --bank "C:/SoundBanks/IthacaPlayer/ks-grand"
 
 # Full (NN + finetune, ~60 min)
-python training/train_pipeline.py full \
-    --bank "C:/SoundBanks/IthacaPlayer/ks-grand" \
-    --out  soundbanks/params-ks-grand.json
+python run-training.py full --bank "C:/SoundBanks/IthacaPlayer/ks-grand"
 ```
 
 See `docs/TRAIN_BUILD_RUN.md` for the complete guide.

@@ -12,8 +12,9 @@ Commands:
   02  SET_NOTE_PARTIAL  midi vel k param_id value_f32
   03  SET_BANK          <chunked JSON>
   10  SET_MASTER        param_id value_f32
-  F0  PING
-  F1  PONG
+  70  PING
+  71  PONG
+  72  EXPORT_BANK       <ASCII path bytes>
 """
 
 import struct
@@ -36,10 +37,11 @@ CMD_SET_NOTE_PARAM   = 0x01
 CMD_SET_NOTE_PARTIAL = 0x02
 CMD_SET_BANK         = 0x03
 CMD_SET_MASTER       = 0x10
-CMD_PING             = 0xF0
-CMD_PONG             = 0xF1
+CMD_PING             = 0x70
+CMD_PONG             = 0x71
+CMD_EXPORT_BANK      = 0x72
 
-# Scalar param IDs (match PianoCore getParam keys)
+# Scalar param IDs — per-note fields (commands 0x01 SET_NOTE_PARAM)
 PARAM_IDS = {
     "f0_hz":      0x01,
     "B":          0x02,
@@ -47,6 +49,32 @@ PARAM_IDS = {
     "A_noise":    0x04,
     "rms_gain":   0x05,
     "phi_diff":   0x06,
+}
+
+# Master param IDs (command 0x10 SET_MASTER)
+#   0x01–0x07  ISynthCore global params  (physical units matching setParam)
+#   0x10–0x13  CoreEngine mix params     (physical units: gain 0–2, pan -1–+1, Hz, 0–1)
+#   0x20–0x24  DspChain params           (normalised 0.0–1.0)
+MASTER_PARAM_IDS = {
+    # ISynthCore global
+    "beat_scale":        0x01,   # ×  0.0–4.0
+    "noise_level":       0x02,   # ×  0.0–4.0
+    "pan_spread":        0x03,   # rad 0.0–π
+    "stereo_decorr":     0x04,   # ×  0.0–2.0
+    "keyboard_spread":   0x05,   # rad 0.0–π
+    "eq_strength":       0x06,   # ×  0.0–1.0
+    "rng_seed":          0x07,   # int 0–9999
+    # CoreEngine mix
+    "master_gain":       0x10,   # 0.0–2.0
+    "master_pan":        0x11,   # -1.0–+1.0
+    "lfo_speed":         0x12,   # Hz  0.0–2.0
+    "lfo_depth":         0x13,   # 0.0–1.0
+    # DspChain (normalised 0.0–1.0 → uint8 0–127 on synth side)
+    "limiter_threshold": 0x20,   # 0=−40 dB, 1=0 dB
+    "limiter_release":   0x21,   # 0=10 ms, 1=2000 ms
+    "limiter_enabled":   0x22,   # ≥0.5 = on
+    "bbe_definition":    0x23,   # 0=0 dB, 1=12 dB
+    "bbe_bass_boost":    0x24,   # 0=0 dB, 1=10 dB
 }
 
 # Per-partial param IDs
@@ -108,25 +136,42 @@ class SysExBridge:
         self._send(CMD_SET_NOTE_PARTIAL, data)
 
     def set_bank(self, json_bytes: bytes):
-        """Send full soundbank JSON (chunked)."""
+        """Send full soundbank JSON (chunked).
+
+        Header encoding (6 bytes, all 7-bit safe):
+          chunk_idx   as 3 × 7-bit bytes (big-endian, supports up to 2M chunks)
+          total_chunks as 3 × 7-bit bytes
+        """
         chunks = [json_bytes[i:i+CHUNK_SIZE]
                   for i in range(0, len(json_bytes), CHUNK_SIZE)]
         total = len(chunks)
         for idx, chunk in enumerate(chunks):
-            # Header: chunk_index(2), total_chunks(2), data
-            header = struct.pack(">HH", idx, total)
-            self._send(CMD_SET_BANK, list(header) + list(chunk))
+            header = _encode_int21(idx) + _encode_int21(total)
+            self._send(CMD_SET_BANK, header + list(chunk))
             time.sleep(0.002)   # give ICR time to buffer
 
     def set_master(self, param_key: str, value: float):
-        """Update a master parameter (beat_scale, noise_level, etc.)."""
-        param_id = PARAM_IDS.get(param_key, 0xFF)
+        """Update a master/global parameter (beat_scale, master_gain, limiter_threshold, …)."""
+        param_id = MASTER_PARAM_IDS.get(param_key)
+        if param_id is None:
+            raise ValueError(f"Unknown master param key: {param_key!r}. "
+                             f"Valid keys: {list(MASTER_PARAM_IDS)}")
         self._send(CMD_SET_MASTER, [param_id] + _f32_to_sysex_bytes(value))
 
     def ping(self) -> bool:
         """Send PING; returns True if sent (no ACK over SysEx yet)."""
         self._send(CMD_PING, [])
         return True
+
+    def export_bank(self, path: str):
+        """
+        Ask ICR to export its current in-memory bank to *path* (absolute path
+        on the machine running ICR).  ICR writes a JSON file identical in
+        format to the soundbank loaded via set_bank().
+
+        The path is sent as raw ASCII bytes — keep it to ASCII characters only.
+        """
+        self._send(CMD_EXPORT_BANK, list(path.encode("ascii")))
 
     # ── Low-level ─────────────────────────────────────────────────────────────
 
@@ -147,6 +192,11 @@ def list_output_ports() -> list[str]:
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _encode_int21(value: int) -> list[int]:
+    """Encode a non-negative integer as 3 × 7-bit SysEx-safe bytes (big-endian)."""
+    return [(value >> 14) & 0x7F, (value >> 7) & 0x7F, value & 0x7F]
+
 
 def _f32_to_sysex_bytes(value: float) -> list[int]:
     """

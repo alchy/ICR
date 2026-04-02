@@ -1,15 +1,18 @@
 /**
  * src/editor/LayerBrowser.js
  *
+ * Dynamic layer browser — builds tabs and layer rows from /schema endpoint.
+ * Three dimensions, each with its own tab:
+ *   scalar      — one float per (midi, vel)       e.g. f0_hz, B, rms_gain
+ *   per_partial — one float per (midi, vel, k)    e.g. tau1_k3, A0_k1
+ *   eq          — array per (midi, vel)            e.g. gains_db curve
+ *
+ * Schema is re-fetched after every bank load so new/removed keys appear
+ * automatically without any code change.
+ *
  * Each layer row:
- *   [K] label              [●][ ]
- *        └ green = active   dots  splines
- *
- * Header:
- *   [Clear all]  [●]  [⌇]   ← toggle all dots / all splines
- *
- * State per layer: { dotsOn, splinesOn, kept }
- * Default: dotsOn=false, splinesOn=false (nothing shown until user checks)
+ *   [K] label              [●][⌇]
+ *        └ green = kept     dots  splines
  */
 
 export class LayerBrowser {
@@ -22,34 +25,53 @@ export class LayerBrowser {
         this._onSelect        = onSelect;
         this._onToggleDots    = onToggleDots;
         this._onToggleSplines = onToggleSplines;
-        this._groups          = {};
-        this._activeId        = null;
-        this._filterGroup     = "";
-        this._filterK         = 0;
-        this._states          = new Map();   // layerId → {dotsOn, splinesOn, kept}
+
+        // schema: { scalar: [Layer], per_partial: [Layer], eq: [Layer], k_max: int }
+        this._schema     = { scalar: [], per_partial: [], eq: [], k_max: 0 };
+        this._dimension  = "scalar";   // active tab
+        this._filterK    = 0;          // 0 = all partials
+        this._activeId   = null;
+        this._states     = new Map();  // layerId → {dotsOn, splinesOn, kept}
     }
 
+    // ── Public API ────────────────────────────────────────────────────────────
+
     async load(api) {
-        this._groups = await api.getLayers();
+        this._schema = await api.getSchema();
         this._buildKSelect();
         this._render();
     }
 
-    filterGroup(g) { this._filterGroup = g; this._render(); }
-    filterK(k)     { this._filterK = k;     this._render(); }
+    setDimension(dim) {
+        this._dimension = dim;
+        this._filterK   = 0;
+
+        // Update tab button styles
+        document.querySelectorAll(".dim-tab").forEach(btn => {
+            btn.classList.toggle("active-tab", btn.id === `tab-${dim}`);
+        });
+
+        // Show/hide k-filter
+        const ksel = document.getElementById("sel-partial-k");
+        if (ksel) ksel.style.display = (dim === "per_partial") ? "block" : "none";
+
+        this._render();
+    }
+
+    filterK(k) { this._filterK = k; this._render(); }
+
+    // Legacy: called by index.html's old sel-group onchange — no-op now
+    filterGroup(_g) {}
 
     setActive(layerId) {
         this._activeId = layerId;
         document.querySelectorAll(".layer-item").forEach(el => {
-            const isActive = el.dataset.lid === layerId;
-            el.classList.toggle("active", isActive);
+            el.classList.toggle("active", el.dataset.lid === layerId);
         });
     }
 
-    /** Called by SplineEditor to reflect Keep/dots/splines state. */
     setLayerState(layerId, patch) {
-        const s = this._getState(layerId);
-        Object.assign(s, patch);
+        Object.assign(this._getState(layerId), patch);
         this._updateRow(layerId);
     }
 
@@ -65,23 +87,34 @@ export class LayerBrowser {
 
     _buildKSelect() {
         const sel = document.getElementById("sel-partial-k");
+        if (!sel) return;
         sel.innerHTML = '<option value="0">All partials</option>';
-        let maxK = 0;
-        for (const layers of Object.values(this._groups))
-            for (const l of layers)
-                if (l.partial_k && l.partial_k > maxK) maxK = l.partial_k;
-        for (let k = 1; k <= maxK; k++) {
+        const kMax = this._schema.k_max || 0;
+        for (let k = 1; k <= kMax; k++) {
             const opt = document.createElement("option");
-            opt.value = k; opt.textContent = `Partial k=${k}`;
+            opt.value = k; opt.textContent = `k = ${k}`;
             sel.appendChild(opt);
         }
+        sel.style.display = (this._dimension === "per_partial") ? "block" : "none";
+    }
+
+    _layersForDim() {
+        return this._schema[this._dimension] || [];
+    }
+
+    /** All layer IDs that have splines (scalar + per_partial, not eq). */
+    allLayerIds() {
+        return [
+            ...(this._schema.scalar      ?? []),
+            ...(this._schema.per_partial ?? []),
+        ].map(l => l.id);
     }
 
     _render() {
         const list = document.getElementById("layer-list");
         list.innerHTML = "";
 
-        // ── Header row ────────────────────────────────────────────────────────
+        // ── Header ────────────────────────────────────────────────────────────
         const hdr = document.createElement("div");
         hdr.style.cssText =
             "display:flex;align-items:center;justify-content:space-between;" +
@@ -100,29 +133,48 @@ export class LayerBrowser {
         list.appendChild(hdr);
 
         // ── Layer rows ────────────────────────────────────────────────────────
-        for (const [group, layers] of Object.entries(this._groups)) {
-            if (this._filterGroup && group !== this._filterGroup) continue;
+        const layers = this._layersForDim();
+
+        if (layers.length === 0) {
+            const empty = document.createElement("div");
+            empty.style.cssText = "font-size:10px;color:#446;padding:8px 4px;";
+            empty.textContent   = this._schema.k_max === 0
+                ? "Load a soundbank to see layers."
+                : `No ${this._dimension} layers found.`;
+            list.appendChild(empty);
+            return;
+        }
+
+        // Group by first token of id (e.g. "tau1" from "tau1_k3") for per_partial,
+        // or by key name for scalar — gives visual sub-grouping within the tab.
+        const grouped = _groupLayers(layers, this._dimension);
+
+        for (const [groupName, groupLayers] of Object.entries(grouped)) {
+            // Skip filtered k for per_partial
+            const visible = (this._dimension === "per_partial" && this._filterK > 0)
+                ? groupLayers.filter(l => l.partial_k === this._filterK)
+                : groupLayers;
+            if (visible.length === 0) continue;
 
             const heading = document.createElement("div");
             heading.style.cssText =
                 "font-size:10px;color:#446;text-transform:uppercase;" +
                 "letter-spacing:.1em;padding:4px 0 2px;";
-            heading.textContent = group;
+            heading.textContent = groupName;
             list.appendChild(heading);
 
-            for (const layer of layers) {
-                if (this._filterK && layer.partial_k !== this._filterK) continue;
+            for (const layer of visible) {
                 list.appendChild(this._makeRow(layer));
             }
         }
     }
 
     _makeRow(layer) {
-        const state   = this._getState(layer.id);
+        const state    = this._getState(layer.id);
         const isActive = layer.id === this._activeId;
 
         const row = document.createElement("div");
-        row.className  = "layer-item" + (isActive ? " active" : "");
+        row.className   = "layer-item" + (isActive ? " active" : "");
         row.dataset.lid = layer.id;
         row.style.cssText =
             `display:flex;align-items:center;justify-content:space-between;` +
@@ -147,29 +199,40 @@ export class LayerBrowser {
             "white-space:nowrap;font-size:11px;";
         label.onclick = () => { this._onSelect(layer.id, layer); this.setActive(layer.id); };
 
-        // Checkboxes
+        // Toggle buttons (dots + splines) — EQ tab gets info button instead
         const checks = document.createElement("span");
         checks.style.cssText = "display:flex;gap:3px;flex-shrink:0;margin-left:4px;";
 
-        const cbDots    = _makeCheckbox("●", state.dotsOn,    "#4af",  "Show data points");
-        const cbSplines = _makeCheckbox("⌇", state.splinesOn, "#fa8",  "Show spline tubes");
+        if (this._dimension === "eq") {
+            const btn = document.createElement("button");
+            btn.textContent = "edit";
+            btn.title       = "Open EQ editor for selected note";
+            btn.style.cssText =
+                "font-size:9px;padding:1px 5px;border-radius:3px;cursor:pointer;" +
+                "border:1px solid #446;color:#88a;background:transparent;";
+            btn.onclick = (e) => { e.stopPropagation(); this._onSelect(layer.id, layer); };
+            checks.appendChild(btn);
+        } else {
+            const cbDots    = _makeCheckbox("●", state.dotsOn,    "#4af", "Show data points");
+            const cbSplines = _makeCheckbox("⌇", state.splinesOn, "#fa8", "Show spline tubes");
 
-        cbDots.onclick = (e) => {
-            e.stopPropagation();
-            const s = this._getState(layer.id);
-            s.dotsOn = !s.dotsOn;
-            _setCheckboxActive(cbDots, s.dotsOn, "#4af");
-            this._onToggleDots?.(layer.id, s.dotsOn);
-        };
-        cbSplines.onclick = (e) => {
-            e.stopPropagation();
-            const s = this._getState(layer.id);
-            s.splinesOn = !s.splinesOn;
-            _setCheckboxActive(cbSplines, s.splinesOn, "#fa8");
-            this._onToggleSplines?.(layer.id, s.splinesOn);
-        };
+            cbDots.onclick = (e) => {
+                e.stopPropagation();
+                const s = this._getState(layer.id);
+                s.dotsOn = !s.dotsOn;
+                _setCheckboxActive(cbDots, s.dotsOn, "#4af");
+                this._onToggleDots?.(layer.id, s.dotsOn);
+            };
+            cbSplines.onclick = (e) => {
+                e.stopPropagation();
+                const s = this._getState(layer.id);
+                s.splinesOn = !s.splinesOn;
+                _setCheckboxActive(cbSplines, s.splinesOn, "#fa8");
+                this._onToggleSplines?.(layer.id, s.splinesOn);
+            };
+            checks.append(cbDots, cbSplines);
+        }
 
-        checks.append(cbDots, cbSplines);
         row.append(kbadge, label, checks);
         return row;
     }
@@ -182,7 +245,6 @@ export class LayerBrowser {
         const keep = row.querySelector("[data-badge=keep]");
         if (keep) _styleBadge(keep, state.kept, "#4a8a4a");
 
-        // Update checkbox visuals
         const [cbDots, cbSplines] = row.querySelectorAll(".layer-cb");
         if (cbDots)    _setCheckboxActive(cbDots,    state.dotsOn,    "#4af");
         if (cbSplines) _setCheckboxActive(cbSplines, state.splinesOn, "#fa8");
@@ -198,6 +260,26 @@ export class LayerBrowser {
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
+
+/**
+ * Group layers for display within a tab.
+ * scalar/eq:      group by key name (each key = its own group header)
+ * per_partial:    group by param name (e.g. all tau1_kN under "tau1")
+ */
+function _groupLayers(layers, dimension) {
+    const groups = {};
+    for (const layer of layers) {
+        let groupName;
+        if (dimension === "per_partial") {
+            // "tau1_k3" → "tau1",  "beat_hz_k1" → "beat_hz"
+            groupName = layer.id.replace(/_k\d+$/, "");
+        } else {
+            groupName = layer.id;
+        }
+        (groups[groupName] ??= []).push(layer);
+    }
+    return groups;
+}
 
 function _makeCheckbox(symbol, active, activeColor, title) {
     const el = document.createElement("button");

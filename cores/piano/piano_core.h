@@ -30,6 +30,7 @@
 #include <atomic>
 #include <cstdint>
 #include <cmath>
+#include <mutex>
 #include <random>
 #include <vector>
 #include <unordered_map>
@@ -52,6 +53,7 @@ struct PianoBiquadCoeffs {
 };
 
 struct PianoPartialParam {
+    int   k        = 0;     // partial index, 1-based; used for B recomputation
     float f_hz     = 0.f;
     float A0       = 0.f;
     float tau1     = 0.f;
@@ -69,6 +71,7 @@ struct PianoNoteParam {
     float A_noise    = 0.04f;
     float rms_gain   = 1.f;
     float f0_hz      = 440.f;
+    float B          = 0.f;   // inharmonicity; kept so setNoteParam("B") can recompute f_hz[k]
     // Spectral EQ: min-phase IIR fitted from soundbank spectral_eq curve
     int              n_biquad = 0;
     PianoBiquadCoeffs eq[PIANO_N_BIQUAD];
@@ -167,6 +170,13 @@ public:
     bool getParam(const std::string& key, float& out) const override;
     std::vector<CoreParamDesc> describeParams()        const override;
 
+    bool setNoteParam(int midi, int vel,
+                      const std::string& key, float value)          override;
+    bool setNotePartialParam(int midi, int vel, int k,
+                             const std::string& key, float value)   override;
+    bool loadBankJson(const std::string& json_str)                  override;
+    bool exportBankJson(const std::string& path)                    override;
+
     CoreVizState getVizState() const override;
 
     std::string coreName()    const override { return "PianoCore"; }
@@ -200,6 +210,10 @@ private:
     // Last note info for GUI viz
     std::atomic<int>   last_midi_   {-1};
     std::atomic<int>   last_vel_    {0};
+
+    // Protects note_params_ during full bank reload (loadBankJson).
+    // MIDI callbacks are sequential so only needed vs the RT thread's handleNoteOn.
+    mutable std::mutex bank_mutex_;
 
     // Helpers
     void handleNoteOn (uint8_t midi, uint8_t vel) noexcept;

@@ -26,10 +26,17 @@
 
 #include <cstring>
 #include <cmath>
+#include <cstdio>
 #include <stdexcept>
 #include <algorithm>
 #include <memory>
 #include <fstream>
+#include <chrono>
+#ifdef _WIN32
+#  include <direct.h>   // _mkdir
+#else
+#  include <sys/stat.h> // mkdir
+#endif
 
 #ifdef _WIN32
   #include <conio.h>
@@ -328,6 +335,373 @@ void CoreEngine::setBBEBassBoost    (uint8_t v) noexcept { dsp_.setBBEBassBoost(
 int CoreEngine::activeVoices() const {
     if (!core_) return 0;
     return core_->getVizState().active_voice_count;
+}
+
+// ── SysEx handling (MIDI callback thread) ────────────────────────────────────
+
+static float decodeSysExFloat(const uint8_t* b) {
+    uint32_t bits = 0;
+    for (int i = 0; i < 5; ++i)
+        bits |= (uint32_t)(b[i] & 0x7F) << ((4 - i) * 7);
+    float v;
+    std::memcpy(&v, &bits, sizeof(v));
+    return v;
+}
+
+static const char* noteParamKey(uint8_t id) {
+    switch (id) {
+        case 0x01: return "f0_hz";
+        case 0x02: return "B";          // recomputes all partial f_hz = k*f0*sqrt(1+B*k²)
+        case 0x03: return "attack_tau";
+        case 0x04: return "A_noise";
+        case 0x05: return "rms_gain";
+        case 0x06: return "phi_diff";
+        default:   return nullptr;
+    }
+}
+
+static const char* partialParamKey(uint8_t id) {
+    switch (id) {
+        case 0x10: return "f_hz";
+        case 0x11: return "A0";
+        case 0x12: return "tau1";
+        case 0x13: return "tau2";
+        case 0x14: return "a1";
+        case 0x15: return "beat_hz";
+        case 0x16: return "phi";
+        default:   return nullptr;
+    }
+}
+
+// Master param IDs — ISynthCore global keys (0x01–0x07).
+// CoreEngine and DspChain params (0x10+, 0x20+) are handled inline in SET_MASTER.
+static const char* masterCoreParamKey(uint8_t id) {
+    switch (id) {
+        case 0x01: return "beat_scale";
+        case 0x02: return "noise_level";
+        case 0x03: return "pan_spread";
+        case 0x04: return "stereo_decorr";
+        case 0x05: return "keyboard_spread";
+        case 0x06: return "eq_strength";
+        case 0x07: return "rng_seed";
+        default:   return nullptr;
+    }
+}
+
+std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
+    // data is AFTER F0, BEFORE F7
+    if (len < 3) return {};
+    if (data[0] != 0x7D || data[1] != 0x01) return {};  // not ICR SysEx
+
+    uint8_t        cmd        = data[2];
+    const uint8_t* payload    = data + 3;
+    int            payloadLen = len - 3;
+
+    switch (cmd) {
+
+    case 0x01: {  // SET_NOTE_PARAM — midi vel param_id value(5)
+        if (payloadLen < 8 || !core_) break;
+        int         midi  = payload[0];
+        int         vel   = payload[1];
+        uint8_t     pid   = payload[2];
+        float       value = decodeSysExFloat(payload + 3);
+        const char* key   = noteParamKey(pid);
+        if (key) core_->setNoteParam(midi, vel, key, value);
+        break;
+    }
+
+    case 0x02: {  // SET_NOTE_PARTIAL — midi vel k param_id value(5)
+        if (payloadLen < 9 || !core_) break;
+        int         midi  = payload[0];
+        int         vel   = payload[1];
+        int         k     = payload[2];
+        uint8_t     pid   = payload[3];
+        float       value = decodeSysExFloat(payload + 4);
+        const char* key   = partialParamKey(pid);
+        if (key) core_->setNotePartialParam(midi, vel, k, key, value);
+        break;
+    }
+
+    case 0x03: {  // SET_BANK — 3-byte 7-bit chunk_idx + 3-byte 7-bit total_chunks + data
+        if (payloadLen < 6 || !core_) break;
+        int chunk_idx    = ((int)payload[0] << 14) | ((int)payload[1] << 7) | payload[2];
+        int total_chunks = ((int)payload[3] << 14) | ((int)payload[4] << 7) | payload[5];
+        const uint8_t* chunk_data = payload + 6;
+        int chunk_len = payloadLen - 6;
+
+        if (chunk_idx == 0) {
+            bank_chunk_buf_.clear();
+            bank_chunk_buf_.reserve((size_t)total_chunks * 240);
+            bank_chunk_total_ = total_chunks;
+            bank_chunk_recv_  = 0;
+        }
+        bank_chunk_buf_.append(reinterpret_cast<const char*>(chunk_data),
+                               (size_t)chunk_len);
+        ++bank_chunk_recv_;
+
+        if (bank_chunk_recv_ >= bank_chunk_total_) {
+            if (core_->loadBankJson(bank_chunk_buf_))
+                logger_.log("CoreEngine", LogSeverity::Info,
+                            "SET_BANK: bank applied ("
+                            + std::to_string(bank_chunk_buf_.size()) + " bytes)");
+            else
+                logger_.log("CoreEngine", LogSeverity::Warning,
+                            "SET_BANK: loadBankJson failed");
+            bank_chunk_buf_.clear();
+            bank_chunk_total_ = 0;
+            bank_chunk_recv_  = 0;
+        }
+        break;
+    }
+
+    case 0x10: {  // SET_MASTER — param_id value(5)
+        if (payloadLen < 6) break;
+        uint8_t pid   = payload[0];
+        float   value = decodeSysExFloat(payload + 1);
+
+        if (pid <= 0x07) {
+            // ISynthCore global params (beat_scale, noise_level, …)
+            const char* key = masterCoreParamKey(pid);
+            if (key && core_) core_->setParam(key, value);
+
+        } else if (pid >= 0x10 && pid <= 0x13) {
+            // CoreEngine mix params — write directly to atomics
+            switch (pid) {
+            case 0x10:  // master_gain  0.0–2.0
+                master_gain_.store((std::max)(0.f, (std::min)(2.f, value)),
+                                   std::memory_order_relaxed);
+                break;
+            case 0x11: {  // master_pan  -1.0–+1.0
+                float n = (std::max)(-1.f, (std::min)(1.f, value));
+                if (n <= 0.f) { pan_l_.store(1.f);       pan_r_.store(1.f + n); }
+                else          { pan_l_.store(1.f - n);   pan_r_.store(1.f);     }
+                break;
+            }
+            case 0x12:  // lfo_speed  Hz  0.0–2.0
+                lfo_speed_.store((std::max)(0.f, (std::min)(2.f, value)),
+                                 std::memory_order_relaxed);
+                break;
+            case 0x13:  // lfo_depth  0.0–1.0
+                lfo_depth_.store((std::max)(0.f, (std::min)(1.f, value)),
+                                 std::memory_order_relaxed);
+                break;
+            }
+
+        } else if (pid >= 0x20 && pid <= 0x24) {
+            // DspChain params — normalize float 0.0–1.0 → uint8 0–127
+            auto u = (uint8_t)((std::max)(0.f, (std::min)(1.f, value)) * 127.f);
+            switch (pid) {
+            case 0x20: dsp_.setLimiterThreshold(u); break;
+            case 0x21: dsp_.setLimiterRelease(u);   break;
+            case 0x22: dsp_.setLimiterEnabled(u);   break;
+            case 0x23: dsp_.setBBEDefinition(u);    break;
+            case 0x24: dsp_.setBBEBassBoost(u);     break;
+            }
+        }
+        break;
+    }
+
+    case 0x70:  // PING → reply with PONG
+        return { 0xF0, 0x7D, 0x01, 0x71, 0xF7 };
+
+    case 0x72: {  // EXPORT_BANK — path as ASCII bytes in payload
+        if (payloadLen < 1 || !core_) break;
+        std::string export_path(reinterpret_cast<const char*>(payload),
+                                (size_t)payloadLen);
+        if (core_->exportBankJson(export_path))
+            logger_.log("CoreEngine", LogSeverity::Info,
+                        "EXPORT_BANK: wrote " + export_path);
+        else
+            logger_.log("CoreEngine", LogSeverity::Warning,
+                        "EXPORT_BANK: failed to write " + export_path);
+        break;
+    }
+
+    default:
+        logger_.log("CoreEngine", LogSeverity::Info,
+                    "SysEx: unknown cmd 0x"
+                    + std::to_string((int)cmd));
+        break;
+    }
+    return {};
+}
+
+// ── Offline batch render ──────────────────────────────────────────────────────
+
+// Minimal mono int16 WAV writer — no external dependencies.
+static bool _writeWavMono16(const std::string& path,
+                             const std::vector<float>& samples,
+                             int sr)
+{
+    uint32_t n         = (uint32_t)samples.size();
+    uint32_t data_size = n * 2u;
+    uint32_t riff_size = 36u + data_size;
+    uint32_t byte_rate = (uint32_t)sr * 2u;
+    uint16_t block_al  = 2u;
+    uint16_t bits      = 16u;
+    uint16_t channels  = 1u;
+    uint16_t fmt_type  = 1u;   // PCM
+    uint32_t fmt_size  = 16u;
+    uint32_t sr_u      = (uint32_t)sr;
+
+    std::FILE* f = std::fopen(path.c_str(), "wb");
+    if (!f) return false;
+
+    // RIFF / WAVE header
+    std::fwrite("RIFF",    1, 4, f);
+    std::fwrite(&riff_size, 4, 1, f);
+    std::fwrite("WAVE",    1, 4, f);
+    // fmt chunk
+    std::fwrite("fmt ",    1, 4, f);
+    std::fwrite(&fmt_size,  4, 1, f);
+    std::fwrite(&fmt_type,  2, 1, f);
+    std::fwrite(&channels,  2, 1, f);
+    std::fwrite(&sr_u,      4, 1, f);
+    std::fwrite(&byte_rate, 4, 1, f);
+    std::fwrite(&block_al,  2, 1, f);
+    std::fwrite(&bits,      2, 1, f);
+    // data chunk
+    std::fwrite("data",    1, 4, f);
+    std::fwrite(&data_size, 4, 1, f);
+    // PCM samples — clamp and convert float → int16
+    for (float s : samples) {
+        float clamped = s > 1.f ? 1.f : (s < -1.f ? -1.f : s);
+        int16_t v = static_cast<int16_t>(clamped * 32767.f);
+        std::fwrite(&v, 2, 1, f);
+    }
+    std::fclose(f);
+    return true;
+}
+
+// Map vel_idx 0-7 → MIDI velocity midpoint of that layer.
+// midiVelToIdx(v) = min(7, (v-1)/16)  →  inverse midpoint = 9 + idx*16
+static inline uint8_t _velIdxToMidi(int vel_idx) {
+    return static_cast<uint8_t>(9 + (std::min)(7, (std::max)(0, vel_idx)) * 16);
+}
+
+// Cross-platform mkdir (single level)
+static void _mkdirP(const std::string& dir) {
+#ifdef _WIN32
+    ::_mkdir(dir.c_str());
+#else
+    ::mkdir(dir.c_str(), 0755);
+#endif
+}
+
+int CoreEngine::renderBatch(const std::string& batch_json_path,
+                             const std::string& out_dir,
+                             int sr)
+{
+    if (!core_ || !core_->isLoaded()) {
+        logger_.log("ICR", LogSeverity::Error, "renderBatch: core not loaded");
+        return 0;
+    }
+
+    // ── Parse batch JSON ──────────────────────────────────────────────────────
+    nlohmann::json batch;
+    {
+        std::ifstream f(batch_json_path);
+        if (!f.is_open()) {
+            logger_.log("ICR", LogSeverity::Error,
+                        "renderBatch: cannot open " + batch_json_path);
+            return 0;
+        }
+        try { f >> batch; }
+        catch (const std::exception& e) {
+            logger_.log("ICR", LogSeverity::Error,
+                        std::string("renderBatch: JSON parse error: ") + e.what());
+            return 0;
+        }
+    }
+    if (!batch.is_array() || batch.empty()) {
+        logger_.log("ICR", LogSeverity::Error, "renderBatch: batch JSON must be a non-empty array");
+        return 0;
+    }
+
+    _mkdirP(out_dir);
+
+    const int    BLOCK    = 1024;
+    const float  TAIL_S   = 0.5f;
+    const int    total    = (int)batch.size();
+
+    // Set SR on core (only if different from default — avoids needless recompute)
+    sample_rate_ = sr;
+    core_->setSampleRate((float)sr);
+
+    std::vector<float> buf_l(BLOCK), buf_r(BLOCK);
+
+    logger_.log("ICR", LogSeverity::Info,
+                "Render batch: " + std::to_string(total)
+                + " notes -> " + out_dir);
+
+    int rendered = 0;
+    auto t_start = std::chrono::steady_clock::now();
+
+    for (int ni = 0; ni < total; ++ni) {
+        const auto& entry = batch[ni];
+        int   midi       = entry.value("midi",       60);
+        int   vel_idx    = entry.value("vel_idx",     3);
+        float duration_s = entry.value("duration_s", 3.0f);
+
+        uint8_t midi_u = static_cast<uint8_t>((std::max)(0, (std::min)(127, midi)));
+        uint8_t vel_u  = _velIdxToMidi(vel_idx);
+
+        int sustain_samples = static_cast<int>(duration_s * (float)sr);
+        int tail_samples    = static_cast<int>(TAIL_S * (float)sr);
+        int total_samples   = sustain_samples + tail_samples;
+
+        std::vector<float> mono;
+        mono.reserve((size_t)total_samples);
+
+        core_->allNotesOff();
+        core_->noteOn(midi_u, vel_u);
+
+        // Render sustain
+        for (int s = 0; s < sustain_samples; ) {
+            int n = (std::min)(BLOCK, sustain_samples - s);
+            std::fill(buf_l.begin(), buf_l.begin() + n, 0.f);
+            std::fill(buf_r.begin(), buf_r.begin() + n, 0.f);
+            core_->processBlock(buf_l.data(), buf_r.data(), n);
+            for (int j = 0; j < n; j++)
+                mono.push_back((buf_l[j] + buf_r[j]) * 0.5f);
+            s += n;
+        }
+
+        core_->noteOff(midi_u);
+
+        // Render release tail
+        for (int s = 0; s < tail_samples; ) {
+            int n = (std::min)(BLOCK, tail_samples - s);
+            std::fill(buf_l.begin(), buf_l.begin() + n, 0.f);
+            std::fill(buf_r.begin(), buf_r.begin() + n, 0.f);
+            core_->processBlock(buf_l.data(), buf_r.data(), n);
+            for (int j = 0; j < n; j++)
+                mono.push_back((buf_l[j] + buf_r[j]) * 0.5f);
+            s += n;
+        }
+
+        // Build output filename: m060_vel3.wav
+        char fname[32];
+        std::snprintf(fname, sizeof(fname), "m%03d_vel%d.wav", midi, vel_idx);
+        std::string out_path = out_dir + "/" + fname;
+
+        if (_writeWavMono16(out_path, mono, sr)) {
+            rendered++;
+            logger_.log("ICR", LogSeverity::Info,
+                        "  Rendered " + std::string(fname)
+                        + "  (" + std::to_string(ni + 1) + "/" + std::to_string(total) + ")");
+        } else {
+            logger_.log("ICR", LogSeverity::Warning,
+                        "  Failed to write " + out_path);
+        }
+    }
+
+    auto t_end = std::chrono::steady_clock::now();
+    float elapsed = std::chrono::duration<float>(t_end - t_start).count();
+    logger_.log("ICR", LogSeverity::Info,
+                "Render done: " + std::to_string(rendered) + "/" + std::to_string(total)
+                + " notes in " + std::to_string((int)(elapsed * 10) / 10.f) + "s");
+    return rendered;
 }
 
 // ── runCoreEngine — interactive loop ─────────────────────────────────────────

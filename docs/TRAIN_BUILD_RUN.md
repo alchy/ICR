@@ -22,21 +22,37 @@ Průvodce od WAV banky po zvuk ze syntetizátoru.
 ### Python
 
 ```bash
-pip install -r training/requirements.txt
+# Simple pipeline (bez NN) — minimální install:
+pip install numpy scipy soundfile
+
+# Full pipeline (NN trénink) — přidej torch:
+pip install torch
+
+# Nebo vše najednou (z rootu projektu):
+pip install -r requirements.txt
 ```
 
-Hlavní závislosti: `torch`, `numpy`, `scipy >= 1.10`, `soundfile`.
+| Balíček | Simple | Full |
+|---------|--------|------|
+| `numpy` | ✓ | ✓ |
+| `scipy` | ✓ | ✓ |
+| `soundfile` | ✓ | ✓ |
+| `torch` | — | ✓ |
+| `matplotlib` | — | volitelný |
 
 ### WAV banka
 
-Soubory pojmenované `m{midi:03d}-vel{vel}-f44.wav` (vel = 0–7, MIDI 21–108).
+Soubory pojmenované `m{midi:03d}-vel{vel}-f{sr}.wav` (vel = 0–7, MIDI 21–108).
+Pipeline preferuje 48 kHz varianty (`f48`), automaticky fallbackuje na `f44`.
 
 ```
-m021-vel0-f44.wav   ← MIDI 21, velocity band 0
-m021-vel1-f44.wav
+m021-vel0-f48.wav   ← MIDI 21, velocity band 0, 48 kHz (preferováno)
+m021-vel0-f44.wav   ← alternativa 44,1 kHz (fallback)
 ...
-m108-vel7-f44.wav
+m108-vel7-f48.wav
 ```
+
+Monofonní soubory jsou plně podporovány — pipeline je interně rozšíří na stereo.
 
 ---
 
@@ -77,35 +93,40 @@ soundbanka je hybrid: reálná data kde existují, NN predikce pro zbytek.
 ### Simple pipeline
 
 ```bash
-python training/train_pipeline.py simple \
-    --bank  "C:/SoundBanks/IthacaPlayer/ks-grand" \
-    --out   soundbanks/params-ks-grand.json
+python run-training.py simple \
+    --bank "C:/SoundBanks/IthacaPlayer/vv-rhodes"
+# → soundbanks/params-vv-rhodes-simple.json
 ```
 
-Volitelné přepínače:
+Výstupní cesta se odvodí automaticky z názvu banky a typu pipeline.
+Lze přepsat pomocí `--out`.
 
 | Přepínač | Výchozí | Popis |
 |----------|---------|-------|
+| `--bank PATH` | povinný | Adresář s WAV soubory |
+| `--out PATH` | auto | Výstupní JSON (default: `soundbanks/params-{bank}-simple.json`) |
 | `--workers N` | CPU count | Paralelní workery (extrakce + EQ) |
 | `--skip-eq` | — | Přeskočit spektrální EQ (rychlejší, bez body resonance) |
+| `--skip-outliers-detection` | — | Přeskočit detekci outlierů |
+| `--sr-tag TAG` | `f48` | Preferovaný SR suffix v názvech souborů (`f48` nebo `f44`) |
 
 ### Full pipeline
 
 ```bash
-python training/train_pipeline.py full \
-    --bank      "C:/SoundBanks/IthacaPlayer/ks-grand" \
-    --out       soundbanks/params-ks-grand.json \
-    --epochs    1800 \
-    --ft-epochs 200
+python run-training.py full \
+    --bank "C:/SoundBanks/IthacaPlayer/vv-rhodes"
+# → soundbanks/params-vv-rhodes-full.json
 ```
-
-Volitelné přepínače:
 
 | Přepínač | Výchozí | Popis |
 |----------|---------|-------|
+| `--bank PATH` | povinný | Adresář s WAV soubory |
+| `--out PATH` | auto | Výstupní JSON (default: `soundbanks/params-{bank}-full.json`) |
 | `--workers N` | CPU count | Paralelní workery |
-| `--epochs N` | 1800 | NN trénink epoch |
+| `--epochs N` | 3000 | NN trénink epoch |
 | `--ft-epochs N` | 200 | MRSTFT fine-tuning epoch |
+| `--skip-outliers-detection` | — | Přeskočit detekci outlierů |
+| `--sr-tag TAG` | `f48` | Preferovaný SR suffix (`f48` nebo `f44`) |
 
 ### Spuštění po tréninku
 
@@ -117,62 +138,52 @@ build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-ks-gran
 
 ## 4. Generování sample banky
 
-`generate.py` renderuje WAV soubory ze soundbanky nebo naučeného modelu.
+`run-generate.py` renderuje WAV soubory ze soundbanky nebo naučeného modelu.
 Hodí se pro poslech parametrické varianty, augmentaci dat nebo export
-nástrojové banky.
+nástrojové banky. Výstup jde do `generated/{banka}/`, existující soubory jsou přepsány.
 
 ### Celá banka z modelu (NN predikce)
 
 ```bash
-python training/generate.py \
-    --source  training/profile-ks-grand.pt \
-    --out-dir generated/ks-grand/
+python run-generate.py --source training/profile-ks-grand.pt --full-bank
+# → generated/profile-ks-grand/
 ```
-
-Vygeneruje `m021-vel0-f44.wav` … `m108-vel7-f44.wav` (704 souborů).
 
 ### Celá banka ze soundbank JSON (reálná fyzika)
 
 ```bash
-python training/generate.py \
-    --source  soundbanks/params-ks-grand.json \
-    --out-dir generated/ks-grand-raw/
+python run-generate.py --source soundbanks/params-ks-grand-simple.json --full-bank
+# → generated/ks-grand/
 ```
 
 ### Jednotlivá nota
 
 ```bash
-python training/generate.py \
-    --source     soundbanks/params-ks-grand.json \
-    --out-dir    generated/single/ \
-    --midi-range 60-60 \
-    --vel-count  1
+python run-generate.py --source soundbanks/params-ks-grand-simple.json \
+    --midi-note 60 --velocity 3
 ```
 
 ### Rozsah not s vlastní parametrizací syntézy
 
 ```bash
-python training/generate.py \
-    --source       training/profile-ks-grand.pt \
-    --out-dir      generated/bright/ \
-    --midi-range   48-72 \
-    --vel-count    4 \
-    --beat-scale   2.0 \
-    --noise-level  0.5 \
-    --eq-strength  0.8 \
-    --duration     4.0
+python run-generate.py --source soundbanks/params-ks-grand-simple.json \
+    --midi-range 48-72 --vel-count 4 \
+    --beat-scale 2.0 --noise-level 0.5 --eq-strength 0.8 --duration 4.0
 ```
 
-### Všechny přepínače generate.py
+### Všechny přepínače run-generate.py
 
 | Přepínač | Výchozí | Popis |
 |----------|---------|-------|
 | `--source` | povinný | Cesta k `.pt` modelu nebo params `.json` |
-| `--out-dir` | povinný | Výstupní adresář pro WAV soubory |
-| `--midi-range` | `21-108` | Rozsah MIDI not (včetně), formát `lo-hi` |
-| `--vel-count` | `8` | Počet velocity bands (1–8) |
+| `--out-dir` | auto | Výstupní adresář (default: `generated/{banka}/`) |
+| `--full-bank` | — | Celá banka: MIDI 21–108, všechny velocity vrstvy |
+| `--midi-note N` | — | Jednotlivá nota (vyžaduje `--velocity`) |
+| `--midi-range LO-HI` | — | Rozsah not, např. `48-72` |
+| `--vel-count` | `8` | Počet velocity bands |
+| `--velocity` | — | Velocity index 0–7 (pro `--midi-note`) |
+| `--freq` | `48` | Sample rate: `44` = 44100 Hz, `48` = 48000 Hz |
 | `--duration` | `3.0` | Délka každého WAV v sekundách |
-| `--sr` | `44100` | Sample rate |
 | `--beat-scale` | `1.0` | Škálování beat_hz (1.0 = dle banky) |
 | `--noise-level` | `1.0` | Škálování amplitudy šumu |
 | `--eq-strength` | `1.0` | Blend spektrálního EQ (0 = bypass) |
@@ -202,7 +213,6 @@ Soundbanka je JSON soubor kompatibilní s `PianoCore::load()`:
 
 ```json
 {
-  "format":     "piano-core-v1",
   "sr":         44100,
   "target_rms": 0.06,
   "vel_gamma":  0.7,
@@ -213,18 +223,24 @@ Soundbanka je JSON soubor kompatibilní s `PianoCore::load()`:
       "midi":       60,
       "vel":        3,
       "f0_hz":      261.63,
+      "B":          0.00041,
       "K_valid":    55,
       "phi_diff":   1.234,
       "attack_tau": 0.008,
       "A_noise":    0.42,
       "rms_gain":   0.06,
       "partials": [
-        { "f_hz": 261.63, "A0": 13.7, "tau1": 0.41,
+        { "k": 1, "f_hz": 261.63, "A0": 13.7, "tau1": 0.41,
           "tau2": 3.73, "a1": 0.82, "beat_hz": 0.17, "phi": 0.0 }
       ],
       "eq_biquads": [
         { "b": [1.02, -1.94, 0.93], "a": [-1.89, 0.90] }
-      ]
+      ],
+      "spectral_eq": {
+        "freqs_hz": [20.0, 25.1, "..."],
+        "gains_db": [-1.2, 0.3, "..."],
+        "stereo_width_factor": 1.05
+      }
     }
   }
 }
@@ -235,12 +251,15 @@ Klíčové hodnoty:
 | Klíč | Popis |
 |------|-------|
 | `f0_hz` | Základní frekvence noty (Hz) |
+| `B` | Inharmonicita; SysEx `setNoteParam("B")` přepočítá `f_hz[k]` |
 | `K_valid` | Počet platných parciálů |
+| `k` v parciálu | Skutečný index parciálu (1-based); nutný pro správný SysEx B |
 | `A0` | Amplituda parciálu (normalizovaná) |
 | `tau1 / tau2` | Rychlá / pomalá složka bi-exponenciální obálky (s) |
 | `a1` | Míšení obálek: `env = a1·e^(-t/τ1) + (1-a1)·e^(-t/τ2)` |
 | `beat_hz` | Frekvence beatingu mezi strunami (Hz) |
 | `eq_biquads` | 5 biquad sekcí spektrálního EQ (min-phase IIR) |
+| `spectral_eq` | Zdrojová EQ křivka (64 bodů); editor ji může znovu fitovat |
 
 Podrobná dokumentace modulů → [`docs/TRAINING_MODULES.md`](TRAINING_MODULES.md).
 
@@ -304,11 +323,10 @@ cmake --build build-mingw
 ### GUI (doporučeno)
 
 ```bat
-build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-piano-soundbank.json
+build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-vv-rhodes.json
 ```
 
-> Bundled soundbank `soundbanks/params-piano-soundbank.json` je součástí repozitáře.
-> Byl fitován z KS Grand nahrávek, obsahuje per-note spektrální EQ.
+> Soundbanka se generuje tréninkem — viz sekce 3. Quickstart.
 
 **CLI argumenty:**
 
@@ -337,7 +355,7 @@ frekvenční odezva EQ biquad kaskády (5 sekcí × 32 log-spaced frekvencí,
 ### Headless CLI
 
 ```bat
-build\bin\Release\ICR.exe --core PianoCore --params soundbanks\params-piano-soundbank.json [midi_port]
+build\bin\Release\ICR.exe --core PianoCore --params soundbanks\params-vv-rhodes.json [midi_port]
 ```
 
 `midi_port` — index MIDI vstupu (výchozí: 0). Dostupné porty jsou vypsány při startu.

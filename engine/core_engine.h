@@ -28,6 +28,7 @@
 #include "core_logger.h"
 #include <memory>
 #include <string>
+#include <vector>
 #include <atomic>
 #include <cstdint>
 
@@ -76,6 +77,25 @@ public:
     void setLimiterEnabled  (uint8_t v) noexcept;
     void setBBEDefinition   (uint8_t v) noexcept;
     void setBBEBassBoost    (uint8_t v) noexcept;
+
+    // ── SysEx ─────────────────────────────────────────────────────────────────
+    // Process an incoming SysEx message (called from MidiInput callback thread).
+    // data: bytes AFTER the leading F0, BEFORE the trailing F7.
+    // Returns a PONG response to send, or an empty vector if no response needed.
+    std::vector<uint8_t> handleSysEx(const uint8_t* data, int len);
+
+    // ── Offline batch render ───────────────────────────────────────────────────
+    // Render a list of notes to mono int16 WAV files without starting the audio
+    // device.  Call after initialize() but instead of start().
+    //
+    // batch_json_path: JSON array [{midi, vel_idx, duration_s}, ...] (vel_idx 0-7)
+    // out_dir:         Directory for output WAVs  (m060_vel3.wav, ...)
+    // sr:              Sample rate for render (default 48000)
+    //
+    // Returns number of notes successfully rendered; logs progress via logger_.
+    int renderBatch(const std::string& batch_json_path,
+                    const std::string& out_dir,
+                    int                sr = 48000);
 
     // ── Accessors ─────────────────────────────────────────────────────────────
     ISynthCore*  core()        noexcept { return core_.get();  }
@@ -139,6 +159,11 @@ private:
     // Last note (written on noteOn, read by GUI)
     std::atomic<uint8_t> last_note_midi_{60};
     std::atomic<uint8_t> last_note_vel_ {80};
+
+    // SET_BANK chunk reassembly state (MIDI callback thread only — not concurrent)
+    std::string bank_chunk_buf_;
+    int         bank_chunk_total_ = 0;
+    int         bank_chunk_recv_  = 0;
 };
 
 // ── Convenience: full startup + interactive loop ──────────────────────────────

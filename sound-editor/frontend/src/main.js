@@ -10,6 +10,7 @@ import { ParameterSpace } from "./scene/ParameterSpace.js";
 import { SplineEditor }   from "./editor/SplineEditor.js";
 import { LayerBrowser }   from "./editor/LayerBrowser.js";
 import { VelSelector }    from "./editor/VelSelector.js";
+import { NoteInspector }  from "./editor/NoteInspector.js";
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -23,16 +24,20 @@ const browser     = new LayerBrowser(
     (layerId, on)          => editor.onToggleSplines(layerId, on),
 );
 const editor      = new SplineEditor(space, browser, velSelector);
+const inspector   = new NoteInspector(document.getElementById("note-inspector-container"));
 
 // Expose to inline HTML handlers
 window.app = {
     refreshBanks,
     loadSelectedBank,
-    filterGroup: g => browser.filterGroup(g),
-    filterK:     k => browser.filterK(k),
+    setDimension: d => browser.setDimension(d),
+    filterGroup:  g => browser.filterGroup(g),
+    filterK:      k => browser.filterK(k),
     applySplineConfig: () => editor.applyConfig(),
     fitSpline:         () => editor.fitAndRedraw(),
     removeCP:          m => editor.removeCP(m),
+    setAnchorsFromInput: () => editor.setAnchorsFromInput(),
+    clearAnchors:        () => editor.clearAnchors(),
     connectMidi,
     sysexBank,
     exportSoundbank,

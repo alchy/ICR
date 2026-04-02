@@ -23,7 +23,9 @@ from pydantic import BaseModel
 from params_store   import ParamsStore
 from spline_engine  import SplineEngine, SplineState, SplineConfig, ControlPoint
 from sysex_bridge   import SysExBridge, list_output_ports
-from layer_registry import get_all_layers, group_layers, get_layer
+from layer_registry import get_all_layers, group_layers, get_layer, build_layers_from_schema
+from schema_infer   import infer_schema
+from eq_editor      import refit_biquads
 
 app = FastAPI(title="ICR Sound Editor", version="0.1.0")
 
@@ -94,6 +96,14 @@ class SysExPartialRequest(BaseModel):
     param_key: str
     value:     float
 
+class SysExMasterRequest(BaseModel):
+    param_key: str
+    value:     float
+
+class EqUpdateRequest(BaseModel):
+    freqs_hz:  list[float]
+    gains_db:  list[float]
+
 class ExportRequest(BaseModel):
     path: str
 
@@ -138,6 +148,28 @@ def get_notes():
 @app.get("/layers")
 def get_layers():
     return group_layers()
+
+@app.get("/schema")
+def get_schema():
+    """
+    Return dynamic layer schema inferred from the loaded soundbank.
+
+    If no bank is loaded, falls back to static registry defaults.
+    Response: { scalar: [Layer], per_partial: [Layer], eq: [Layer], k_max: int }
+    """
+    notes = store.all_notes()
+    if notes:
+        schema = infer_schema(notes)
+    else:
+        # Fallback: use static registry with default k_max
+        from schema_infer import infer_schema as _inf
+        schema = {"scalar": [l.id for l in get_all_layers(1) if l.partial_k is None],
+                  "per_partial": ["f_hz","A0","tau1","tau2","a1","beat_hz","phi"],
+                  "eq": ["gains_db"],
+                  "k_max": 60}
+    layers = build_layers_from_schema(schema)
+    # Serialize dataclasses to dicts
+    return {dim: [vars(l) for l in lst] for dim, lst in layers.items()} | {"k_max": schema["k_max"]}
 
 @app.get("/layers/{layer_id}/values")
 def get_layer_values(layer_id: str):
@@ -340,6 +372,51 @@ def apply_layer(layer_id: str, req: KeepRequest):
     store.update_layer_values(layer_id, baked)
     return {"applied": True, "notes": len(baked)}
 
+@app.post("/spline/{layer_id}/fill_missing")
+def fill_missing(layer_id: str, req: KeepRequest):
+    """
+    Compute spline values for notes that are missing this layer's value,
+    and bake them directly into _params.
+
+    Only notes where extract_layer() returns nothing are affected.
+    Existing measured values are never overwritten.
+    Returns the list of newly filled note keys.
+    """
+    import numpy as np
+    vels    = req.velocities
+    filled: dict[str, float] = {}
+
+    for vel in vels:
+        # Existing data for this vel
+        all_raw  = store.extract_layer(layer_id)
+        vel_data = {k: v for k, v in all_raw.items() if k.endswith(f"_vel{vel}")}
+
+        # Which notes are missing at this vel?
+        missing_keys = {
+            k for k in store.missing_notes(layer_id)
+            if k.endswith(f"_vel{vel}")
+        }
+        if not missing_keys or not vel_data:
+            continue
+
+        # Fit spline on existing data
+        state  = _get_spline(f"{layer_id}__vel{vel}")
+        fitted = engine.fit(state, vel_data)    # { midi: value }
+
+        for note_key in missing_keys:
+            try:
+                midi = int(note_key[1:4])
+            except (ValueError, IndexError):
+                continue
+            if midi in fitted:
+                filled[note_key] = fitted[midi]
+
+    if filled:
+        store.update_layer_values(layer_id, filled)
+
+    return {"filled": len(filled), "notes": sorted(filled.keys())}
+
+
 @app.get("/spline/{layer_id}/keep_status")
 def keep_status(layer_id: str):
     kept = store.kept_layers()
@@ -377,6 +454,52 @@ def preview_soundbank():
 def export_soundbank(req: ExportRequest):
     store.save(req.path)
     return {"saved": req.path}
+
+
+# ── EQ editor endpoints ───────────────────────────────────────────────────────
+
+@app.get("/eq/{midi}/{vel}")
+def get_eq(midi: int, vel: int):
+    """
+    Return the spectral EQ curve and current biquads for one note.
+
+    Response:
+        {
+          "freqs_hz":  [...],   # frequency grid (from spectral_eq or default)
+          "gains_db":  [...],   # gains (dB)
+          "eq_biquads": [...]   # current biquad coefficients
+        }
+    """
+    note = store.get_note(midi, vel)
+    if note is None:
+        raise HTTPException(404, f"Note m{midi:03d}_vel{vel} not found")
+
+    spectral_eq = note.get("spectral_eq", {})
+    return {
+        "freqs_hz":   spectral_eq.get("freqs_hz", []),
+        "gains_db":   spectral_eq.get("gains_db", []),
+        "eq_biquads": note.get("eq_biquads", []),
+    }
+
+@app.post("/eq/{midi}/{vel}")
+def update_eq(midi: int, vel: int, req: EqUpdateRequest):
+    """
+    Replace the EQ curve for one note, recompute biquads, update the store.
+
+    The new biquads take effect for the next /sysex/bank push.
+    Does not automatically send SysEx — call /sysex/bank afterwards.
+    """
+    note = store.get_note(midi, vel)
+    if note is None:
+        raise HTTPException(404, f"Note m{midi:03d}_vel{vel} not found")
+
+    sr = store._meta.get("sr", 44100)
+    new_biquads = refit_biquads(req.freqs_hz, req.gains_db, sr=sr)
+
+    note["spectral_eq"] = {"freqs_hz": req.freqs_hz, "gains_db": req.gains_db}
+    note["eq_biquads"]  = new_biquads
+
+    return {"ok": True, "n_biquads": len(new_biquads)}
 
 
 # ── MIDI / SysEx endpoints ────────────────────────────────────────────────────
@@ -423,6 +546,16 @@ def sysex_bank():
     data = json.dumps(store.to_dict()).encode("utf-8")
     bridge.set_bank(data)
     return {"sent": True, "bytes": len(data)}
+
+@app.post("/sysex/master")
+def sysex_master(req: SysExMasterRequest):
+    if not bridge.is_open():
+        raise HTTPException(400, "MIDI port not connected")
+    try:
+        bridge.set_master(req.param_key, req.value)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    return {"sent": True}
 
 @app.post("/sysex/ping")
 def sysex_ping():
