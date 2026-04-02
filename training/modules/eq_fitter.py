@@ -18,7 +18,7 @@ because it operates on the EQ curve data produced by this module.
 
 import math
 import traceback
-from multiprocessing import Pool
+from concurrent.futures import ProcessPoolExecutor, TimeoutError as FutureTimeout
 from pathlib import Path
 
 import numpy as np
@@ -69,26 +69,35 @@ class EQFitter:
         print(f"EQFitter: processing {total} samples with {workers} workers …")
 
         results = {}
-        done = 0
+        done    = 0
+        WORKER_TIMEOUT = 90   # seconds per note — guards against hung WAV/synth
 
-        with Pool(
-            processes=workers,
+        with ProcessPoolExecutor(
+            max_workers=workers,
             initializer=_eq_worker_init,
             initargs=(params, bank_dir),
         ) as pool:
-            for key, eq in pool.imap_unordered(_eq_worker, keys):
+            future_map = {pool.submit(_eq_worker, key): key for key in keys}
+            for fut, key in future_map.items():
                 done += 1
-                log_msg  = eq.pop("_log",   "") if eq else ""
-                is_skip  = eq.pop("_skip",  False) if eq else False
-                is_err   = eq.pop("_error", False) if eq else False
+                try:
+                    res_key, eq = fut.result(timeout=WORKER_TIMEOUT)
+                except FutureTimeout:
+                    eq = {"_log": f"TIMEOUT (>{WORKER_TIMEOUT}s) — skipped", "_skip": True}
+                except Exception as exc:
+                    eq = {"_log": traceback.format_exc(), "_error": True}
+
+                log_msg = eq.pop("_log",   "") if eq else ""
+                is_skip = eq.pop("_skip",  False) if eq else False
+                is_err  = eq.pop("_error", False) if eq else False
 
                 if is_err:
-                    print(f"  {done}/{total}: {key} … ERROR:\n{log_msg}")
+                    print(f"  {done}/{total}: {key} … ERROR:\n{log_msg}", flush=True)
                 elif is_skip or eq is None:
-                    print(f"  {done}/{total}: {key} … {log_msg}")
+                    print(f"  {done}/{total}: {key} … {log_msg}", flush=True)
                 else:
                     results[key] = eq
-                    print(f"  {done}/{total}: {key} … {log_msg}")
+                    print(f"  {done}/{total}: {key} … {log_msg}", flush=True)
 
         n_ok = 0
         for key, eq in results.items():
@@ -149,8 +158,11 @@ def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
     midi = sample["midi"]
     vel  = sample["vel"]
 
-    # Find WAV file
-    matches = sorted(Path(bank_dir).glob(f"m{midi:03d}-vel{vel}-f*.wav"))
+    # Find WAV file — prefer f48 over f44
+    bank = Path(bank_dir)
+    matches = (sorted(bank.glob(f"m{midi:03d}-vel{vel}-f48.wav")) or
+               sorted(bank.glob(f"m{midi:03d}-vel{vel}-f44.wav")) or
+               sorted(bank.glob(f"m{midi:03d}-vel{vel}-f*.wav")))
     if not matches:
         return {"_log": f"SKIP: WAV not found for {key}", "_skip": True}
 

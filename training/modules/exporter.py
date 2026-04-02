@@ -37,7 +37,7 @@ RNG_SEED_DEFAULT   = 0
 
 class SoundbankExporter:
     """
-    Write piano_core_v1 JSON soundbanks from extracted params or NN model.
+    Write ICR soundbank JSON from extracted params or NN model.
 
     Usage:
         # Export only real extracted data
@@ -147,7 +147,6 @@ class SoundbankExporter:
         duration: float, rng_seed: int,
     ) -> dict:
         return {
-            "format":     "piano-core-v2",
             "source":     source,
             "sr":         sr,
             "target_rms": target_rms,

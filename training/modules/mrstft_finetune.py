@@ -41,8 +41,9 @@ class MRSTFTFinetuner:
         model = MRSTFTFinetuner().finetune(model, bank_dir="path/to/wavs", epochs=200)
     """
 
-    # Default WAV pattern within the bank directory
-    WAV_PATTERN = "m*-vel*-f44.wav"
+    # Default WAV pattern: prefer f48 (48 kHz), fall back to f44 at load time
+    WAV_PATTERN = "m*-vel*-f48.wav"
+    WAV_PATTERN_FALLBACK = "m*-vel*-f44.wav"
 
     def finetune(
         self,
@@ -86,7 +87,9 @@ class MRSTFTFinetuner:
             Fine-tuned InstrumentProfile (best checkpoint, eval mode).
         """
         pattern    = wav_pattern or self.WAV_PATTERN
-        ref_notes  = self._load_reference_wavs(bank_dir, pattern, sr, duration)
+        fallback   = None if wav_pattern else self.WAV_PATTERN_FALLBACK
+        ref_notes  = self._load_reference_wavs(bank_dir, pattern, sr, duration,
+                                                fallback=fallback)
 
         print(f"MRSTFTFinetuner: {len(ref_notes)} reference notes, "
               f"batch={batch_size}, epochs={epochs}, lr={lr}")
@@ -105,15 +108,21 @@ class MRSTFTFinetuner:
     _WAV_RE = re.compile(r"m(\d+)-vel(\d+)-.*\.wav", re.IGNORECASE)
 
     def _load_reference_wavs(
-        self, bank_dir: str, pattern: str, sr: int, duration: float
+        self, bank_dir: str, pattern: str, sr: int, duration: float,
+        fallback: str = None,
     ) -> list:
         bank = Path(bank_dir)
         if not bank.is_dir():
             raise FileNotFoundError(f"Bank directory not found: {bank}")
 
+        paths = sorted(bank.glob(pattern))
+        if not paths and fallback:
+            print(f"MRSTFTFinetuner: no files for '{pattern}', trying '{fallback}'")
+            paths = sorted(bank.glob(fallback))
+
         ref_notes = []
         skipped   = 0
-        for path in sorted(bank.glob(pattern)):
+        for path in paths:
             m = self._WAV_RE.match(path.name)
             if not m:
                 continue

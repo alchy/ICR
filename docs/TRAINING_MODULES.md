@@ -9,18 +9,19 @@ Dokumentace modulárního training systému v `training/modules/`.
 ```
 training/
   modules/
-    extractor.py       ParamExtractor       — extrakce fyziky z WAV banky
-    outlier_filter.py  OutlierFilter        — odstranění chybných extrakcí
-    eq_fitter.py       EQFitter             — LTASE spektrální EQ + biquad fit
-    profile_trainer.py ProfileTrainer       — trénink surrogate NN
-    mrstft_finetune.py MRSTFTFinetuner      — closed-loop MRSTFT fine-tuning
-    exporter.py        SoundbankExporter    — export PianoCore JSON
-    synthesizer.py     Synthesizer          — fyzikální syntéza (stereo, numpy)
-                       DifferentiableRenderer — diferenciabilní proxy (mono, torch)
-    generator.py       SampleGenerator      — generování WAV sample banky
+    extractor.py                  ParamExtractor              — extrakce fyziky z WAV banky
+    structural_outlier_filter.py  StructuralOutlierFilter     — detekce outlierů přes křivkový fit
+    outlier_filter.py             OutlierFilter               — (legacy) detekce fyzikálních outlierů
+    eq_fitter.py                  EQFitter                    — LTASE spektrální EQ + biquad fit
+    profile_trainer.py            ProfileTrainer              — trénink surrogate NN
+    mrstft_finetune.py            MRSTFTFinetuner             — closed-loop MRSTFT fine-tuning
+    exporter.py                   SoundbankExporter           — export PianoCore JSON
+    synthesizer.py                Synthesizer                 — fyzikální syntéza (stereo, numpy)
+                                  DifferenciableRenderer      — diferenciabilní proxy (mono, torch)
+    generator.py                  SampleGenerator             — generování WAV sample banky
 
-  pipeline_simple.py   — extract → filter → EQ → export  (~15 min, bez GPU)
-  pipeline_full.py     — extract → filter → EQ → NN → finetune → hybrid  (~60 min)
+  pipeline_simple.py   — extract → structural filter → EQ → export  (~15 min, bez GPU)
+  pipeline_full.py     — extract → structural filter → EQ → NN → finetune → hybrid  (~60 min)
 
   train_pipeline.py    — CLI: `python train_pipeline.py simple|full ...`
   generate.py          — CLI: `python generate.py --source ... --out-dir ...`
@@ -29,14 +30,14 @@ training/
 Každý modul lze importovat samostatně:
 
 ```python
-from training.modules.extractor      import ParamExtractor
-from training.modules.outlier_filter import OutlierFilter
-from training.modules.eq_fitter      import EQFitter
-from training.modules.profile_trainer import ProfileTrainer
-from training.modules.mrstft_finetune import MRSTFTFinetuner
-from training.modules.exporter       import SoundbankExporter
-from training.modules.synthesizer    import Synthesizer, DifferentiableRenderer
-from training.modules.generator      import SampleGenerator
+from training.modules.extractor                 import ParamExtractor
+from training.modules.structural_outlier_filter import StructuralOutlierFilter
+from training.modules.eq_fitter                 import EQFitter
+from training.modules.profile_trainer           import ProfileTrainer
+from training.modules.mrstft_finetune           import MRSTFTFinetuner
+from training.modules.exporter                  import SoundbankExporter
+from training.modules.synthesizer               import Synthesizer, DifferentiableRenderer
+from training.modules.generator                 import SampleGenerator
 ```
 
 ---
@@ -96,39 +97,58 @@ note = extractor.extract_note("m060-vel3-f44.wav")
 
 ---
 
-## OutlierFilter
+## StructuralOutlierFilter
 
-**Soubor:** `training/modules/outlier_filter.py`
+**Soubor:** `training/modules/structural_outlier_filter.py`
 
-Odstraní záznamy, kde extrakce selhala (špatné spektrální peaky, šum
-zachycený místo noty). Porovnává každý vzorek s klouzavým mediánem přes
-sousední MIDI noty v rámci velocity vrstvy.
+Detekuje a odstraňuje vzorky, jejichž `duration` nebo `n_partials` vybočuje
+z hladké křivky napříč klávesnicí nebo velocity vrstvami. Pracuje jako
+nezávislý mezikrok — nevstupuje do extrakce ani analýzy.
+
+### Algoritmus
+
+1. Sestaví matici `{feature: {midi: {vel: hodnota}}}` ze všech vzorků.
+2. Pro každou MIDI notu fituje polynom 2. stupně přes velocity osu.
+3. Pro každou velocity vrstvu fituje polynom 2. stupně přes MIDI osu.
+4. Vzorek je označen za outlier, pokud jeho reziduum překročí práh `sigma`
+   MAD-sigma v **obou směrech** (příliš vysoko I příliš nízko) na **libovolné ose**.
 
 ### API
 
 ```python
-params = OutlierFilter().filter(params, z=10.0)
+params = StructuralOutlierFilter().filter(params, sigma=3.0)
 ```
 
 | Parametr | Výchozí | Popis |
 |----------|---------|-------|
 | `params` | — | Dict z `ParamExtractor.extract_bank()` |
-| `z` | 10.0 | Z-score práh (vyšší = méně agresivní filtrování) |
+| `sigma` | 3.0 | MAD-sigma práh (obě strany). Vyšší = méně agresivní. |
 
-### Kontrolované vlastnosti
+### Sledované vlastnosti
 
-| Feature | Popis |
-|---------|-------|
-| `B` | Inharmonicita — outlier pokud skok > z×MAD |
-| `tau1_mean` | Průměrný rychlý decay (k=1–6) |
-| `A0_mean` | Průměrná amplituda (k=1–6) |
-| `f0_ratio` | `f0_measured / f0_nominal` — detekuje špatnou transpozici |
+| Feature | Zdroj | Prostor fitu |
+|---------|-------|--------------|
+| `duration` | `duration_s` | Log-prostor |
+| `n_partials` | `n_partials` | Lineární |
+| `B` | `B` (přeskočeno pokud ≤ 0) | Log-prostor |
+| `tau1_mean` | průměr tau1 parciálů k=1–6 | Log-prostor |
+| `A0_mean` | průměr A0 parciálů k=1–6 | Log-prostor |
+
+### Příklad — velocity osa pro jednu MIDI notu
+
+```
+vel:      0     1     2     3     4     5
+dur(s):  20.1  10.3   8.1   5.0   3.1   2.0   ← hladká křivka
+outlier:                    ?                  ← např. 15 s na vel=3 → smazáno
+```
 
 ### Poznámky
 
 - Vstupní dict není modifikován — vrací novou kopii.
 - `n_samples` je aktualizováno po filtrování.
-- Pro z=10 jsou odstraněny pouze zjevné chyby; z=3 je agresivnější.
+- Výpis obsahuje signed z-score (`+` = příliš vysoká, `-` = příliš nízká hodnota).
+- `MIN_POINTS = 4` — série s méně body je přeskočena (nefituje se).
+- Fyzikální parametry (B, tau1, A0) jsou fitovány nezávisle; jedna chybná extrakce neovlivní ostatní.
 
 ---
 
@@ -236,10 +256,27 @@ pro register awareness; `vel_feat(v)` — 3D; `k_feat(k)` — 3D.
 
 ### Trénink
 
-- Optimizér: Adam, LR=0.003, cos-annealing
-- Loss: MSE extrahovaných params vs. NN predikce
-- Epochy: 1800 default (~2–5 min na CPU)
-- Evaluace každých 10 epoch
+- Optimizér: Adam, LR=0.003, cos-annealing do `lr×0.01`
+- Loss: MSE extrahovaných params vs. NN predikce (viz `_compute_data_loss`)
+- Smoothness penalty na MIDI gridu každých 5 epoch (B, τ1, A0, noise)
+- Epochy: 3000 default
+
+### Validační set
+
+Každá N-tá MIDI nota je deterministicky vyčleněna jako validační set
+(`val_frac=0.15` → ~15 % not, rovnoměrně rozložených přes celý rozsah).
+
+```
+train: m033 m034 m035 m036 m037 m038 m039 m040 …
+val:              ↑                   ↑           každá ~7. nota
+```
+
+Val loss se počítá každých 100 epoch ze stejných data-fit termů jako train
+(bez smoothness penalty). Ukládá se nejlepší checkpoint a na konci se restoruje.
+
+**Poznámka:** Val loss měří fit na zašumělá extrahovaná data — není to
+perceptuální kvalita. Hlavní role je detekce divergence a nestability tréninku.
+Perceptuální validace probíhá až ve fázi MRSTFT fine-tuning.
 
 ---
 
@@ -287,8 +324,7 @@ Per scale: Spectral Convergence + Log-Magnitude loss.
 
 **Soubor:** `training/modules/exporter.py`
 
-Exportuje JSON soundbanku ve formátu `piano-core-v2` načitatelném
-C++ `PianoCore::load()`.
+Exportuje soundbank JSON načitatelný C++ `PianoCore::load()`.
 
 ### API
 
@@ -310,7 +346,7 @@ exporter.hybrid(model, params, "soundbanks/out.json", sr=44100)
 | `hybrid` | Extrahovaná kde existuje, NN predikce pro zbytek | Ano |
 
 `hybrid` je výstupem `pipeline_full` — NN vyplní MIDI noty mimo rozsah banky
-nebo noty s špatnou extrakcí odstraněné `OutlierFilter`.
+nebo noty odstraněné `StructuralOutlierFilter`.
 
 ### Zpracování při exportu
 
@@ -321,9 +357,9 @@ Pro každou (midi, vel) kombinaci:
 4. Generování φ (phase) per parciál — seedováno midi+vel pro reprodukovatelnost
 5. Zápis do `notes["m{midi:03d}_vel{vel}"]`
 
-### Soundbank v2 — přidané klíče
+### Soundbank — uložené klíče
 
-Od formátu `piano-core-v2` jsou v soundbanku uloženy i editovatelné zdrojové hodnoty:
+Soundbanka ukládá fyzikální parametry i editovatelné zdrojové hodnoty:
 
 ```json
 {
@@ -341,11 +377,11 @@ Od formátu `piano-core-v2` jsou v soundbanku uloženy i editovatelné zdrojové
 }
 ```
 
-| Klíč | v1 | v2 | Účel |
-|------|----|----|------|
-| `B` | – | ✓ | inharmonicita; změna via SysEx přepočítá `f_hz[k]` |
-| `k` v parciálu | – | ✓ | skutečný index parciálu (1-based), nutný pro SysEx B |
-| `spectral_eq` | – | ✓ | zdrojová EQ křivka; editor ji může znovu fitovat |
+| Klíč | Účel |
+|------|------|
+| `B` | inharmonicita; změna via SysEx přepočítá `f_hz[k]` |
+| `k` v parciálu | skutečný index parciálu (1-based), nutný pro SysEx B |
+| `spectral_eq` | zdrojová EQ křivka; editor ji může znovu fitovat |
 
 ---
 
@@ -489,14 +525,16 @@ banka může být použita jako vstup do dalšího tréninku.
 from training.pipeline_simple import run
 
 out_path = run(
-    bank_dir = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path = "soundbanks/params-ks-grand.json",
-    workers  = 8,
-    skip_eq  = False,
+    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
+    out_path      = "soundbanks/params-ks-grand.json",
+    workers       = 8,
+    skip_eq       = False,
+    skip_outliers = False,   # True = přeskočit StructuralOutlierFilter
+    sr_tag        = "f48",   # preferovat f48, fallback na f44
 )
 ```
 
-Kroky: `extract_bank` → `filter` → `fit_bank` → `from_params`
+Kroky: `extract_bank` → `StructuralOutlierFilter` → `fit_bank` → `from_params`
 
 ### pipeline_full.py
 
@@ -504,15 +542,17 @@ Kroky: `extract_bank` → `filter` → `fit_bank` → `from_params`
 from training.pipeline_full import run
 
 model, out_path = run(
-    bank_dir  = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path  = "soundbanks/params-ks-grand.json",
-    epochs    = 1800,
-    ft_epochs = 200,
-    workers   = 8,
+    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
+    out_path      = "soundbanks/params-ks-grand.json",
+    epochs        = 1800,
+    ft_epochs     = 200,
+    workers       = 8,
+    skip_outliers = False,
+    sr_tag        = "f48",
 )
 ```
 
-Kroky: `extract_bank` → `filter` → `fit_bank` → `train` → `finetune` → `hybrid`
+Kroky: `extract_bank` → `StructuralOutlierFilter` → `fit_bank` → `train` → `finetune` → `hybrid`
 
 ---
 

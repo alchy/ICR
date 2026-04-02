@@ -3,7 +3,7 @@ sound-editor/backend/params_store.py
 ──────────────────────────────────────
 In-memory store for the active params dict.
 
-Loaded from a soundbank JSON (piano-core-v1 format).
+Loaded from a soundbank JSON.
 Provides per-note / per-partial access and layer extraction.
 """
 
@@ -28,7 +28,7 @@ class ParamsStore:
     # ── Loading ───────────────────────────────────────────────────────────────
 
     def load_file(self, path: str) -> int:
-        """Load a piano-core-v1 JSON. Returns number of notes loaded."""
+        """Load a soundbank JSON. Returns number of notes loaded."""
         p = Path(path)
         with open(p) as f:
             data = json.load(f)
