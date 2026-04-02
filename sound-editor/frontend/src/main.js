@@ -30,8 +30,9 @@ const inspector   = new NoteInspector(document.getElementById("note-inspector-co
 window.app = {
     refreshBanks,
     loadSelectedBank,
-    filterGroup: g => browser.filterGroup(g),
-    filterK:     k => browser.filterK(k),
+    setDimension: d => browser.setDimension(d),
+    filterGroup:  g => browser.filterGroup(g),
+    filterK:      k => browser.filterK(k),
     applySplineConfig: () => editor.applyConfig(),
     fitSpline:         () => editor.fitAndRedraw(),
     removeCP:          m => editor.removeCP(m),

@@ -23,7 +23,8 @@ from pydantic import BaseModel
 from params_store   import ParamsStore
 from spline_engine  import SplineEngine, SplineState, SplineConfig, ControlPoint
 from sysex_bridge   import SysExBridge, list_output_ports
-from layer_registry import get_all_layers, group_layers, get_layer
+from layer_registry import get_all_layers, group_layers, get_layer, build_layers_from_schema
+from schema_infer   import infer_schema
 from eq_editor      import refit_biquads
 
 app = FastAPI(title="ICR Sound Editor", version="0.1.0")
@@ -147,6 +148,28 @@ def get_notes():
 @app.get("/layers")
 def get_layers():
     return group_layers()
+
+@app.get("/schema")
+def get_schema():
+    """
+    Return dynamic layer schema inferred from the loaded soundbank.
+
+    If no bank is loaded, falls back to static registry defaults.
+    Response: { scalar: [Layer], per_partial: [Layer], eq: [Layer], k_max: int }
+    """
+    notes = store.all_notes()
+    if notes:
+        schema = infer_schema(notes)
+    else:
+        # Fallback: use static registry with default k_max
+        from schema_infer import infer_schema as _inf
+        schema = {"scalar": [l.id for l in get_all_layers(1) if l.partial_k is None],
+                  "per_partial": ["f_hz","A0","tau1","tau2","a1","beat_hz","phi"],
+                  "eq": ["gains_db"],
+                  "k_max": 60}
+    layers = build_layers_from_schema(schema)
+    # Serialize dataclasses to dicts
+    return {dim: [vars(l) for l in lst] for dim, lst in layers.items()} | {"k_max": schema["k_max"]}
 
 @app.get("/layers/{layer_id}/values")
 def get_layer_values(layer_id: str):

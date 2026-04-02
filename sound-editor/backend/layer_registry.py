@@ -86,3 +86,85 @@ def group_layers(k_max: int = K_MAX) -> dict[str, list[Layer]]:
     for layer in get_all_layers(k_max):
         groups.setdefault(layer.group, []).append(layer)
     return groups
+
+
+# ── Dynamic schema → Layer objects ───────────────────────────────────────────
+# Metadata hints for known keys (min, max, color, log_scale).
+# Unknown keys get safe defaults.
+
+_SCALAR_HINTS: dict[str, dict] = {
+    k: {"min": l.min_val, "max": l.max_val, "color": l.color_hex, "log": l.log_scale,
+        "label": l.label}
+    for l in SCALAR_LAYERS
+    for k in [l.id]
+}
+
+_PARTIAL_HINTS: dict[str, dict] = {
+    key: {"min": mn, "max": mx, "color": col, "log": log, "label_fmt": fmt}
+    for key, fmt, _grp, mn, mx, col, log in _PARTIAL_TEMPLATES
+}
+
+
+def build_layers_from_schema(schema: dict) -> dict[str, list]:
+    """
+    Build Layer lists from a dynamically inferred schema dict.
+
+    Returns:
+        {
+          "scalar":      [Layer, ...],
+          "per_partial": [Layer, ...],   # expanded for k=1..k_max
+          "eq":          [Layer, ...],
+        }
+    """
+    k_max = max(1, schema.get("k_max", K_MAX))
+    result: dict[str, list[Layer]] = {"scalar": [], "per_partial": [], "eq": []}
+
+    # Scalar
+    for key in schema.get("scalar", []):
+        h = _SCALAR_HINTS.get(key, {})
+        result["scalar"].append(Layer(
+            id        = key,
+            label     = h.get("label", key),
+            group     = "scalar",
+            partial_k = None,
+            min_val   = h.get("min", 0.0),
+            max_val   = h.get("max", 1.0),
+            color_hex = h.get("color", "#4af"),
+            log_scale = h.get("log", False),
+        ))
+
+    # Per-partial (expanded)
+    for key in schema.get("per_partial", []):
+        h = _PARTIAL_HINTS.get(key, {})
+        fmt = h.get("label_fmt", f"{key}[k{{k}}]")
+        for k in range(1, k_max + 1):
+            result["per_partial"].append(Layer(
+                id        = f"{key}_k{k}",
+                label     = fmt.format(k=k),
+                group     = "per_partial",
+                partial_k = k,
+                min_val   = h.get("min", 0.0),
+                max_val   = h.get("max", 1.0),
+                color_hex = h.get("color", "#4af"),
+                log_scale = h.get("log", False),
+            ))
+
+    # EQ (one layer per array key — treated as a special curve layer)
+    EQ_HINTS = {
+        "gains_db":           {"label": "EQ Gains (dB)", "min": -24.0, "max": 24.0, "color": "#ff8"},
+        "stereo_width_factor": {"label": "Stereo Width",  "min": 0.0,   "max": 2.0,  "color": "#f8a"},
+    }
+    for key in schema.get("eq", []):
+        h = EQ_HINTS.get(key, {})
+        result["eq"].append(Layer(
+            id        = f"eq_{key}",
+            label     = h.get("label", f"EQ {key}"),
+            group     = "eq",
+            partial_k = None,
+            min_val   = h.get("min", -1.0),
+            max_val   = h.get("max",  1.0),
+            color_hex = h.get("color", "#ff8"),
+            log_scale = False,
+        ))
+
+    return result

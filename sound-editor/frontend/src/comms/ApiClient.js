@@ -34,6 +34,7 @@ export default {
 
     // ── Layers ──────────────────────────────────────────────────────────────
     getLayers:       ()           => get("/layers"),
+    getSchema:       ()           => get("/schema"),
     getLayerValues:  (layerId)    => get(`/layers/${layerId}/values`),
 
     // ── Splines ─────────────────────────────────────────────────────────────
