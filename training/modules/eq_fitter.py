@@ -156,7 +156,8 @@ def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
 
     wav_path = matches[0]
     orig_stereo, sr_orig = sf.read(str(wav_path), dtype="float32", always_2d=True)
-    if orig_stereo.shape[1] == 1:          # mono → duplicate to fake stereo
+    is_mono   = orig_stereo.shape[1] == 1
+    if is_mono:                            # mono → duplicate so downstream shape is (N,2)
         orig_stereo = np.column_stack([orig_stereo, orig_stereo])
     sr_use    = int(sr_orig)
     orig_mono = orig_stereo.mean(axis=1).astype(np.float64)
@@ -177,14 +178,18 @@ def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
     synth_stereo_trim = synth_stereo[:n].astype(np.float64)
 
     # Stereo width factor: skip first 100 ms to avoid attack transient
+    # For mono sources the ratio is meaningless; keep synth at its natural width (1.0).
     skip    = int(0.10 * sr_use)
-    orig_M  = (orig_stereo_trim[skip:,0]  + orig_stereo_trim[skip:,1])  / 2
-    orig_S  = (orig_stereo_trim[skip:,0]  - orig_stereo_trim[skip:,1])  / 2
-    syn_M   = (synth_stereo_trim[skip:,0] + synth_stereo_trim[skip:,1]) / 2
-    syn_S   = (synth_stereo_trim[skip:,0] - synth_stereo_trim[skip:,1]) / 2
-    rms     = lambda x: float(np.sqrt(np.mean(x**2)) + 1e-12)
-    width_factor = float(np.clip(rms(orig_S)/rms(orig_M) / (rms(syn_S)/rms(syn_M)+1e-12),
-                                 0.2, 8.0))
+    if is_mono:
+        width_factor = 1.0
+    else:
+        orig_M  = (orig_stereo_trim[skip:,0]  + orig_stereo_trim[skip:,1])  / 2
+        orig_S  = (orig_stereo_trim[skip:,0]  - orig_stereo_trim[skip:,1])  / 2
+        syn_M   = (synth_stereo_trim[skip:,0] + synth_stereo_trim[skip:,1]) / 2
+        syn_S   = (synth_stereo_trim[skip:,0] - synth_stereo_trim[skip:,1]) / 2
+        rms     = lambda x: float(np.sqrt(np.mean(x**2)) + 1e-12)
+        width_factor = float(np.clip(rms(orig_S)/rms(orig_M) / (rms(syn_S)/rms(syn_M)+1e-12),
+                                     0.2, 8.0))
 
     # Adaptive N_FFT
     n_fft, hop = _adaptive_nfft(midi, sr_use)
