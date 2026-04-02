@@ -156,6 +156,8 @@ def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
 
     wav_path = matches[0]
     orig_stereo, sr_orig = sf.read(str(wav_path), dtype="float32", always_2d=True)
+    if orig_stereo.shape[1] == 1:          # mono → duplicate to fake stereo
+        orig_stereo = np.column_stack([orig_stereo, orig_stereo])
     sr_use    = int(sr_orig)
     orig_mono = orig_stereo.mean(axis=1).astype(np.float64)
 
