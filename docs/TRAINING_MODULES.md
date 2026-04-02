@@ -460,12 +460,17 @@ evaluator.close()
 ```
 1. SoundbankExporter().hybrid(model, params, tmp.json)
 2. Zapsat eval_notes.json   [{midi, vel_idx, duration_s}, ...]
-3. subprocess: ICR.exe --core PianoCore --params tmp.json
+3. Print: "ICR eval: rendering N notes via ICR.exe ..."
+4. subprocess: ICR.exe --core PianoCore --params tmp.json
                         --render-batch eval_notes.json --out-dir tmp_dir/
-4. Načíst m{midi:03d}_vel{vel}.wav z tmp_dir/
-5. Mono, ořez/pad na note_dur*sr vzorků
-6. mrstft(rendered_wav, reference_wav) → průměr přes 24 not
+   (každý řádek stdout ICR.exe se přeposílá jako "[ICR] ...")
+5. Načíst m{midi:03d}_vel{vel}.wav z tmp_dir/
+6. Mono, ořez/pad na note_dur*sr vzorků
+7. mrstft(rendered_wav, reference_wav) → průměr přes 24 not
+8. Print: "ICR-MRSTFT = X.XXXX  (N/N notes, Xs)"
 ```
+
+Timeout ICR.exe: **120 s** (`ICR_TIMEOUT_S`). Při selhání vrátí `float('inf')` a pokračuje dál (nespustí early stop).
 
 ### MRSTFT scales (identické s MRSTFTFinetuner)
 
@@ -771,7 +776,7 @@ extract → filter → EQ
                     │
               ProfileTrainerEncExp.train(epochs, icr_evaluator=...)
                     │
-              každých eval_every epoch:
+              každých eval_every (50) epoch:
                 ├─ data val-loss (jako dosud, verbose breakdown)
                 └─ ICR-MRSTFT eval (ICRBatchEvaluator, 24 not)
                         │
@@ -782,11 +787,45 @@ extract → filter → EQ
               SoundbankExporter().hybrid()
 ```
 
+**Console výstup (icr-eval):**
+
+```
+ICRBatchEvaluator: loaded 475 reference WAVs from C:/SoundBanks/.../vv-rhodes
+ICRBatchEvaluator: 24 eval notes (12 MIDI x 2 vel)  dur=3.0s  sr=48000
+ProfileTrainerEncExp: 384 measured samples  ->  train=319  val=65 ...
+  Mode: experimental-enc -- shared encoders (midi->16  vel->8  k->8  freq->8)
+  Eval: ICR-MRSTFT (early stop patience=15 evals, no MRSTFTFinetuner)
+Building datasets ...
+  train batches: {'B_mf': 319, 'B_vf': 319, 'tau_mf': 2847, ...}
+Model parameters: 29,686  (encoders hidden=64, heads hidden=32)
+Training 5000 epochs  (ICR-MRSTFT early stop) ...
+  epoch    1/5000  loss=X.XXXX  [training started]         ← ihned po epoch 1
+  epoch   10/5000  loss=X.XXXX                             ← heartbeat každých 10 epoch
+  epoch   20/5000  loss=X.XXXX
+  epoch   30/5000  loss=X.XXXX
+  epoch   40/5000  loss=X.XXXX
+  epoch   50/5000  train=X.XXXX  val=X.XXXX  lr=...  ✓    ← val eval (eval_every=50)
+    val breakdown:  B=X.XX  dur=X.XX  eq=X.XX  ...
+    ICR eval: rendering 24 notes via ICR.exe ...           ← před subprocess
+    [ICR] Render batch: 24 notes -> /tmp/icr_eval_.../
+    [ICR]   Rendered m036_vel0.wav (1/24)
+    [ICR]   ...
+    [ICR] Render done: 24/24 notes in 5.2s
+    ICR-MRSTFT = X.XXXX  (24/24 notes, 5.3s)
+  epoch   60/5000  loss=X.XXXX
+  ...
+  Early stop: ICR-MRSTFT no improvement for 15 evals (best=X.XXXX)
+  Restored best ICR-MRSTFT checkpoint (X.XXXX)
+
+Done -> soundbanks/params-vv-rhodes-icr-eval.json
+```
+
 **CLI:**
 
 ```bash
 python run-training.py icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
 python run-training.py icr-eval --bank ... --epochs 5000 --icr-exe build/bin/Release/ICR.exe
+python run-training.py icr-eval --bank ... --icr-patience 20 --note-dur 4.0
 ```
 
 ---
