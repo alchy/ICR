@@ -8,17 +8,20 @@ Run from anywhere (repo root, IDE, double-click):
 
 Subcommands
 ───────────
-  simple        Extract → filter → EQ → export soundbank (no NN)
-  full          Extract → filter → EQ → train NN → finetune → export hybrid
-  experimental  Like full, but all nets take velocity + share per-axis encoders
-  icr-eval      Like experimental, but ICR C++ renderer drives eval/early-stop
-                (no MRSTFTFinetuner; requires running build/bin/Release/ICR.exe)
+  simple        Extract -> filter -> EQ -> export soundbank (no NN)
+  full          Extract -> filter -> EQ -> train NN -> MRSTFT finetune -> export hybrid
+  nn            Extract -> filter -> EQ -> train NN (shared encoders) -> export  (no finetuner)
+  icr-eval      Like nn, but ICR C++ renderer drives eval/early-stop
+                (no MRSTFTFinetuner; requires build/bin/Release/ICR.exe)
+  experimental  Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
 
 Output naming (--out optional)
 ───────────────────────────────
   soundbanks/params-{bank_name}-simple.json
   soundbanks/params-{bank_name}-full.json
+  soundbanks/params-{bank_name}-nn.json
   soundbanks/params-{bank_name}-icr-eval.json
+  soundbanks/params-{bank_name}-experimental.json
 
 All console output is also written to:
   training-logs/run-{cmd}-{bank_name}-{timestamp}.log
@@ -134,10 +137,27 @@ def _build_parser() -> argparse.ArgumentParser:
     full.add_argument("--sr-tag",    default="f48",
                       help="SR suffix in filenames: f44 or f48 (default: f48)")
 
-    # ── experimental ──────────────────────────────────────────────────────────
+    # ── nn ────────────────────────────────────────────────────────────────────
+    nn = sub.add_parser(
+        "nn",
+        help="Extract -> EQ -> NN (shared encoders, vel on all nets) -> export (no finetuner)",
+    )
+    nn.add_argument("--bank",      required=True, help="WAV bank directory")
+    nn.add_argument("--out",       default=None,
+                    help="Output soundbank JSON (default: soundbanks/params-{bank}-nn.json)")
+    nn.add_argument("--workers",   type=int, default=None,
+                    help="Parallel workers (default: CPU count)")
+    nn.add_argument("--epochs",    type=int, default=10000,
+                    help="NN training epochs (default: 10000)")
+    nn.add_argument("--skip-outliers-detection", action="store_true",
+                    help="Skip structural outlier detection step")
+    nn.add_argument("--sr-tag",    default="f48",
+                    help="SR suffix in filenames: f44 or f48 (default: f48)")
+
+    # ── experimental (legacy: nn + MRSTFTFinetuner) ───────────────────────────
     exp = sub.add_parser(
         "experimental",
-        help="Like full, but all nets take velocity + share per-axis encoders",
+        help="Like nn, but followed by MRSTFTFinetuner (Python proxy MRSTFT, slow)",
     )
     exp.add_argument("--bank",      required=True, help="WAV bank directory")
     exp.add_argument("--out",       default=None,
@@ -207,6 +227,19 @@ def main() -> int:
                 out_path=out_path,
                 epochs=args.epochs,
                 ft_epochs=args.ft_epochs,
+                workers=args.workers,
+                skip_outliers=args.skip_outliers_detection,
+                sr_tag=args.sr_tag,
+            )
+            print(f"\nDone -> {out}")
+
+        elif args.cmd == "nn":
+            out_path = args.out or _default_out(args.bank, "nn")
+            from training.pipeline_nn import run
+            model, out = run(
+                bank_dir=args.bank,
+                out_path=out_path,
+                epochs=args.epochs,
                 workers=args.workers,
                 skip_outliers=args.skip_outliers_detection,
                 sr_tag=args.sr_tag,

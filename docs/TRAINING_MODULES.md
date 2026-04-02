@@ -19,12 +19,13 @@ training/
                                   DifferenciableRenderer      — diferenciabilní proxy (mono, torch)
     generator.py                  SampleGenerator             — generování WAV sample banky
 
-  pipeline_simple.py          — extract → structural filter → EQ → export  (~15 min, bez GPU)
-  pipeline_full.py            — extract → structural filter → EQ → NN → finetune → hybrid  (~60 min)
-  pipeline_experimental.py    — jako full, ale NN sdílí enkodéry + všechny sítě berou velocity
-  pipeline_icr_eval.py        — jako experimental, ale eval/early-stop přes ICR C++ renderer
+  pipeline_simple.py          — extract -> structural filter -> EQ -> export  (~15 min, bez GPU)
+  pipeline_full.py            — extract -> structural filter -> EQ -> NN -> MRSTFT finetune -> hybrid  (~60 min)
+  pipeline_nn.py              — extract -> structural filter -> EQ -> NN (shared encoders) -> export  (~30 min)
+  pipeline_icr_eval.py        — jako nn, ale eval/early-stop pres ICR C++ renderer
+  pipeline_experimental.py    — legacy: jako nn + MRSTFTFinetuner (Python proxy, pomaly)
 
-  run-training.py      — CLI: `python run-training.py simple|full|experimental ...`  (root)
+  run-training.py      — CLI: `python run-training.py simple|full|nn|icr-eval ...`  (root)
   run-generate.py      — CLI: `python run-generate.py --source ... --full-bank`  (root)
 ```
 
@@ -721,7 +722,32 @@ model, out_path = run(
 
 Kroky: `extract_bank` → `StructuralOutlierFilter` → `fit_bank` → `train` → `finetune` → `hybrid`
 
-### pipeline_experimental.py
+### pipeline_nn.py  *(doporuceno)*
+
+```python
+from training.pipeline_nn import run
+
+model, out_path = run(
+    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
+    out_path      = "soundbanks/params-ks-grand.json",
+    epochs        = 10000,
+    workers       = 8,
+    skip_outliers = False,
+    sr_tag        = "f48",
+)
+```
+
+Kroky: `extract_bank` -> `StructuralOutlierFilter` -> `fit_bank` -> `train` -> `hybrid`
+
+Pouziva `ProfileTrainerEncExp` — velocity na vsech sitich, sdilene enkodery.
+Zadny MRSTFTFinetuner. Ciste parametricky MSE fitting s early-stop pres val data-loss.
+
+```bash
+python run-training.py nn --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
+python run-training.py nn --bank ... --epochs 10000
+```
+
+### pipeline_experimental.py  *(legacy)*
 
 ```python
 from training.pipeline_experimental import run
@@ -729,7 +755,7 @@ from training.pipeline_experimental import run
 model, out_path = run(
     bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
     out_path      = "soundbanks/params-ks-grand.json",
-    epochs        = 3000,
+    epochs        = 10000,
     ft_epochs     = 200,
     workers       = 8,
     skip_outliers = False,
@@ -737,8 +763,9 @@ model, out_path = run(
 )
 ```
 
-Kroky: identické s `pipeline_full`, ale místo `ProfileTrainer` použije
-`ProfileTrainerEncExp` — velocity vstupuje do všech sítí, enkodéry jsou sdílené.
+Stejne jako `nn`, ale za NN treninkem nasleduje `MRSTFTFinetuner` (200 epoch,
+Python DifferentiableRenderer). Ponechano pro zpetnou kompatibilitu — pro nove
+runy preferuj `nn` nebo `icr-eval`.
 
 ### pipeline_icr_eval.py  *(icr-eval mode)*
 
@@ -758,15 +785,15 @@ model, out_path = run(
 )
 ```
 
-**Klíčové rozdíly oproti `experimental`:**
+**Klicove rozdily oproti `nn`:**
 
-| Vlastnost | experimental | icr-eval |
-|-----------|-------------|----------|
-| Eval metrika | Python DifferenciableRenderer | C++ ICR.exe batch render |
+| Vlastnost | nn | icr-eval |
+|-----------|-----|----------|
+| Eval metrika | val data-loss (MSE na parametrech) | C++ ICR.exe batch render (MRSTFT) |
 | Early stopping | val data-loss plateau | ICR-MRSTFT plateau |
-| MRSTFTFinetuner | ano (200 epoch po NN) | **ne** |
-| Tréninkový loss | data loss (MSE na parametrech) | stejný |
-| Best model | nejnižší val data-loss | nejnižší ICR-MRSTFT |
+| MRSTFTFinetuner | ne | ne |
+| Tréninkový loss | data loss (MSE na parametrech) | stejny |
+| Best model | nejnizsi val data-loss | nejnizsi ICR-MRSTFT |
 | Export | hybrid (NN + params) | hybrid (NN + params) |
 
 **Schéma:**
