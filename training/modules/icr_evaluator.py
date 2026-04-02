@@ -130,6 +130,8 @@ class ICRBatchEvaluator:
 
             # 3. Run ICR.exe --render-batch
             os.makedirs(self._out_dir, exist_ok=True)
+            print(f"    ICR eval: rendering {len(self._eval_notes)} notes "
+                  f"via {os.path.basename(self.icr_exe)} ...", flush=True)
             cmd = [
                 self.icr_exe,
                 "--core",         "PianoCore",

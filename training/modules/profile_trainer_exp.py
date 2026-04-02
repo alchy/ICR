@@ -467,7 +467,16 @@ def _run_training_exp(
             _sm_count    += 1
 
         loss.backward(); opt.step(); sched.step()
-        losses.append(float(loss.detach()))
+        loss_val = float(loss.detach())
+        losses.append(loss_val)
+
+        # Epoch-1 sanity check + periodic heartbeat
+        if epoch == 1:
+            print(f"  epoch    1/{epochs}  loss={loss_val:.4f}  [training started]", flush=True)
+        elif verbose and epoch % 10 == 0 and epoch % eval_every != 0:
+            import math as _math
+            print(f"  epoch {epoch:4d}/{epochs}  loss={loss_val:.4f}"
+                  + ("  [NaN!]" if _math.isnan(loss_val) else ""), flush=True)
 
         # Validation + verbose breakdown
         if val_ds and (epoch % eval_every == 0 or epoch == epochs):
@@ -534,9 +543,9 @@ def _run_training_exp(
                 else:
                     sm_str = ""
                 print(f"  epoch {epoch:4d}/{epochs}  "
-                      f"train={loss.item():.4f}  val={val_loss:.4f}"
-                      f"  lr={sched.get_last_lr()[0]:.2e}{improved}")
-                print(f"    val breakdown:  {bd_str}{sm_str}")
+                      f"train={loss_val:.4f}  val={val_loss:.4f}"
+                      f"  lr={sched.get_last_lr()[0]:.2e}{improved}", flush=True)
+                print(f"    val breakdown:  {bd_str}{sm_str}", flush=True)
         elif verbose and epoch % eval_every == 0:
             _, train_bd = _compute_data_loss_exp(model, b, return_breakdown=True)
             bd_str = "  ".join(
@@ -547,9 +556,9 @@ def _run_training_exp(
                 _sm_midi_avg = _sm_vel_avg = 0.0; _sm_count = 0
             else:
                 sm_str = ""
-            print(f"  epoch {epoch:4d}/{epochs}  loss={loss.item():.6f}  "
-                  f"lr={sched.get_last_lr()[0]:.2e}")
-            print(f"    breakdown:  {bd_str}{sm_str}")
+            print(f"  epoch {epoch:4d}/{epochs}  loss={loss_val:.6f}  "
+                  f"lr={sched.get_last_lr()[0]:.2e}", flush=True)
+            print(f"    breakdown:  {bd_str}{sm_str}", flush=True)
 
     if icr_evaluator is not None:
         model.load_state_dict(best_icr_state)
@@ -900,17 +909,19 @@ class ProfileTrainerEncExp(ProfileTrainerExp):
             print(f"  Eval: ICR-MRSTFT (early stop patience={icr_patience} evals, "
                   f"no MRSTFTFinetuner)")
 
-        print("Building datasets ...")
+        print("Building datasets ...", flush=True)
         train_ds = build_dataset_exp(train_s)
         val_ds   = build_dataset_exp(val_s)
+        _ds_sizes = {k: v.shape[0] for k, v in train_ds["batches"].items() if hasattr(v, "shape")}
+        print(f"  train batches: { {k: v for k, v in _ds_sizes.items()} }", flush=True)
         model    = InstrumentProfileEncExp(hidden=hidden, head_hidden=32)
 
         n_p = sum(p.numel() for p in model.parameters())
-        print(f"Model parameters: {n_p:,}  (encoders hidden={hidden}, heads hidden=32)")
+        print(f"Model parameters: {n_p:,}  (encoders hidden={hidden}, heads hidden=32)", flush=True)
         if icr_evaluator is not None:
-            print(f"Training {epochs} epochs  (ICR-MRSTFT early stop) ...")
+            print(f"Training {epochs} epochs  (ICR-MRSTFT early stop) ...", flush=True)
         else:
-            print(f"Training {epochs} epochs  (progressive depth: expand heads at plateau) ...")
+            print(f"Training {epochs} epochs  (progressive depth: expand heads at plateau) ...", flush=True)
 
         _run_training_exp(model, train_ds, val_ds=val_ds,
                           epochs=epochs, lr=lr, verbose=verbose,
