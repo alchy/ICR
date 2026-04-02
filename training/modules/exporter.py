@@ -116,11 +116,29 @@ class SoundbankExporter:
         # Build dataset only to get eq_freqs
         ds = build_dataset(measured)
 
-        # Generate full 88×8 profile; measured samples are preserved verbatim
-        all_samples = generate_profile(
-            model, ds, midi_from=21, midi_to=108, sr=sr,
-            orig_samples=measured,
-        )
+        # Generate full 88×8 profile; measured samples are preserved verbatim.
+        # Use generate_profile_exp for EncExp models (forward_dur requires vf).
+        try:
+            from training.modules.profile_trainer_exp import (
+                InstrumentProfileEncExp, generate_profile_exp,
+                build_dataset_exp,
+            )
+            if isinstance(model, InstrumentProfileEncExp):
+                ds_exp = build_dataset_exp(measured)
+                all_samples = generate_profile_exp(
+                    model, ds_exp, midi_from=21, midi_to=108, sr=sr,
+                    orig_samples=measured,
+                )
+            else:
+                all_samples = generate_profile(
+                    model, ds, midi_from=21, midi_to=108, sr=sr,
+                    orig_samples=measured,
+                )
+        except ImportError:
+            all_samples = generate_profile(
+                model, ds, midi_from=21, midi_to=108, sr=sr,
+                orig_samples=measured,
+            )
 
         out = self._make_header("nn-hybrid:model", sr, target_rms, duration, rng_seed)
 
