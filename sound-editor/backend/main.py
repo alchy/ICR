@@ -372,6 +372,51 @@ def apply_layer(layer_id: str, req: KeepRequest):
     store.update_layer_values(layer_id, baked)
     return {"applied": True, "notes": len(baked)}
 
+@app.post("/spline/{layer_id}/fill_missing")
+def fill_missing(layer_id: str, req: KeepRequest):
+    """
+    Compute spline values for notes that are missing this layer's value,
+    and bake them directly into _params.
+
+    Only notes where extract_layer() returns nothing are affected.
+    Existing measured values are never overwritten.
+    Returns the list of newly filled note keys.
+    """
+    import numpy as np
+    vels    = req.velocities
+    filled: dict[str, float] = {}
+
+    for vel in vels:
+        # Existing data for this vel
+        all_raw  = store.extract_layer(layer_id)
+        vel_data = {k: v for k, v in all_raw.items() if k.endswith(f"_vel{vel}")}
+
+        # Which notes are missing at this vel?
+        missing_keys = {
+            k for k in store.missing_notes(layer_id)
+            if k.endswith(f"_vel{vel}")
+        }
+        if not missing_keys or not vel_data:
+            continue
+
+        # Fit spline on existing data
+        state  = _get_spline(f"{layer_id}__vel{vel}")
+        fitted = engine.fit(state, vel_data)    # { midi: value }
+
+        for note_key in missing_keys:
+            try:
+                midi = int(note_key[1:4])
+            except (ValueError, IndexError):
+                continue
+            if midi in fitted:
+                filled[note_key] = fitted[midi]
+
+    if filled:
+        store.update_layer_values(layer_id, filled)
+
+    return {"filled": len(filled), "notes": sorted(filled.keys())}
+
+
 @app.get("/spline/{layer_id}/keep_status")
 def keep_status(layer_id: str):
     kept = store.kept_layers()

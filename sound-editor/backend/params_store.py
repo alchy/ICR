@@ -92,6 +92,14 @@ class ParamsStore:
 
         return result
 
+    def missing_notes(self, layer_id: str) -> set[str]:
+        """
+        Return note keys that exist in the store but have no value for layer_id.
+        Works for both scalar and per-partial layers.
+        """
+        existing = set(self.extract_layer(layer_id).keys())
+        return {k for k in self._params if k not in existing}
+
     # ── Layer update ─────────────────────────────────────────────────────────
 
     def update_layer_values(self, layer_id: str, values: dict[str, float]):

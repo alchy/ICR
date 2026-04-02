@@ -40,7 +40,7 @@ export class SplineEditor {
 
     // ── VelSelector callback ──────────────────────────────────────────────────
 
-    onSelectorChange({ selected, coherence, stickiness, keepToggled, applyPressed }) {
+    onSelectorChange({ selected, coherence, stickiness, keepToggled, applyPressed, fillPressed }) {
         const prevKept    = this._browser.getLayerState(this._layerId ?? "").kept;
         const keepChanged = keepToggled !== prevKept;
         this._selected    = selected;
@@ -49,7 +49,8 @@ export class SplineEditor {
 
         if (!this._layerId) return;
 
-        if (applyPressed)       this._doApply();
+        if (fillPressed)        this._doFillMissing();
+        else if (applyPressed)  this._doApply();
         else if (keepChanged)   keepToggled ? this._doKeep() : this._doUnkeep();
         else                    this.fitAndRedraw();
     }
@@ -278,6 +279,27 @@ export class SplineEditor {
             setStatus("Applied ✓");
         } catch (err) {
             setStatus(`Apply error: ${err.message}`, true);
+        }
+    }
+
+    async _doFillMissing() {
+        if (!this._layerId) return;
+        setStatus("Filling missing values…");
+        try {
+            const res = await api.fillMissing(
+                this._layerId, [...this._selected], this._coherence);
+
+            // Reload values so newly filled points appear as blue dots
+            const values = await api.getLayerValues(this._layerId);
+            this._layerValues.set(this._layerId, values);
+
+            const state = this._browser.getLayerState(this._layerId);
+            if (state.dotsOn) this._space.loadLayer(values, this._layer);
+
+            await this.fitAndRedraw();
+            setStatus(`Filled ${res.filled} missing values ✓`);
+        } catch (err) {
+            setStatus(`Fill error: ${err.message}`, true);
         }
     }
 
