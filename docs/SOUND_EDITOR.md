@@ -17,8 +17,7 @@ sound-editor/
 │   ├── spline_engine.py  Weighted smoothing spline (scipy)
 │   ├── sysex_bridge.py   MIDI SysEx output (mido + python-rtmidi)
 │   ├── layer_registry.py Parameter layer definitions
-│   ├── eq_editor.py      EQ curve re-fitting (wraps training/_eq_to_biquads)
-│   └── requirements.txt
+│   └── eq_editor.py      EQ curve re-fitting (wraps training/_eq_to_biquads)
 └── frontend/             Three.js + Vite  (port 5173)
     ├── index.html        Single-page app + CSS
     └── src/
@@ -42,8 +41,10 @@ sound-editor/
 ### Backend
 
 ```bash
-cd sound-editor/backend
+# Z rootu projektu (jednorázově):
 pip install -r requirements.txt
+
+cd sound-editor/backend
 uvicorn main:app --reload --port 8000
 ```
 

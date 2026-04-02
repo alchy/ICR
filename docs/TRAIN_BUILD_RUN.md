@@ -28,8 +28,8 @@ pip install numpy scipy soundfile
 # Full pipeline (NN trénink) — přidej torch:
 pip install torch
 
-# Nebo vše najednou:
-pip install -r training/requirements.txt
+# Nebo vše najednou (z rootu projektu):
+pip install -r requirements.txt
 ```
 
 | Balíček | Simple | Full |
