@@ -11,6 +11,7 @@ Public API:
 
 import json
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -70,6 +71,10 @@ class SoundbankExporter:
         samples = params["samples"]
         out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed)
 
+        n_total = len(samples)
+        print(f"Exporting params bank: {n_total} notes "
+              f"(computing rms_gain + biquad EQ per note) …", flush=True)
+        t0     = time.monotonic()
         n_done = 0
         for midi in range(21, 109):
             for vel_idx in range(8):
@@ -81,7 +86,9 @@ class SoundbankExporter:
                 out["notes"][key] = note_data
                 n_done += 1
                 if n_done % 88 == 0:
-                    print(f"  {n_done} notes …", flush=True)
+                    pct = 100 * n_done // n_total
+                    ela = time.monotonic() - t0
+                    print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
         out["n_notes"] = n_done
         self._write(out, out_path)
@@ -142,6 +149,13 @@ class SoundbankExporter:
 
         out = self._make_header("nn-hybrid:model", sr, target_rms, duration, rng_seed)
 
+        n_measured = len(measured)
+        n_total    = len(all_samples)
+        n_nn       = n_total - n_measured
+        print(f"Exporting hybrid bank: {n_total} notes "
+              f"({n_measured} measured + {n_nn} NN-generated, "
+              f"computing rms_gain + biquad EQ per note) …", flush=True)
+        t0     = time.monotonic()
         n_done = 0
         for midi in range(21, 109):
             for vel_idx in range(8):
@@ -153,7 +167,9 @@ class SoundbankExporter:
                 out["notes"][key] = note_data
                 n_done += 1
                 if n_done % 88 == 0:
-                    print(f"  {n_done} notes …", flush=True)
+                    pct = 100 * n_done // n_total
+                    ela = time.monotonic() - t0
+                    print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
         out["n_notes"] = n_done
         self._write(out, out_path)
