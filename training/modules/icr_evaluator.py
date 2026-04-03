@@ -50,7 +50,7 @@ class ICRBatchEvaluator:
         icr_exe:      Path to ICR.exe binary.
         bank_dir:     Directory with original reference WAV files.
         sr:           Sample rate (must match reference WAVs).
-        eval_midi:    12 MIDI note numbers to evaluate (auto-selected if None).
+        eval_midi:    24 MIDI note numbers to evaluate (auto-selected if None).
         eval_vels:    Velocity indices to evaluate, e.g. [0, 5].
         note_dur:     Duration in seconds for each rendered note.
         out_dir:      Directory for rendered WAVs (None = auto temp, cleaned up).
@@ -59,7 +59,7 @@ class ICRBatchEvaluator:
 
     WAV_PATTERN          = "m*-vel*-f48.wav"
     WAV_PATTERN_FALLBACK = "m*-vel*-f44.wav"
-    N_EVAL_MIDI          = 12
+    N_EVAL_MIDI          = 24
     ICR_TIMEOUT_S        = 120   # max seconds for one renderBatch call
 
     def __init__(
