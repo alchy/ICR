@@ -73,45 +73,90 @@ note = extractor.extract_note("m060-vel3-f44.wav")
   "bank_dir": "/path/to/ks-grand",
   "n_samples": 704,
   "samples": {
-    "m060_vel3": {
-      "midi": 60, "vel": 3,
-      "f0_hz": 261.63,
-      "B": 0.00041,               # inharmonicita (velocity-independent, z BSplneFitter)
-      "K_valid": 18,              # počet validních parciálů (max ~60 dle MIDI)
+
+    # ── C3 (MIDI 48) — basová nota, bohatý harmonický obsah ─────────────────
+    "m048_vel4": {
+      "midi": 48, "vel": 4,
+      "f0_hz": 130.81,
+      "B": 0.00187,               # vyšší B u bassů (tlustší struna)
+      "K_valid": 26,              # bohatý obsah — parciály až ~3.4 kHz
       "partials": [
-        # k=1 — základní tón, nejsilnější, nejdelší decay
-        { "k": 1,  "f_hz":  261.7, "A0": 14.2, "tau1": 0.52, "tau2": 4.81, "a1": 0.84, "beat_hz": 0.12, "phi": 0.0 },
-        # k=2 — první overtón, mírný beating (dvě struny)
-        { "k": 2,  "f_hz":  523.5, "A0":  8.7, "tau1": 0.38, "tau2": 3.12, "a1": 0.79, "beat_hz": 0.31, "phi": 0.0 },
-        { "k": 3,  "f_hz":  785.4, "A0":  5.1, "tau1": 0.29, "tau2": 2.44, "a1": 0.75, "beat_hz": 0.08, "phi": 0.0 },
-        { "k": 4,  "f_hz": 1047.6, "A0":  3.8, "tau1": 0.23, "tau2": 1.97, "a1": 0.71, "beat_hz": 0.19, "phi": 0.0 },
-        { "k": 5,  "f_hz": 1310.1, "A0":  2.4, "tau1": 0.18, "tau2": 1.61, "a1": 0.68, "beat_hz": 0.42, "phi": 0.0 },
-        { "k": 6,  "f_hz": 1572.9, "A0":  1.9, "tau1": 0.14, "tau2": 1.33, "a1": 0.65, "beat_hz": 0.25, "phi": 0.0 },
-        { "k": 7,  "f_hz": 1836.1, "A0":  1.3, "tau1": 0.11, "tau2": 1.12, "a1": 0.62, "beat_hz": 0.51, "phi": 0.0 },
-        { "k": 8,  "f_hz": 2099.7, "A0":  0.9, "tau1": 0.09, "tau2": 0.94, "a1": 0.59, "beat_hz": 0.17, "phi": 0.0 },
-        # ... parciály k=9..18 pokračují s klesající amplitudou a tau
-        # až k=60 je alokováno (PIANO_MAX_PARTIALS), nevalidní mají A0≈0
+        # k  f_hz    A0     tau1   tau2    a1     beat_hz  phi
+        # tau1 = rychlý decay (úder), tau2 = pomalý (dozvuk)
+        # beat_hz výrazné u bassů — 3 struny, větší rozladění
+        { "k":  1, "f_hz":  130.9, "A0": 18.4, "tau1": 1.21, "tau2": 9.83, "a1": 0.87, "beat_hz": 0.08, "phi": 0.0 },
+        { "k":  2, "f_hz":  261.8, "A0": 12.7, "tau1": 0.84, "tau2": 7.21, "a1": 0.83, "beat_hz": 0.41, "phi": 0.0 },
+        { "k":  3, "f_hz":  392.8, "A0":  9.3, "tau1": 0.61, "tau2": 5.44, "a1": 0.79, "beat_hz": 0.19, "phi": 0.0 },
+        { "k":  4, "f_hz":  523.9, "A0":  7.1, "tau1": 0.47, "tau2": 4.12, "a1": 0.76, "beat_hz": 0.63, "phi": 0.0 },
+        { "k":  5, "f_hz":  655.2, "A0":  5.4, "tau1": 0.38, "tau2": 3.31, "a1": 0.73, "beat_hz": 0.35, "phi": 0.0 },
+        { "k":  6, "f_hz":  786.7, "A0":  4.2, "tau1": 0.31, "tau2": 2.73, "a1": 0.70, "beat_hz": 0.82, "phi": 0.0 },
+        { "k":  7, "f_hz":  918.4, "A0":  3.1, "tau1": 0.25, "tau2": 2.28, "a1": 0.67, "beat_hz": 0.27, "phi": 0.0 },
+        { "k":  8, "f_hz": 1050.3, "A0":  2.4, "tau1": 0.21, "tau2": 1.94, "a1": 0.64, "beat_hz": 0.51, "phi": 0.0 },
+        { "k":  9, "f_hz": 1182.4, "A0":  1.8, "tau1": 0.17, "tau2": 1.67, "a1": 0.61, "beat_hz": 0.44, "phi": 0.0 },
+        { "k": 10, "f_hz": 1314.7, "A0":  1.4, "tau1": 0.14, "tau2": 1.45, "a1": 0.58, "beat_hz": 0.38, "phi": 0.0 },
+        { "k": 11, "f_hz": 1447.2, "A0":  1.1, "tau1": 0.12, "tau2": 1.27, "a1": 0.56, "beat_hz": 0.71, "phi": 0.0 },
+        { "k": 12, "f_hz": 1579.9, "A0":  0.8, "tau1": 0.10, "tau2": 1.12, "a1": 0.53, "beat_hz": 0.29, "phi": 0.0 },
+        # k=13..26 pokračují s dále klesající amplitudou (A0 < 0.5)
+        # k=27..60 alokováno, A0 ≈ 0 (pod extrakčním prahem SNR)
       ],
       "noise": {
-        "attack_tau":          0.012,   # doba náběhu šumu [s]
-        "A_noise":             0.78,    # amplituda šumu
-        "centroid_hz":      2400.0,     # spektrální těžiště šumu
-        "spectral_slope_db_oct": -3.0   # sklon spektra šumu [dB/oct]
+        "attack_tau":          0.018,   # o něco delší náběh u bassů
+        "A_noise":             1.12,
+        "centroid_hz":      1800.0,     # nižší těžiště — bas má méně výškového šumu
+        "spectral_slope_db_oct": -4.2
       },
-      "rms_gain":   0.063,      # kalibrační zesílení pro target_rms
-      "duration_s": 3.0,        # délka rendrované noty
-      "_interpolated": False    # True = NN-generovaná nota (ne měřená)
+      "rms_gain":   0.071,
+      "duration_s": 3.0,
+      "_interpolated": False
+    },
+
+    # ── C5 (MIDI 72) — výšková nota, méně parciálů (Nyquist omezení) ────────
+    "m072_vel4": {
+      "midi": 72, "vel": 4,
+      "f0_hz": 523.25,
+      "B": 0.00028,               # nižší B u výšek (tenčí struna)
+      "K_valid": 9,               # parciály k=9 → ~4.7 kHz, dále pod SNR prahem
+      "partials": [
+        { "k": 1, "f_hz":  523.3, "A0": 11.2, "tau1": 0.31, "tau2": 2.94, "a1": 0.82, "beat_hz": 0.06, "phi": 0.0 },
+        { "k": 2, "f_hz": 1046.7, "A0":  6.8, "tau1": 0.22, "tau2": 2.11, "a1": 0.77, "beat_hz": 0.14, "phi": 0.0 },
+        { "k": 3, "f_hz": 1570.3, "A0":  3.9, "tau1": 0.16, "tau2": 1.58, "a1": 0.73, "beat_hz": 0.09, "phi": 0.0 },
+        { "k": 4, "f_hz": 2094.1, "A0":  2.1, "tau1": 0.12, "tau2": 1.24, "a1": 0.69, "beat_hz": 0.21, "phi": 0.0 },
+        { "k": 5, "f_hz": 2618.2, "A0":  1.2, "tau1": 0.09, "tau2": 1.01, "a1": 0.65, "beat_hz": 0.17, "phi": 0.0 },
+        { "k": 6, "f_hz": 3142.5, "A0":  0.7, "tau1": 0.07, "tau2": 0.84, "a1": 0.62, "beat_hz": 0.11, "phi": 0.0 },
+        { "k": 7, "f_hz": 3667.1, "A0":  0.4, "tau1": 0.06, "tau2": 0.71, "a1": 0.59, "beat_hz": 0.08, "phi": 0.0 },
+        { "k": 8, "f_hz": 4192.0, "A0":  0.2, "tau1": 0.05, "tau2": 0.61, "a1": 0.56, "beat_hz": 0.05, "phi": 0.0 },
+        { "k": 9, "f_hz": 4717.2, "A0":  0.1, "tau1": 0.04, "tau2": 0.53, "a1": 0.53, "beat_hz": 0.03, "phi": 0.0 },
+        # k=10..60 pod SNR prahem — A0 ≈ 0
+      ],
+      "noise": {
+        "attack_tau":          0.008,
+        "A_noise":             0.54,
+        "centroid_hz":      3600.0,
+        "spectral_slope_db_oct": -2.8
+      },
+      "rms_gain":   0.058,
+      "duration_s": 3.0,
+      "_interpolated": False
     }
-    # ... 703 dalších not (88 MIDI × 8 vel)
+
+    # ... 702 dalších not
   }
 }
 ```
 
-> **Počet parciálů:** reálně 8–20 validních pro střední polohu klaviatury
-> (C4 = MIDI 60), 3–8 pro krajní basy (MIDI 21–32), až 30+ pro výšky
-> kde jsou parciály v Nyquistovém pásmu kratší. `K_valid` udává počet
-> parciálů s dostatečným SNR; zbývající sloty do 60 jsou inicializovány
-> s `A0≈0` a exporter je nezahrnuje do výstupu.
+> **Počet parciálů podle polohy na klaviatuře:**
+>
+> | Oblast | MIDI | f0 [Hz] | K_valid (typicky) | Omezující faktor |
+> |---|---|---|---|---|
+> | Hluboký bas | 21–32 | 27–69 | 30–50 | SNR (slabé vyšší harmonické) |
+> | Bas | 33–48 | 69–131 | 20–30 | SNR |
+> | Střed | 49–72 | 131–523 | 10–20 | SNR + Nyquist |
+> | Výšky | 73–96 | 523–2093 | 4–10 | Nyquist (parciály nad 20 kHz) |
+> | Pikola | 97–108 | 2093–4186 | 2–5 | Nyquist |
+>
+> `K_valid` udává počet parciálů s dostatečným SNR při extrakci.
+> Sloty k=K_valid+1 až k=60 (`PIANO_MAX_PARTIALS`) jsou alokovány s `A0≈0`
+> a exporter je do JSON nezahrnuje.
 
 ### Poznámky
 
