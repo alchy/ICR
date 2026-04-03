@@ -33,13 +33,18 @@ Legacy workflows
   full                    Extract -> filter -> EQ -> NN -> MRSTFT finetune -> export hybrid
   experimental            Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
 
-Output naming (--out optional)
-───────────────────────────────
-  soundbanks/params-{bank_name}-raw-nn-icreval.json
-  soundbanks/params-{bank_name}-spl-nn-icreval.json
-  soundbanks/params-{bank_name}-spl-ext-nn-icreval.json
-  soundbanks/params-{bank_name}-spl-icrtarget-nn-icreval.json
-  soundbanks/params-{bank_name}-spl-ext-icrtarget-nn-icreval.json
+Output naming (--out sets hybrid path; nn path derived automatically)
+───────────────────────────────────────────────────────────────────
+  soundbanks/{bank_name}-raw-nn-icreval-hybrid.json      ← raw measured + NN interpolated
+  soundbanks/{bank_name}-raw-nn-icreval-nn.json          ← pure NN (all 704 notes)
+  soundbanks/{bank_name}-spl-nn-icreval-hybrid.json
+  soundbanks/{bank_name}-spl-nn-icreval-nn.json
+  soundbanks/{bank_name}-spl-ext-nn-icreval-hybrid.json
+  soundbanks/{bank_name}-spl-ext-nn-icreval-nn.json
+  soundbanks/{bank_name}-spl-icrtarget-nn-icreval-hybrid.json
+  soundbanks/{bank_name}-spl-icrtarget-nn-icreval-nn.json
+  soundbanks/{bank_name}-spl-ext-icrtarget-nn-icreval-hybrid.json
+  soundbanks/{bank_name}-spl-ext-icrtarget-nn-icreval-nn.json
 
 All console output is also written to:
   training-logs/run-{cmd}-{bank_name}-{timestamp}.log
@@ -105,7 +110,7 @@ def _start_tee(cmd: str, bank: str) -> _Tee | None:
 
 def _default_out(bank: str, cmd: str) -> str:
     name = Path(bank).name
-    return str(REPO_ROOT / "soundbanks" / f"params-{name}-{cmd}.json")
+    return str(REPO_ROOT / "soundbanks" / f"{name}-{cmd}-hybrid.json")
 
 
 # ── Argument parser ───────────────────────────────────────────────────────────

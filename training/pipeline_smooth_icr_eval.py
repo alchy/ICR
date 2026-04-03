@@ -187,7 +187,7 @@ def run(
     print(f"\n[4/4] Exporting hybrid + pure-NN banks...")
     SoundbankExporter().hybrid(model, params, out_path)
 
-    pure_nn_path = out_path.replace(".json", "-pure-nn.json")
+    pure_nn_path = str(Path(out_path).parent / (Path(out_path).stem.replace("-hybrid", "") + "-nn.json"))
     print(f"\nExporting pure-NN bank -> {pure_nn_path}")
     SoundbankExporter().pure_nn(model, params, pure_nn_path)
 
