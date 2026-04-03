@@ -4,7 +4,7 @@ Items ordered by priority. Parked here for evaluation after current training exp
 
 ---
 
-## Po dokončení tréninku (icr-eval / smooth-icr-eval / full-spline-icr-eval)
+## Po dokončení tréninku (icr-eval / smooth-icr-eval)
 
 ### 1. B vyčlenit ze NN — vysoká priorita
 
@@ -20,7 +20,42 @@ velocity-independent — závisí na struně, ne na síle úderu.
 
 ---
 
-### 2. tau2 loss ve spline pipelinech — sledovat
+### 2. B_g / B_v vyhodit z smooth penalty — nízká priorita, snadná oprava
+
+**Pozorování:** V NoB modelu vrací `forward_B()` samé nuly. Smooth penalty přesto
+počítá `(B_g[1:]-B_g[:-1]).pow(2).mean()` a `(B_v[1:]-B_v[:-1]).pow(2).mean()` —
+výsledek je vždy 0, ale zbytečně zatěžuje každou iteraci.
+
+**Oprava:** Vyhodit `B_g` a `B_v` z `_run_training_exp` smooth penalty bloku.
+Řádky v `profile_trainer_exp.py`:
+```python
+B_g   = model.forward_B(mf_grid, vf_ref).squeeze(-1)   # ← odstranit
+...
+smooth_midi += (B_g[1:]-B_g[:-1]).pow(2).mean()         # ← odstranit
+
+B_v   = model.forward_B(mf60, vf_grid).squeeze(-1)      # ← odstranit
+smooth_vel += (B_v[1:]-B_v[:-1]).pow(2).mean()          # ← odstranit
+```
+
+---
+
+### 3. EQ hlavu oddělit od hlavního lossu — střední priorita
+
+**Pozorování (ep. 400–650):** `eq` tvoří ~45 % val lossu (eq≈2.7 vs ostatní ≤1.3).
+EQFitter předvýpočítá biquady před tréninkem — NN EQ hlava dolaďuje zbytek, ale
+saturuje gradient podobně jako B dřív.
+
+**Návrh:**
+- Snížit weight EQ termu v loss (např. 0.3× místo 1.0×), nebo
+- Trénovat EQ hlavu separátní optimizer s nižším lr, nebo
+- Zmrazit EQ hlavu po prvních N epochách (EQFitter výstup je dostatečný základ)
+
+**Otázka k zodpovězení po A/B poslechu:** přispívá NN EQ hlava k lepšímu zvuku,
+nebo jen přetěžuje trénink? Pokud bez ní zní banka stejně → kandidát na odstranění.
+
+---
+
+### 4. tau2 loss ve spline pipelinech — sledovat
 
 **Pozorování (ep.350):** smooth/full-spline mají tau2=1.26 vs icr-eval tau2=0.84, a roste.
 Spline-smoothed targety mají přísnější tau2 křivku než raw extrakty.
@@ -31,7 +66,7 @@ Spline-smoothed targety mají přísnější tau2 křivku než raw extrakty.
 
 ---
 
-### 3. sm_vel penalizaci odstranit — nízká priorita
+### 5. sm_vel penalizaci odstranit — nízká priorita
 
 **Pozorování:** sm_vel ≈ 0 ve všech runech od začátku. NN přirozeně produkuje hladké
 velocity křivky → penalizace nedělá nic, jen zatěžuje loss breakdown.
@@ -40,7 +75,7 @@ velocity křivky → penalizace nedělá nic, jen zatěžuje loss breakdown.
 
 ---
 
-### 4. ICR early-stop averaging — střední priorita
+### 6. ICR early-stop averaging — střední priorita
 
 **Pozorování:** ICR-MRSTFT metriky oscilují (~0.02 mezi evaly) kvůli renderovací
 variabilitě. Early-stop rozhodnutí na základě jednoho evalu je hlučné.
@@ -49,7 +84,7 @@ variabilitě. Early-stop rozhodnutí na základě jednoho evalu je hlučné.
 
 ---
 
-### 5. full-spline-icr-eval vs smooth-icr-eval — rozhodnutí
+### 7. full-spline-icr-eval vs smooth-icr-eval — rozhodnutí
 
 **Pozorování (ep.350):** ICR-MRSTFT rozdíl pouze 0.005 — v rámci šumu.
 `extend_partials` nepřináší měřitelný benefit v metrice.
@@ -59,7 +94,7 @@ Pokud bez auditelného rozdílu → full-spline-icr-eval zrušit, snížit poče
 
 ---
 
-### 6. Train/val shuffle — diskutováno, odloženo
+### 8. Train/val shuffle — diskutováno, odloženo
 
 **Kontext:** Val set (65 sampů, 17 %) je deterministicky fixní split po MIDI pozicích (každá 5. nota).
 Zvažovali jsme periodický resplit mezi tréninkovými cykly, aby NN viděla postupně všechna měřená data.
