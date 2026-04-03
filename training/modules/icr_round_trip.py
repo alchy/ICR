@@ -16,8 +16,11 @@ Round-trip corrected targets capture this offset automatically:
                                                               ↕ MSE
                                                           (training target)
 
-The NN learns "what params does ICR need to produce the intended sound", not
-"what params did we measure from the real piano".
+The NN learns to predict params_rt — values consistent with ICR's synthesis model.
+This corrects the systematic offset between what the extractor measures from the real
+piano (smooth_params) and what it measures from ICR-rendered audio of those same params
+(params_rt). The NN output is thus calibrated to ICR's operating range, not to raw
+physical measurements.
 
 EQ handling
 ───────────

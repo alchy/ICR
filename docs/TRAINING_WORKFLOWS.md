@@ -35,8 +35,18 @@ ICR vstupuje do tréninku dvěma způsoby — podle role v názvu:
 
 Gradient přes ICR.exe v žádném případě nepochází (C++ binary, non-diferenciabilní).
 V `icrtarget` workflow však ICR zásadně ovlivňuje trénink — ne přes gradient, ale tím,
-že mění samotné targety: NN se učí reprodukovat to, co ICR skutečně produkuje,
-ne co extrakce naměřila z reálného klavíru.
+že mění samotné targety:
+
+```
+smooth_params → ICR render → WAV_icr → extractor → params_rt
+                                                        ↑
+                                        NN loss = MSE(NN_output, params_rt)
+```
+
+`params_rt` jsou parametry extrahované z ICR-generovaného zvuku. NN se učí predikovat
+hodnoty přizpůsobené ICR syntéznímu modelu — opravuje systematický offset mezi tím,
+co extraktor naměřil z reálného klavíru (`smooth_params`), a tím, co extraktor naměří
+z ICR-rendered zvuku se stejnými vstupními parametry (`params_rt`).
 
 ---
 
