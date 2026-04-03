@@ -217,35 +217,6 @@ def _build_parser() -> argparse.ArgumentParser:
     fsi.add_argument("--skip-outliers-detection", action="store_true")
     fsi.add_argument("--sr-tag",        default="f48")
 
-    # ── b-spline-icr-eval ────────────────────────────────────────────────────
-    bsi = sub.add_parser(
-        "b-spline-icr-eval",
-        help="Like smooth-icr-eval but B (inharmonicity) is fitted as a spline "
-             "from measured notes and excluded from NN training — eliminates the "
-             "dominant loss term and frees gradient capacity for other parameters",
-    )
-    bsi.add_argument("--bank",          required=True, help="WAV bank directory")
-    bsi.add_argument("--out",           default=None,
-                     help="Output JSON (default: soundbanks/params-{bank}-b-spline-icr-eval.json)")
-    bsi.add_argument("--workers",       type=int, default=None,
-                     help="Parallel workers (default: CPU count)")
-    bsi.add_argument("--epochs",        type=int, default=5000,
-                     help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    bsi.add_argument("--icr-exe",       default="build/bin/Release/ICR.exe",
-                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
-    bsi.add_argument("--note-dur",      type=float, default=3.0,
-                     help="ICR render duration per note in seconds (default: 3.0)")
-    bsi.add_argument("--icr-patience",  type=int, default=15,
-                     help="Early stop after N evals without improvement (default: 15)")
-    bsi.add_argument("--auto-anchors",  type=int, default=12,
-                     help="Auto-anchor count for spline smoothing (default: 12)")
-    bsi.add_argument("--b-stiffness",   type=float, default=2.0,
-                     help="B spline stiffness — higher = smoother B curve (default: 2.0)")
-    bsi.add_argument("--skip-outliers-detection", action="store_true",
-                     help="Skip structural outlier detection step")
-    bsi.add_argument("--sr-tag",        default="f48",
-                     help="SR suffix in filenames: f44 or f48 (default: f48)")
-
     # ── icr-eval ─────────────────────────────────────────────────────────────
     icr = sub.add_parser(
         "icr-eval",
@@ -364,24 +335,6 @@ def main() -> int:
                 note_dur      = args.note_dur,
                 icr_patience  = args.icr_patience,
                 auto_anchors  = args.auto_anchors,
-            )
-            print(f"\nDone -> {out}")
-
-        elif args.cmd == "b-spline-icr-eval":
-            out_path = args.out or _default_out(args.bank, "b-spline-icr-eval")
-            from training.pipeline_b_spline_icr_eval import run
-            model, b_fitter, out = run(
-                bank_dir      = args.bank,
-                out_path      = out_path,
-                epochs        = args.epochs,
-                workers       = args.workers,
-                skip_outliers = args.skip_outliers_detection,
-                sr_tag        = args.sr_tag,
-                icr_exe       = args.icr_exe,
-                note_dur      = args.note_dur,
-                icr_patience  = args.icr_patience,
-                auto_anchors  = args.auto_anchors,
-                b_stiffness   = args.b_stiffness,
             )
             print(f"\nDone -> {out}")
 

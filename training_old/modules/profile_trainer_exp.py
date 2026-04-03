@@ -371,7 +371,7 @@ def _expand_head(head: nn.Sequential) -> nn.Sequential:
     return nn.Sequential(*new_mods)
 
 
-def _expand_all_heads(model: "InstrumentProfileEncExpWithB") -> int:
+def _expand_all_heads(model: "InstrumentProfileEncExp") -> int:
     """
     Expand every head in the model by one layer (identity init).
     Returns number of heads expanded.
@@ -586,22 +586,9 @@ def generate_profile_exp(
     """
     Evaluate InstrumentProfileExp at all (midi, vel) positions.
 
-    Dispatcher: if the model carries a ``_b_fitter`` attribute (set by
-    ProfileTrainerEncExp.train), delegates to generate_profile_exp_no_b so
-    that B is sourced from the spline rather than the NN.  This keeps all
-    callers (SoundbankExporter, pipelines) working without changes.
-
     Like generate_profile but B, dur, wf, tau_ratio, df, eq are computed
     per-velocity (inner loop over vel moved to enclose all network calls).
     """
-    b_fitter = getattr(model, "_b_fitter", None)
-    if b_fitter is not None:
-        return generate_profile_exp_no_b(
-            model, ds, b_fitter,
-            midi_from=midi_from, midi_to=midi_to,
-            sr=sr, orig_samples=orig_samples,
-        )
-
     model.eval()
     samples_out = {}
     eq_freqs    = ds.get("eq_freqs")
@@ -769,10 +756,10 @@ class ProfileTrainerExp(ProfileTrainer):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# InstrumentProfileEncExpWithB — shared per-axis encoders
+# InstrumentProfileEncExp — shared per-axis encoders
 # ─────────────────────────────────────────────────────────────────────────────
 
-class InstrumentProfileEncExpWithB(InstrumentProfileExp):
+class InstrumentProfileEncExp(InstrumentProfileExp):
     """
     Like InstrumentProfileExp (all nets take velocity) but with shared encoders
     per axis: midi_enc, vel_enc, k_enc, freq_enc.
@@ -881,19 +868,19 @@ class InstrumentProfileEncExpWithB(InstrumentProfileExp):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ProfileTrainerEncExpWithB
+# ProfileTrainerEncExp
 # ─────────────────────────────────────────────────────────────────────────────
 
-class ProfileTrainerEncExpWithB(ProfileTrainerExp):
+class ProfileTrainerEncExp(ProfileTrainerExp):
     """
-    Train InstrumentProfileEncExpWithB — shared per-axis encoders + velocity on all nets.
+    Train InstrumentProfileEncExp — shared per-axis encoders + velocity on all nets.
 
     Reuses build_dataset_exp / _compute_data_loss_exp / _run_training_exp /
     generate_profile_exp from the experimental module unchanged.
 
     API identical to ProfileTrainerExp:
-        model = ProfileTrainerEncExpWithB().train(params, epochs=3000)
-        model = ProfileTrainerEncExpWithB().load("profile-enc-exp.pt")
+        model = ProfileTrainerEncExp().train(params, epochs=3000)
+        model = ProfileTrainerEncExp().load("profile-enc-exp.pt")
     """
 
     def train(
@@ -906,20 +893,20 @@ class ProfileTrainerEncExpWithB(ProfileTrainerExp):
         verbose:       bool  = True,
         icr_evaluator         = None,
         icr_patience:  int   = 15,
-    ) -> InstrumentProfileEncExpWithB:
+    ) -> InstrumentProfileEncExp:
         samples  = params["samples"]
         measured = {k: v for k, v in samples.items() if not v.get("_interpolated")}
 
         train_s, val_s = _split_val_midis(measured, val_frac)
         val_midis = sorted({s["midi"] for s in val_s.values()})
-        print(f"ProfileTrainerEncExpWithB: {len(measured)} measured samples  "
+        print(f"ProfileTrainerEncExp: {len(measured)} measured samples  "
               f"→  train={len(train_s)}  val={len(val_s)} "
               f"(MIDI {val_midis[0]}–{val_midis[-1]}, every ~{len(measured)//max(len(val_s),1)}th)")
         print(f"  Mode: experimental-enc — shared encoders "
-              f"(midi→{InstrumentProfileEncExpWithB.ENC_MIDI}  "
-              f"vel→{InstrumentProfileEncExpWithB.ENC_VEL}  "
-              f"k→{InstrumentProfileEncExpWithB.ENC_K}  "
-              f"freq→{InstrumentProfileEncExpWithB.ENC_FREQ})")
+              f"(midi→{InstrumentProfileEncExp.ENC_MIDI}  "
+              f"vel→{InstrumentProfileEncExp.ENC_VEL}  "
+              f"k→{InstrumentProfileEncExp.ENC_K}  "
+              f"freq→{InstrumentProfileEncExp.ENC_FREQ})")
         if icr_evaluator is not None:
             print(f"  Eval: ICR-MRSTFT (early stop patience={icr_patience} evals, "
                   f"no MRSTFTFinetuner)")
@@ -929,7 +916,7 @@ class ProfileTrainerEncExpWithB(ProfileTrainerExp):
         val_ds   = build_dataset_exp(val_s)
         _ds_sizes = {k: v.shape[0] for k, v in train_ds["batches"].items() if hasattr(v, "shape")}
         print(f"  train batches: { {k: v for k, v in _ds_sizes.items()} }", flush=True)
-        model    = InstrumentProfileEncExpWithB(hidden=hidden, head_hidden=32)
+        model    = InstrumentProfileEncExp(hidden=hidden, head_hidden=32)
 
         n_p = sum(p.numel() for p in model.parameters())
         print(f"Model parameters: {n_p:,}  (encoders hidden={hidden}, heads hidden=32)", flush=True)
@@ -946,284 +933,6 @@ class ProfileTrainerEncExpWithB(ProfileTrainerExp):
         model.eval()
         return model
 
-    def load(self, path: str) -> InstrumentProfileEncExpWithB:
-        ckpt   = torch.load(path, map_location="cpu", weights_only=False)
-        hidden = ckpt.get("hidden", 64)
-        model  = InstrumentProfileEncExpWithB(hidden=hidden)
-
-        missing, unexpected = model.load_state_dict(ckpt["state_dict"], strict=False)
-        if missing:
-            print(f"  [load] new params (fresh init): {missing}")
-        if unexpected:
-            print(f"  [load] unexpected keys (ignored): {unexpected}")
-
-        model.eval()
-        return model
-
-    def predict_all(
-        self,
-        model:     InstrumentProfileEncExpWithB,
-        midi_from: int = 21,
-        midi_to:   int = 108,
-        sr:        int = 44_100,
-    ) -> dict:
-        ds      = {"batches": {}, "eq_freqs": None}
-        samples = generate_profile_exp(
-            model, ds,
-            midi_from=midi_from, midi_to=midi_to,
-            sr=sr, orig_samples=None,
-        )
-        return {"samples": samples, "n_samples": len(samples)}
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# B-spline helpers (imported here so callers only need profile_trainer_exp)
-# ─────────────────────────────────────────────────────────────────────────────
-
-from training.modules.b_spline_fitter import BSplneFitter   # noqa: E402
-
-
-def build_dataset_exp_no_b(samples: dict) -> dict:
-    """
-    Like build_dataset_exp but removes B_mf / B_vf / B_y from the batch dict.
-
-    Since _compute_data_loss_exp checks ``if "B_mf" in b:`` before computing
-    the B loss term, removing these keys eliminates B from the gradient.
-    """
-    ds = build_dataset_exp(samples)
-    for key in ("B_mf", "B_vf", "B_y"):
-        ds["batches"].pop(key, None)
-    ds["n_B"] = 0
-    return ds
-
-
-def generate_profile_exp_no_b(
-    model:        "InstrumentProfileEncExp",
-    ds:           dict,
-    b_fitter:     BSplneFitter,
-    midi_from:    int  = 21,
-    midi_to:      int  = 108,
-    sr:           int  = 44_100,
-    orig_samples: dict = None,
-) -> dict:
-    """
-    Like generate_profile_exp_with_b but B is sourced from b_fitter (1-D spline
-    over MIDI) instead of the NN.
-
-    B is evaluated once per MIDI and shared across all 8 velocity layers —
-    consistent with its physical interpretation as velocity-independent.
-    """
-    model.eval()
-    samples_out = {}
-    eq_freqs    = ds.get("eq_freqs")
-
-    with torch.no_grad():
-        for midi in range(midi_from, midi_to + 1):
-            mf = midi_feat(midi)
-            f0 = midi_to_hz(midi)
-            n_partials = max(1, int((sr / 2) / f0))
-
-            B = b_fitter.predict(midi)   # one value per MIDI, all velocities
-
-            for vel in range(8):
-                vf  = vel_feat(vel)
-                key = f"m{midi:03d}_vel{vel}"
-
-                dur = float(np.clip(float(torch.exp(model.forward_dur(mf, vf)).item()), 0.3, None))
-                wf  = float(np.clip(float(torch.exp(model.forward_wf(mf, vf)).item()),  0.1, 10.0))
-
-                spectral_eq: dict = {}
-                if eq_freqs is not None:
-                    gains = [
-                        float(np.clip(float(model.forward_eq(
-                            mf, freq_feat(float(fhz)), vf).item()), -30, 20))
-                        for fhz in eq_freqs
-                    ]
-                    spectral_eq = {
-                        "freqs_hz":            [round(float(f), 2) for f in eq_freqs],
-                        "gains_db":            [round(g, 4) for g in gains],
-                        "stereo_width_factor": round(wf, 4),
-                    }
-
-                noise_pred = model.forward_noise(mf, vf).squeeze(0)
-                noise_out  = {
-                    "attack_tau":  round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
-                    "centroid_hz": round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
-                    "A_noise":     round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
-                }
-
-                partials = []
-                for k in range(1, n_partials + 1):
-                    kf  = k_feat(k)
-                    f_k = k * f0 * math.sqrt(1.0 + B * k ** 2)
-                    if f_k >= sr / 2:
-                        break
-
-                    tau1_k1 = float(torch.exp(model.forward_tau1_k1(mf, vf)).item())
-                    if k == 1:
-                        tau1 = tau1_k1
-                    else:
-                        log_ratio  = float(model.forward_tau_ratio(mf, kf, vf).item())
-                        log_k_bias = -0.3 * math.log(k)
-                        log_ratio  = max(log_k_bias - 2.0, min(0.0, log_ratio))
-                        tau1 = tau1_k1 * math.exp(log_ratio)
-                    tau1 = max(tau1, 0.005)
-
-                    biexp    = model.forward_biexp(mf, kf, vf).squeeze(0)
-                    a1_val   = float(np.clip(float(torch.sigmoid(biexp[0]).item()), 0.05, 0.99))
-                    tau2_val = tau1 * max(float(torch.exp(biexp[1]).item()), 3.0)
-                    emit_biexp = a1_val < 0.92
-
-                    a0_ratio = float(np.clip(float(torch.exp(model.forward_A0(mf, kf, vf)).item()), 1e-6, None))
-                    df       = float(np.clip(float(torch.exp(model.forward_df(mf, kf, vf)).item()), 0.0, None))
-
-                    entry = {
-                        "k": k, "f_hz": round(f_k, 4),
-                        "A0": round(a0_ratio, 6), "tau1": round(tau1, 6),
-                        "a1": round(a1_val, 4), "beat_hz": round(df, 6),
-                    }
-                    if emit_biexp:
-                        entry["tau2"] = round(tau2_val, 6)
-                    partials.append(entry)
-
-                sample = {
-                    "midi": midi, "vel": vel,
-                    "f0_nominal_hz": round(f0, 6),
-                    "B": round(float(B), 8), "duration_s": round(float(dur), 3),
-                    "partials": partials, "noise": noise_out,
-                    "_interpolated": True,
-                }
-                if spectral_eq:
-                    sample["spectral_eq"] = spectral_eq
-
-                if orig_samples and key in orig_samples and not orig_samples[key].get("_interpolated"):
-                    sample = copy.deepcopy(orig_samples[key])
-                    sample["_interpolated"] = False
-
-                samples_out[key] = sample
-
-    return samples_out
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# InstrumentProfileEncExp — default model (B from spline, not from NN)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class InstrumentProfileEncExp(InstrumentProfileEncExpWithB):
-    """
-    Default instrument profile model — identical to InstrumentProfileEncExpWithB
-    except that B_head is removed.
-
-    B (inharmonicity) is physically velocity-independent (string stiffness) and
-    its extracted values have high per-note variance, causing B loss to dominate
-    the multi-task gradient (~5–8× other terms).  Removing B_head:
-
-        - Frees ~1 K params + optimizer state.
-        - Redirects shared midi_enc gradient capacity to the 10 remaining heads.
-        - Eliminates the dominant noise source from training targets.
-
-    B is supplied at inference time by BSplneFitter (a smooth 1-D spline over
-    MIDI fitted from measured notes) stored on the model as ``_b_fitter``.
-    generate_profile_exp detects this attribute and dispatches automatically to
-    generate_profile_exp_no_b.
-
-    To retain the old B-predicting behaviour use InstrumentProfileEncExpWithB /
-    ProfileTrainerEncExpWithB explicitly.
-    """
-
-    def __init__(self, hidden: int = 64, head_hidden: int = 32):
-        super().__init__(hidden=hidden, head_hidden=head_hidden)
-        del self.B_head
-
-    def forward_B(self, mf, vf=None):
-        """Return zeros — B smooth-penalty contribution is zero (B is smooth by spline)."""
-        n = mf.shape[0] if mf.dim() > 1 else 1
-        return torch.zeros(n, 1, dtype=mf.dtype, device=mf.device)
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# ProfileTrainerEncExp — default trainer (auto-fits B spline)
-# ─────────────────────────────────────────────────────────────────────────────
-
-class ProfileTrainerEncExp(ProfileTrainerEncExpWithB):
-    """
-    Default trainer — uses InstrumentProfileEncExp (no B_head) and auto-fits a
-    BSplneFitter from measured notes before training.
-
-    B spline is attached to the returned model as ``model._b_fitter`` so that
-    generate_profile_exp and SoundbankExporter.hybrid() dispatch correctly
-    without any changes to the callers.
-
-    API is identical to ProfileTrainerEncExpWithB:
-        model = ProfileTrainerEncExp().train(params, epochs=5000)
-
-    Pass an explicit ``b_fitter`` to reuse a spline fitted elsewhere:
-        b_fitter = BSplneFitter().fit(params["samples"])
-        model    = ProfileTrainerEncExp().train(params, b_fitter=b_fitter)
-    """
-
-    def train(
-        self,
-        params:        dict,
-        b_fitter:      BSplneFitter = None,
-        epochs:        int   = 10000,
-        hidden:        int   = 64,
-        lr:            float = 0.003,
-        val_frac:      float = 0.15,
-        verbose:       bool  = True,
-        icr_evaluator         = None,
-        icr_patience:  int   = 15,
-    ) -> InstrumentProfileEncExp:
-        from training.modules.profile_trainer import _split_val_midis
-
-        samples  = params["samples"]
-        measured = {k: v for k, v in samples.items() if not v.get("_interpolated")}
-
-        if b_fitter is None:
-            print("  Fitting B spline from measured notes (auto) ...")
-            b_fitter = BSplneFitter().fit(measured)
-
-        train_s, val_s = _split_val_midis(measured, val_frac)
-        val_midis = sorted({s["midi"] for s in val_s.values()})
-        enc = InstrumentProfileEncExpWithB
-        print(
-            f"ProfileTrainerEncExp: {len(measured)} measured samples  "
-            f"→  train={len(train_s)}  val={len(val_s)} "
-            f"(MIDI {val_midis[0]}–{val_midis[-1]}, every ~{len(measured)//max(len(val_s),1)}th)"
-        )
-        print(
-            f"  Mode: enc (B=spline) — shared encoders "
-            f"(midi→{enc.ENC_MIDI}  vel→{enc.ENC_VEL}  k→{enc.ENC_K}  freq→{enc.ENC_FREQ})"
-        )
-        if icr_evaluator is not None:
-            print(f"  Eval: ICR-MRSTFT (early stop patience={icr_patience} evals, no MRSTFTFinetuner)")
-
-        print("Building datasets (B excluded from targets) ...", flush=True)
-        train_ds = build_dataset_exp_no_b(train_s)
-        val_ds   = build_dataset_exp_no_b(val_s)
-        _ds_sizes = {k: v.shape[0] for k, v in train_ds["batches"].items() if hasattr(v, "shape")}
-        print(f"  train batches: { {k: v for k, v in _ds_sizes.items()} }", flush=True)
-
-        model = InstrumentProfileEncExp(hidden=hidden, head_hidden=32)
-        n_p   = sum(p.numel() for p in model.parameters())
-        print(f"Model parameters: {n_p:,}  (no B_head; B from spline)", flush=True)
-
-        if icr_evaluator is not None:
-            print(f"Training {epochs} epochs  (ICR-MRSTFT early stop) ...", flush=True)
-        else:
-            print(f"Training {epochs} epochs  (progressive depth: expand heads at plateau) ...", flush=True)
-
-        _run_training_exp(
-            model, train_ds, val_ds=val_ds,
-            epochs=epochs, lr=lr, verbose=verbose,
-            all_params=params,
-            icr_evaluator=icr_evaluator,
-            icr_patience=icr_patience,
-        )
-        model._b_fitter = b_fitter   # attached for generate_profile_exp / SoundbankExporter
-        model.eval()
-        return model
-
     def load(self, path: str) -> InstrumentProfileEncExp:
         ckpt   = torch.load(path, map_location="cpu", weights_only=False)
         hidden = ckpt.get("hidden", 64)
@@ -1237,3 +946,18 @@ class ProfileTrainerEncExp(ProfileTrainerEncExpWithB):
 
         model.eval()
         return model
+
+    def predict_all(
+        self,
+        model:     InstrumentProfileEncExp,
+        midi_from: int = 21,
+        midi_to:   int = 108,
+        sr:        int = 44_100,
+    ) -> dict:
+        ds      = {"batches": {}, "eq_freqs": None}
+        samples = generate_profile_exp(
+            model, ds,
+            midi_from=midi_from, midi_to=midi_to,
+            sr=sr, orig_samples=None,
+        )
+        return {"samples": samples, "n_samples": len(samples)}
