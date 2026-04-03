@@ -3,9 +3,57 @@ training/modules/b_spline_fitter.py
 ──────────────────────────────────────
 Fit inharmonicity coefficient B as a smooth 1-D spline over MIDI.
 
-B is physically velocity-independent (depends on string material and tension
-only), so a single per-MIDI curve captures all relevant information without NN
-capacity being consumed by the noisy per-velocity scatter in extracted values.
+## Physics of B
+
+The inharmonicity coefficient B determines how piano partial frequencies
+deviate from integer multiples of the fundamental:
+
+    f_k = k · f0 · sqrt(1 + B · k²)
+
+B is defined by string physics:
+
+    B = (π² · E · I) / (T · L²)
+
+where:
+    E  — Young's modulus of the string material
+    I  — second moment of area (depends on string diameter)
+    T  — string tension
+    L  — string length
+
+None of these depend on keystrike velocity.  B is a fixed property of
+each string and varies smoothly across the keyboard as strings change
+in length, diameter, and material (plain wire → wound).
+
+## Why extracted B varies with velocity
+
+Extraction yields different B values per velocity layer for the same note:
+
+    MIDI 33 example: vel0=0.00003  vel3=0.00014  vel4=0.00015  vel6=0.00012
+    → factor ~5 variation
+
+Three sources of this variation — all are measurement artefacts, not physics:
+
+1. **SNR noise** — at low velocity the signal is quiet → higher frequency
+   estimation error → noisier partial fits → noisier B.
+
+2. **Multiple strings per note** — most notes have 2–3 slightly detuned
+   strings (chorus effect).  At different velocities, relative string
+   amplitudes vary → the apparent combined B shifts.
+
+3. **Large-amplitude non-linearity** — at fff the string tension increases
+   slightly with amplitude → B changes very weakly with velocity.  This
+   effect is real but small compared to (1) and (2).
+
+## What is the "true" B
+
+Best estimate: average log(B) across all velocity layers per MIDI, then
+fit a smoothing spline over MIDI 21–108.  This averages out velocity noise
+and enforces the physically expected smooth variation with MIDI number.
+
+This is exactly what BSplneFitter does.  The velocity scatter in extracted
+B is noise, not signal — which is why training the NN to predict B per
+(midi, vel) caused B loss to dominate the multi-task gradient (~5–8× other
+terms) without improving output quality.
 
 Public API:
     fitter = BSplneFitter()

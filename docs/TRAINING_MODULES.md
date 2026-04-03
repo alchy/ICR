@@ -926,6 +926,108 @@ python run-training.py icr-eval --bank ... --icr-patience 20 --note-dur 4.0
 
 ---
 
+### pipeline_b_spline_icr_eval.py  *(b-spline-icr-eval mode)*
+
+Jako `smooth-icr-eval`, ale B (inharmonicita) je vyřazeno z NN a nahrazeno
+splinem přes MIDI.
+
+#### Fyzika B a proč na velocity nezávisí
+
+Inharmonicita B je definována fyzikálními vlastnostmi struny:
+
+```
+B = (π² · E · I) / (T · L²)
+
+E — Young's modulus materiálu struny
+I — moment průřezu (závisí na průměru)
+T — napětí struny
+L — délka struny
+```
+
+**Žádný z těchto parametrů na velocity nezávisí.** B je fixní vlastnost každé
+struny, plynule se mění přes klaviaturu (různé délky, průměry, materiály).
+
+#### Proč extraction vrací jiné B per velocity
+
+```
+MIDI 33, naměřené B přes velocity:
+  vel0 = 0.00003   vel1 = 0.00012   vel2 = 0.00003
+  vel3 = 0.00014   vel4 = 0.00015   vel5 = 0.00013
+  vel6 = 0.00012   vel7 = 0.00015
+  → variace faktorem ~5
+```
+
+Tato variabilita je **šum měření, ne fyzikální signál**. Zdroje:
+
+| Zdroj | Popis |
+|---|---|
+| **SNR šum** | Tichý úder (vel0) → hoší SNR → větší chyba ve fittovaných frekvencích parciálů |
+| **Více strun na notu** | 2–3 struny mírně rozladěné (chorus). Různé velocity → různé relativní amplitudy → zdánlivě jiné B |
+| **Nelinearita** | Při fff napětí struny mírně vzroste (velká amplituda). Efekt je malý |
+
+#### Co je "pravdivé" B
+
+Nejlepší odhad = průměr log(B) přes všechny velocity layers pro dané MIDI +
+vyhlazení splinem přes MIDI 21–108. Implementuje `BSplneFitter`.
+
+Protože variabilita B přes velocity je šum, trénovat NN na predikci B per
+(midi, vel) způsobí, že B loss dominuje multi-task gradient (~5–8× jiné
+termy). Vyřazení B z NN targets a nahrazení splinem tento problém odstraní.
+
+#### Schéma
+
+```
+extract → filter → EQ
+                    │
+              BSplneFitter.fit(measured_notes)   ← průměr log(B) per MIDI + spline
+                    │
+              spline-smooth measured params (auto-anchors)
+                    │
+              ProfileTrainerEncExp.train(smooth_params, b_fitter=fitter)
+                  B_head odstraněn; B loss = 0; gradient jde do zbylých 10 headů
+                    │
+              generate_profile_exp_no_b(model, ds, b_fitter)
+                  B = b_fitter.predict(midi) — jedna hodnota per MIDI, 8 vel
+                    │
+              SoundbankExporter.from_params(hybrid_params)
+                    │
+              spline_fix: fix_interpolated
+```
+
+#### Klíčové rozdíly vs smooth-icr-eval
+
+| Vlastnost | smooth-icr-eval | b-spline-icr-eval |
+|---|---|---|
+| B v NN | predikováno B_head | **vyřazeno** |
+| B v exportu | NN výstup per (midi, vel) | spline per MIDI |
+| B loss | ~5–8× ostatní termy | **0** |
+| Model params | 29 686 | **29 109** (bez B_head) |
+| Gradient kapacita | sdílena s B | **plná pro zbylých 10 headů** |
+
+#### API
+
+```python
+from training.pipeline_b_spline_icr_eval import run
+
+model, b_fitter, out_path = run(
+    bank_dir     = "C:/SoundBanks/IthacaPlayer/vv-rhodes",
+    out_path     = "soundbanks/params-vv-rhodes-b-spline-icr-eval.json",
+    epochs       = 5000,
+    b_stiffness  = 2.0,   # vyšší = hladší B křivka
+    auto_anchors = 12,
+    icr_patience = 15,
+)
+```
+
+#### CLI
+
+```bash
+python run-training.py b-spline-icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
+python run-training.py b-spline-icr-eval --bank ... --b-stiffness 3.0 --auto-anchors 16
+```
+
+---
+
 ## Full pipeline — detailní průběh
 
 `pipeline_full` nespouští `simple` jako podkrok — extrakci dělá od začátku.
