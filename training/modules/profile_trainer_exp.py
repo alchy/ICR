@@ -442,12 +442,10 @@ def _run_training_exp(
             vf_ref    = vel_feat(4).unsqueeze(0).expand(len(midi_grid), -1)
 
             # MIDI smoothness (vel=4 fixed)
-            B_g   = model.forward_B(mf_grid, vf_ref).squeeze(-1)
             tau_g = model.forward_tau1_k1(mf_grid, vf_ref).squeeze(-1)
             a0_g  = model.forward_A0(mf_grid, kf_ref, vf_ref).squeeze(-1)
             n_g   = model.forward_noise(mf_grid, vf_ref)
-            smooth_midi = ((B_g[1:]-B_g[:-1]).pow(2).mean()
-                           + (tau_g[1:]-tau_g[:-1]).pow(2).mean()
+            smooth_midi = ((tau_g[1:]-tau_g[:-1]).pow(2).mean()
                            + (a0_g[1:]-a0_g[:-1]).pow(2).mean()
                            + (n_g[1:]-n_g[:-1]).pow(2).mean())
 
@@ -455,10 +453,8 @@ def _run_training_exp(
             vel_grid = torch.arange(8, dtype=torch.float32)
             mf60     = midi_feat(60.0).unsqueeze(0).expand(len(vel_grid), -1)
             vf_grid  = torch.stack([vel_feat(int(v)) for v in vel_grid])
-            B_v      = model.forward_B(mf60, vf_grid).squeeze(-1)
             dur_v    = model.forward_dur(mf60, vf_grid).squeeze(-1)
-            smooth_vel = ((B_v[1:]-B_v[:-1]).pow(2).mean()
-                          + (dur_v[1:]-dur_v[:-1]).pow(2).mean())
+            smooth_vel = (dur_v[1:]-dur_v[:-1]).pow(2).mean()
 
             loss = loss + 0.3*smooth_midi + 0.3*smooth_vel
 
