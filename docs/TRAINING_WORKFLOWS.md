@@ -25,7 +25,18 @@ Liší se v přípravě trénovacích targetů a post-exportu:
 
 Všechny workflows používají `ProfileTrainerEncExp` a ICR early stop (`ICRBatchEvaluator`).
 Tréninkový loss je vždy **MSE na parametrech** (NN výstup vs. targety).
-ICR metrika slouží pouze pro early stop — gradient přes ni nepochází.
+
+ICR vstupuje do tréninku dvěma způsoby — podle role v názvu:
+
+| Role | Suffix | Co ICR dělá | Gradient přes ICR |
+|------|--------|-------------|-------------------|
+| `icreval` | všechny WF | renderuje zvuk, počítá MRSTFT → řídí early stop | Ne |
+| `icrtarget` | `spl-icrtarget-*` | generuje trénovací targety přes round-trip → definuje, k čemu NN konverguje | Ne |
+
+Gradient přes ICR.exe v žádném případě nepochází (C++ binary, non-diferenciabilní).
+V `icrtarget` workflow však ICR zásadně ovlivňuje trénink — ne přes gradient, ale tím,
+že mění samotné targety: NN se učí reprodukovat to, co ICR skutečně produkuje,
+ne co extrakce naměřila z reálného klavíru.
 
 ---
 
