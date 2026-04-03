@@ -160,57 +160,109 @@ outlier:                    ?                  ← např. 15 s na vel=3 → smaz
 
 **Soubor:** `training/modules/eq_fitter.py`
 
-Počítá Long-Term Average Spectral Envelope (LTASE) korekcní křivku pro
-každou notu: poměr spektrální obálky originálního WAV vůči syntetizované
-notě (bez EQ). Zachycuje rezonanci těla nástroje.
+EQFitter zjistí co chybí syntetizátoru oproti originálu ve frekvenční
+doméně a uloží to jako IIR filtr aplikovaný při přehrávání.
 
-Obsahuje také `params_to_biquads()` — převod EQ křivky na min-phase IIR
-biquad kaskádu (5 sekcí), který se používá i v `SoundbankExporter`.
+Syntetizátor modeluje fyziku strun (parciály, decay, inharmonicita), ale
+nezná tělo nástroje — Rhodes má kovovou vidličku a pickup, klavír má
+soundboard. EQ zachytí tuto barvovou část, která se nedá popsat pár
+parametry. Výsledek: syntéza + EQ zní mnohem blíže originálu než syntéza
+samotná.
+
+### Proč je to potřeba
+
+Synth produkuje čisté parciály se správnými frekvencemi a amplitudami.
+Originální nástroj navíc obsahuje:
+- rezonance těla / soundboardu
+- charakteristiku snímače (pickup)
+- akustický prostor
+
+Tyto efekty se projevují jako frekvenčně závislé zesílení/útlum — přesně
+to co EQ dokáže korigovat.
+
+### Algoritmus krok po kroku
+
+**1. LTASE (Long-Term Average Spectral Envelope)**
+
+Pro každou notu se spustí syntetizátor bez EQ a výsledek se porovná s
+originálním WAV přes STFT. Průměrováním přes všechny časové snímky
+vznikne spektrální obálka každého signálu:
+
+```
+LTASE_orig(f)   — jak nota zní v originálním nástroji
+LTASE_synth(f)  — jak nota zní ze syntetizátoru (čisté parciály)
+```
+
+N_FFT se volí adaptivně podle MIDI výšky (cíl: 20 binů na jednu
+harmonickou), rozsah 8192–32768 vzorků.
+
+**2. Přenosová funkce H**
+
+```
+H(f) = LTASE_orig(f) / LTASE_synth(f)
+```
+
+Podělením se vyruší co je v obou stejné (parciální struktura) a zbyde
+jen rozdíl — rezonance těla nástroje. Poté se aplikuje 1/6-oktávové
+vyhlazení a normalizace průměru nad 100 Hz na 0 dB.
+
+**3. 64 bodů na log-škále**
+
+Křivka H se vzorkuje na 64 log-rovnoměrně rozložených frekvencích
+(20 Hz–20 kHz) → `spectral_eq: {freqs_hz, gains_db}`. Tato data jdou
+do JSONu a jsou editovatelná v sound editoru.
+
+**4. Konverze na biquad kaskádu (5 sekcí)**
+
+Při exportu se křivka fituje na 5 IIR biquad filtrů:
+1. Interpolace EQ křivky na 2048-bodový FFT grid
+2. Cepstrální minimum-phase rekonstrukce z magnitudy
+3. Least-squares IIR design (rovnicová chyba) → `_invfreqz()`
+4. Stabilizace pólů do jednotkového kruhu → `_stabilize()`
+5. `tf2sos()` → 5 biquad sekcí (Direct Form II)
+
+C++ PianoCore aplikuje těchto 5 filtrů za sebou na výstupní audio každé
+noty.
 
 ### API
 
 ```python
 fitter = EQFitter()
 
-# Přidá 'spectral_eq' ke každému vzorku v params
+# Přidá 'spectral_eq' ke každému vzorku v params (paralelně)
 params = fitter.fit_bank(params, bank_dir, workers=None)
 
 # Standalone: převod EQ křivky na biquad koeficienty
 biquads = fitter.params_to_biquads(freqs_hz, gains_db, sr=44100)
 ```
 
-### Princip LTASE
-
-```
-H(f) = LTASE_original(f) / LTASE_synth(f)
-```
-
-Syntéza pro výpočet LTASE běží s `eq_strength=0` (bypass EQ),
-aby se předešlo cirkulární závislosti.
-
 ### Výstup `fit_bank` (přidané klíče do každého vzorku)
 
 ```python
 sample["spectral_eq"] = {
-    "freqs_hz":           [20.0, 25.1, ...],   # 64 log-spaced bodů
-    "gains_db":           [-1.2, 0.3, ...],
-    "stereo_width_factor": 1.05
+    "freqs_hz":            [20.0, 25.1, ...],   # 64 log-spaced bodů
+    "gains_db":            [-1.2, 0.3, ...],    # dB, průměr ~0 dB
+    "stereo_width_factor": 1.05                 # poměr stereo šířky orig/synth
 }
 ```
 
-### `params_to_biquads` — IIR fitting
-
-Algoritmus:
-1. Interpolace EQ křivky na 2048-bodový FFT grid
-2. Cepstrální minimum-phase rekonstrukce
-3. Least-squares IIR design (rovnicová chyba) → 5 pólů / 5 nul
-4. Stabilizace pólů (odraz mimo jednotkovou kružnici)
-5. `tf2sos()` → 5 biquad sekcí (Direct Form II)
+### Výstup `params_to_biquads`
 
 ```python
 biquads = fitter.params_to_biquads(freqs_hz, gains_db, sr=44100)
-# biquads == [{"b": [b0,b1,b2], "a": [a1,a2]}, ...]  délka 5
+# [{"b": [b0, b1, b2], "a": [a1, a2]}, ...]   délka 5
 ```
+
+### Parametry
+
+| Konstanta | Hodnota | Popis |
+|---|---|---|
+| `N_EQ_POINTS` | 64 | Počet log-spaced bodů EQ křivky |
+| `EQ_F_MIN/MAX` | 20–20000 Hz | Frekvenční rozsah |
+| `NFFT_EXP_MIN/MAX` | 13–15 | N_FFT = 2^exp (8192–32768) |
+| `NFFT_BINS_TARGET` | 20 | Cíl: 20 FFT binů na harmonickou |
+| `SMOOTH_OCT` | 1/12 oct | Polo-šířka oktávového vyhlazení |
+| `PIANO_N_BIQUAD` | 5 | Počet biquad sekcí v exportu |
 
 ---
 
