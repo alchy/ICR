@@ -148,8 +148,11 @@ class BSplneFitter:
         Return B for a given MIDI note.
 
         Extrapolates smoothly beyond the fitted range (spline extrapolation).
-        Result is always >= 1e-10.
+        log(B) is clamped to [-20, 0] before exp to prevent overflow (inf) on
+        extreme MIDI positions outside the measured range.
+        Result is always in [1e-10, 1.0].
         """
         if self._spline is None:
             raise RuntimeError("BSplneFitter.predict called before fit().")
-        return max(float(np.exp(float(self._spline(midi)))), 1e-10)
+        log_b = float(np.clip(float(self._spline(midi)), -20.0, 0.0))
+        return max(float(np.exp(log_b)), 1e-10)
