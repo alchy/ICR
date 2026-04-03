@@ -551,7 +551,8 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
         if (midi < 0 || midi > 127 || vel_idx < 0 || vel_idx > 7) continue;
 
         PianoNoteParam& np = tmp[midi * 8 + vel_idx];
-        np.valid      = true;
+        np.valid           = true;
+        np.is_interpolated = s.value("_interpolated", false);
         np.phi_diff   = s["phi_diff"].get<float>();
         np.attack_tau = s["attack_tau"].get<float>();
         np.A_noise    = s["A_noise"].get<float>();
@@ -682,10 +683,11 @@ CoreVizState PianoCore::getVizState() const {
         const PianoNoteParam& np = note_params_[last_midi][vi];
 
         CoreVoiceViz vv;
-        vv.midi       = last_midi;
-        vv.vel        = last_vel;
-        vv.f0_hz      = np.f0_hz;
-        vv.n_partials = np.K;
+        vv.midi            = last_midi;
+        vv.vel             = last_vel;
+        vv.f0_hz           = np.f0_hz;
+        vv.n_partials      = np.K;
+        vv.is_interpolated = np.is_interpolated;
 
         for (int ki = 0; ki < np.K && ki < 16; ki++) {   // cap at 16 for GUI
             const PianoPartialParam& pp = np.partials[ki];

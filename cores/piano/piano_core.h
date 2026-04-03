@@ -64,7 +64,8 @@ struct PianoPartialParam {
 };
 
 struct PianoNoteParam {
-    bool  valid      = false;
+    bool  valid           = false;
+    bool  is_interpolated = false;   // true = NN-generated, false = measured
     int   K          = 0;
     float phi_diff   = 0.f;
     float attack_tau = 0.05f;

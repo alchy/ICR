@@ -221,6 +221,15 @@ static void drawCorePanel(CoreEngine& engine) {
         noteName(ln.midi), ln.midi / 12 - 1,
         ln.midi, ln.vel, ln.f0_hz);
     ImGui::PopStyleColor();
+    ImGui::SameLine();
+    if (ln.is_interpolated) {
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(180,180,180,255));
+        ImGui::TextUnformatted("[NN]");
+    } else {
+        ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(100,220,100,255));
+        ImGui::TextUnformatted("[MEASURED]");
+    }
+    ImGui::PopStyleColor();
 
     // Show resonator-style detail only if the core provides it
     if (ln.n_partials > 0 || ln.n_strings > 0) {

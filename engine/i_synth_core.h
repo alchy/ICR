@@ -65,6 +65,7 @@ struct CoreVoiceViz {
     int   vel               = 0;
     float f0_hz             = 0.f;
     float B                 = 0.f;      // inharmonicity
+    bool  is_interpolated   = false;    // true = NN-generated, false = measured
     int   n_strings         = 0;
     int   n_partials        = 0;
     float width_factor      = 0.f;
