@@ -368,6 +368,62 @@ def _process_layer_vel(
     return updates, n_replaced, n_filled
 
 
+# ── Partial extension ─────────────────────────────────────────────────────────
+
+def _get_max_partials_per_vel(
+    notes:    dict,
+    ref_keys: "set[str]|None" = None,
+) -> "dict[int,int]":
+    """Return {vel: max_partial_count} across all measured notes."""
+    result: dict[int, int] = {}
+    for key, note in notes.items():
+        if note.get("_interpolated", False):
+            continue
+        if ref_keys is not None and key not in ref_keys:
+            continue
+        vel = int(key.split("_vel")[1])
+        k   = len(note.get("partials", []))
+        if k > result.get(vel, 0):
+            result[vel] = k
+    return result
+
+
+def _extend_note_partials(note: dict, target_k: int) -> None:
+    """
+    Extend the partials list of a note to target_k entries in-place.
+
+    New partials are initialised with:
+      - f_hz  : inharmonic frequency  k * f0 * sqrt(1 + B*k²)
+      - A0    : 1/10 of the last measured partial A0 (spline will overwrite)
+      - tau1/tau2/a1 : copied from last existing partial (spline will overwrite)
+      - beat_hz / phi : 0.0
+
+    K_valid is updated to target_k.
+    """
+    partials = note.get("partials")
+    if not partials or len(partials) >= target_k:
+        return
+
+    B   = float(note.get("B", 0.0))
+    f0  = float(note.get("f0_hz", 440.0))
+    last = partials[-1]
+
+    for i in range(len(partials), target_k):
+        k    = i + 1
+        f_hz = k * f0 * math.sqrt(max(1.0 + B * k * k, 0.0))
+        partials.append({
+            "k":       k,
+            "f_hz":    round(f_hz, 4),
+            "A0":      float(last.get("A0", 0.001)) * 0.1,
+            "tau1":    float(last.get("tau1", 0.5)),
+            "tau2":    float(last.get("tau2", 0.5)),
+            "a1":      float(last.get("a1",  1.0)),
+            "beat_hz": 0.0,
+            "phi":     0.0,
+        })
+    note["K_valid"] = target_k
+
+
 # ── Python API (for use in pipelines) ────────────────────────────────────────
 
 def apply_spline_fix_bank(
@@ -375,6 +431,7 @@ def apply_spline_fix_bank(
     smooth_all:       bool             = False,
     fix_interpolated: bool             = False,
     fill_missing:     bool             = False,
+    extend_partials:  bool             = False,
     auto_anchors:     int              = 0,
     anchor_midi:      "list[int]|None" = None,
     ref_keys:         "set[str]|None"  = None,
@@ -390,6 +447,9 @@ def apply_spline_fix_bank(
         smooth_all:       Replace all non-anchor values with spline.
         fix_interpolated: Fit spline on measured notes only; replace NN notes.
         fill_missing:     Fill MIDI positions absent from notes dict.
+        extend_partials:  Extend NN notes to the max partial count of measured
+                          notes, then fill new partial values via spline.
+                          Only effective when fix_interpolated=True.
         auto_anchors:     Number of anchors to auto-select by quality metric.
         anchor_midi:      Additional hard-coded anchor MIDI numbers.
         ref_keys:         Measured note keys (for older banks without _interpolated).
@@ -398,11 +458,30 @@ def apply_spline_fix_bank(
         smooth_outliers:  Replace |value − spline| > K×std outliers.
 
     Returns:
-        (fixed_notes, stats) where stats = {"replaced": int, "filled": int}.
+        (fixed_notes, stats) where stats = {"replaced": int, "filled": int,
+                                            "extended": int}.
     """
     import copy
     out_notes = copy.deepcopy(notes)
-    all_layers = _detect_layers(notes)
+
+    # ── Extend NN note partials to max measured count (before layer detection) ──
+    total_extended = 0
+    if extend_partials and fix_interpolated:
+        max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
+        for key, note in out_notes.items():
+            is_nn = note.get("_interpolated", False) or (
+                ref_keys is not None and key not in ref_keys)
+            if not is_nn:
+                continue
+            vel     = int(key.split("_vel")[1])
+            max_k   = max_per_vel.get(vel, 0)
+            before  = len(note.get("partials", []))
+            _extend_note_partials(note, max_k)
+            total_extended += len(note.get("partials", [])) - before
+        print(f"Partials extended: +{total_extended} across NN notes")
+
+    # Detect layers after potential extension so new per-partial layers are included
+    all_layers = _detect_layers(out_notes)
 
     anchor_set: set[int] = set(anchor_midi) if anchor_midi else set()
     if auto_anchors > 0:
@@ -451,8 +530,10 @@ def apply_spline_fix_bank(
             total_replaced += n_rep
             total_filled   += n_fill
 
-    print(f"Spline: replaced={total_replaced}  filled={total_filled}")
-    return out_notes, {"replaced": total_replaced, "filled": total_filled}
+    print(f"Spline: replaced={total_replaced}  filled={total_filled}  "
+          f"extended={total_extended}")
+    return out_notes, {"replaced": total_replaced, "filled": total_filled,
+                       "extended": total_extended}
 
 
 def json_notes_to_samples(notes: dict, duration_s: float = 3.0) -> dict:
@@ -600,7 +681,29 @@ def run(args):
 
     total_replaced = 0
     total_filled   = 0
+    total_extended = 0
     out_notes = copy.deepcopy(notes) if not report_only else notes
+
+    # --extend-partials: extend NN notes to max measured partial count
+    if getattr(args, "extend_partials", False) and args.fix_interpolated and not report_only:
+        max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
+        for key, note in out_notes.items():
+            is_nn = note.get("_interpolated", False) or (
+                ref_keys is not None and key not in ref_keys)
+            if not is_nn:
+                continue
+            vel   = int(key.split("_vel")[1])
+            max_k = max_per_vel.get(vel, 0)
+            before = len(note.get("partials", []))
+            _extend_note_partials(note, max_k)
+            total_extended += len(note.get("partials", [])) - before
+        print(f"Partials extended: +{total_extended} across NN notes")
+        # Re-detect layers after extension to include new per-partial layers
+        all_layers = _detect_layers(out_notes)
+        if args.layers:
+            layers = [l for l in all_layers if l in set(args.layers.split(","))]
+        else:
+            layers = all_layers
 
     for layer_id in layers:
         log_sp = any(layer_id.startswith(p) or layer_id == p
@@ -672,8 +775,9 @@ def run(args):
 
     print(f"\nReplaced (outliers/smooth): {total_replaced}")
     print(f"Filled  (missing)         : {total_filled}")
+    print(f"Extended (new partials)   : {total_extended}")
 
-    if total_replaced == 0 and total_filled == 0 and not anchor_midis:
+    if total_replaced == 0 and total_filled == 0 and total_extended == 0 and not anchor_midis:
         print("Nothing changed — did you forget --smooth-outliers, "
               "--smooth-all, or --fill-missing?")
         return
@@ -725,6 +829,10 @@ def main():
                    help="Fit spline on measured notes only, replace all "
                         "NN-interpolated notes with spline values "
                         "(best fix for NN-generated soundbanks)")
+    p.add_argument("--extend-partials", action="store_true",
+                   help="Extend NN notes to the max partial count of measured "
+                        "notes before applying spline; new partials get values "
+                        "from the spline. Requires --fix-interpolated.")
     p.add_argument("--report", action="store_true",
                    help="Dry run: print stats without writing output")
     args = p.parse_args()

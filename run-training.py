@@ -199,6 +199,24 @@ def _build_parser() -> argparse.ArgumentParser:
     smi.add_argument("--sr-tag",        default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
+    # ── full-spline-icr-eval ─────────────────────────────────────────────────
+    fsi = sub.add_parser(
+        "full-spline-icr-eval",
+        help="Like smooth-icr-eval but also extends NN notes to max measured "
+             "partial count (full harmonic content from spline)",
+    )
+    fsi.add_argument("--bank",          required=True, help="WAV bank directory")
+    fsi.add_argument("--out",           default=None,
+                     help="Output JSON (default: soundbanks/params-{bank}-full-spline-icr-eval.json)")
+    fsi.add_argument("--workers",       type=int, default=None)
+    fsi.add_argument("--epochs",        type=int, default=5000)
+    fsi.add_argument("--icr-exe",       default="build/bin/Release/ICR.exe")
+    fsi.add_argument("--note-dur",      type=float, default=3.0)
+    fsi.add_argument("--icr-patience",  type=int, default=15)
+    fsi.add_argument("--auto-anchors",  type=int, default=12)
+    fsi.add_argument("--skip-outliers-detection", action="store_true")
+    fsi.add_argument("--sr-tag",        default="f48")
+
     # ── icr-eval ─────────────────────────────────────────────────────────────
     icr = sub.add_parser(
         "icr-eval",
@@ -283,6 +301,23 @@ def main() -> int:
                 workers=args.workers,
                 skip_outliers=args.skip_outliers_detection,
                 sr_tag=args.sr_tag,
+            )
+            print(f"\nDone -> {out}")
+
+        elif args.cmd == "full-spline-icr-eval":
+            out_path = args.out or _default_out(args.bank, "full-spline-icr-eval")
+            from training.pipeline_full_spline_icr_eval import run
+            model, out = run(
+                bank_dir      = args.bank,
+                out_path      = out_path,
+                epochs        = args.epochs,
+                workers       = args.workers,
+                skip_outliers = args.skip_outliers_detection,
+                sr_tag        = args.sr_tag,
+                icr_exe       = args.icr_exe,
+                note_dur      = args.note_dur,
+                icr_patience  = args.icr_patience,
+                auto_anchors  = args.auto_anchors,
             )
             print(f"\nDone -> {out}")
 

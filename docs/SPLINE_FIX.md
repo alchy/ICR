@@ -51,6 +51,7 @@ python tools/spline_fix.py --file-in PATH [options]
 | Flag | Description |
 |---|---|
 | `--fix-interpolated` | Fit spline on measured notes only; replace every NN-interpolated note with the spline value. Best fix for NN-generated soundbanks. |
+| `--extend-partials` | Extend NN notes to the maximum partial count of measured notes before applying the spline. New partials are initialised with inharmonic `f_hz` and values from the last existing partial; the spline then fills in correct `tau1`, `tau2`, `A0`, etc. **Requires `--fix-interpolated`.** |
 | `--smooth-outliers K` | Replace any point where `|value − spline| > K × std` with the spline value. `K=3.0` is a safe starting point. |
 | `--smooth-all` | Replace every non-anchor value with the smooth spline. Maximum smoothing. |
 | `--fill-missing` | Add values for MIDI positions that have no data at all (21–108). |
@@ -192,6 +193,48 @@ python tools/spline_fix.py \
     --smooth-outliers 2.5 \
     --layers tau1_k1,tau1_k2,tau1_k3 \
     --vel 0,1,2
+```
+
+### Fix NN notes AND extend harmonics
+
+```
+python tools/spline_fix.py \
+    --file-in  soundbanks/params-vv-rhodes-icr-eval.json \
+    --fix-interpolated \
+    --extend-partials \
+    --auto-anchors 12 \
+    --file-out soundbanks/params-vv-rhodes-full.json
+```
+
+NN notes that have fewer harmonics than measured notes will be extended to the
+maximum measured partial count, with new partial values filled from the spline.
+
+---
+
+## Training pipeline workflows
+
+Three pipelines are available, producing comparable output for A/B listening:
+
+| Workflow | Command | What changes vs baseline |
+|---|---|---|
+| **icr-eval** | `python run-training.py icr-eval --bank ...` | Baseline — NN trained directly on extracted params |
+| **smooth-icr-eval** | `python run-training.py smooth-icr-eval --bank ...` | Measured params spline-smoothed before training; NN notes replaced by spline post-export |
+| **full-spline-icr-eval** | `python run-training.py full-spline-icr-eval --bank ...` | Same as smooth-icr-eval + NN notes extended to max measured partial count |
+
+Output files per workflow:
+
+```
+soundbanks/params-{bank}-icr-eval.json
+soundbanks/params-{bank}-smooth-icr-eval.json
+soundbanks/params-{bank}-full-spline-icr-eval.json
+```
+
+`full-spline-icr-eval` additionally produces intermediate files:
+
+```
+params-{bank}-full-spline-icr-eval-pre-smooth.json        measured-only simple export
+params-{bank}-full-spline-icr-eval-pre-smooth-spline.json spline-smoothed measured params
+params-{bank}-full-spline-icr-eval-hybrid-raw.json        raw NN hybrid before spline fix
 ```
 
 ---

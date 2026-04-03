@@ -57,8 +57,9 @@ def run(
     icr_exe:       str   = "build/bin/Release/ICR.exe",
     note_dur:      float = 3.0,
     icr_patience:  int   = 15,
-    sr:            int   = 48000,
-    auto_anchors:  int   = 12,
+    sr:              int   = 48000,
+    auto_anchors:    int   = 12,
+    extend_partials: bool  = False,
 ) -> tuple:
     """
     Smooth-ICR-eval pipeline:
@@ -74,9 +75,11 @@ def run(
         sr_tag:        Sample-rate tag suffix, e.g. "f44" or "f48".
         icr_exe:       Path to ICR.exe binary.
         note_dur:      Duration in seconds for each ICR-rendered eval note.
-        icr_patience:  Early stop after this many evals without improvement.
-        sr:            Sample rate for ICR rendering (must match sr_tag).
-        auto_anchors:  Number of anchors auto-selected by extraction quality.
+        icr_patience:    Early stop after this many evals without improvement.
+        sr:              Sample rate for ICR rendering (must match sr_tag).
+        auto_anchors:    Number of anchors auto-selected by extraction quality.
+        extend_partials: Extend NN notes to max measured partial count before
+                         applying spline (fills new partials via spline).
 
     Returns:
         (model, out_path) -- trained model and path to final soundbank JSON.
@@ -144,7 +147,8 @@ def run(
     SoundbankExporter().hybrid(model, smooth_params, hybrid_path)
 
     # Spline-fix: replace NN-generated notes with spline from smooth measured
-    _spline_fix_hybrid(hybrid_path, out_path, pre_path, auto_anchors)
+    _spline_fix_hybrid(hybrid_path, out_path, pre_path, auto_anchors,
+                       extend_partials)
 
     print(f"\nDone -> {out_path}")
     return model, out_path
@@ -179,10 +183,11 @@ def _spline_smooth_simple(
 
 
 def _spline_fix_hybrid(
-    hybrid_path:  str,
-    out_path:     str,
-    ref_path:     str,
-    auto_anchors: int,
+    hybrid_path:     str,
+    out_path:        str,
+    ref_path:        str,
+    auto_anchors:    int,
+    extend_partials: bool = False,
 ) -> None:
     """Fix NN-generated notes in hybrid bank using measured-only spline."""
     from tools.spline_fix import apply_spline_fix_bank
@@ -195,6 +200,7 @@ def _spline_fix_hybrid(
     fixed_notes, stats = apply_spline_fix_bank(
         notes,
         fix_interpolated = True,
+        extend_partials  = extend_partials,
         ref_keys         = ref_keys,
         auto_anchors     = auto_anchors,
     )
