@@ -102,4 +102,9 @@ def run(
         evaluator.close()
 
     SoundbankExporter().hybrid(model, params, out_path)
+
+    pure_nn_path = out_path.replace(".json", "-pure-nn.json")
+    print(f"\nExporting pure-NN bank -> {pure_nn_path}")
+    SoundbankExporter().pure_nn(model, params, pure_nn_path)
+
     return model, out_path

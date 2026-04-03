@@ -150,6 +150,10 @@ def run(
     _spline_fix_hybrid(hybrid_path, out_path, pre_path, auto_anchors,
                        extend_partials)
 
+    pure_nn_path = out_path.replace(".json", "-pure-nn.json")
+    print(f"\nExporting pure-NN bank -> {pure_nn_path}")
+    SoundbankExporter().pure_nn(model, smooth_params, pure_nn_path)
+
     print(f"\nDone -> {out_path}")
     return model, out_path
 

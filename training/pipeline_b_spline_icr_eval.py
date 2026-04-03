@@ -170,6 +170,10 @@ def run(
     ref_keys = set(json.loads(Path(pre_path).read_text())["notes"].keys())
     _spline_fix_hybrid(hybrid_path, out_path, ref_keys, auto_anchors)
 
+    pure_nn_path = out_path.replace(".json", "-pure-nn.json")
+    print(f"\nExporting pure-NN bank -> {pure_nn_path}")
+    SoundbankExporter().pure_nn(model, smooth_params, pure_nn_path)
+
     print(f"\nDone -> {out_path}")
     return model, b_fitter, out_path
 

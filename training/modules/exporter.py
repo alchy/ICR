@@ -174,6 +174,83 @@ class SoundbankExporter:
         out["n_notes"] = n_done
         self._write(out, out_path)
 
+    def pure_nn(
+        self,
+        model,
+        params:     dict,
+        out_path:   str,
+        sr:         int   = SR_DEFAULT,
+        duration:   float = DURATION_DEFAULT,
+        target_rms: float = TARGET_RMS_DEFAULT,
+        rng_seed:   int   = RNG_SEED_DEFAULT,
+    ) -> None:
+        """
+        Export a pure-NN soundbank: all 704 notes from NN, none from extraction.
+
+        Unlike hybrid(), measured notes are NOT preserved — the NN predicts
+        every (midi, vel) slot uniformly.  Useful for A/B comparison: does
+        the NN produce a smoother keyboard sweep when not interrupted by
+        measured notes at their original (potentially noisy) values?
+
+        Args:
+            model:    Trained InstrumentProfile.
+            params:   Params dict (used only for eq_freqs / B spline context).
+            out_path: Output JSON path.
+        """
+        from training.modules.profile_trainer import build_dataset, generate_profile
+
+        samples  = params["samples"]
+        measured = {k: v for k, v in samples.items()
+                    if not v.get("_interpolated")}
+
+        ds = build_dataset(measured)
+
+        try:
+            from training.modules.profile_trainer_exp import (
+                InstrumentProfileEncExp, generate_profile_exp,
+                build_dataset_exp,
+            )
+            if isinstance(model, InstrumentProfileEncExp):
+                ds_exp      = build_dataset_exp(measured)
+                all_samples = generate_profile_exp(
+                    model, ds_exp, midi_from=21, midi_to=108, sr=sr,
+                    orig_samples=None,   # ← no measured notes preserved
+                )
+            else:
+                all_samples = generate_profile(
+                    model, ds, midi_from=21, midi_to=108, sr=sr,
+                    orig_samples=None,
+                )
+        except ImportError:
+            all_samples = generate_profile(
+                model, ds, midi_from=21, midi_to=108, sr=sr,
+                orig_samples=None,
+            )
+
+        out    = self._make_header("nn-pure:model", sr, target_rms, duration, rng_seed)
+        n_total = len(all_samples)
+        print(f"Exporting pure-NN bank: {n_total} notes "
+              f"(all from NN, no measured notes preserved, "
+              f"computing rms_gain + biquad EQ per note) …", flush=True)
+        t0     = time.monotonic()
+        n_done = 0
+        for midi in range(21, 109):
+            for vel_idx in range(8):
+                key = f"m{midi:03d}_vel{vel_idx}"
+                if key not in all_samples:
+                    continue
+                note_data = self._build_note(all_samples[key], midi, vel_idx,
+                                             sr, duration, target_rms, rng_seed)
+                out["notes"][key] = note_data
+                n_done += 1
+                if n_done % 88 == 0:
+                    pct = 100 * n_done // n_total
+                    ela = time.monotonic() - t0
+                    print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
+
+        out["n_notes"] = n_done
+        self._write(out, out_path)
+
     # ── Internal builders ─────────────────────────────────────────────────────
 
     def _make_header(
