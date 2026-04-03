@@ -76,22 +76,42 @@ note = extractor.extract_note("m060-vel3-f44.wav")
     "m060_vel3": {
       "midi": 60, "vel": 3,
       "f0_hz": 261.63,
-      "B": 0.00041,               # inharmonicita
+      "B": 0.00041,               # inharmonicita (velocity-independent, z BSplneFitter)
+      "K_valid": 18,              # počet validních parciálů (max ~60 dle MIDI)
       "partials": [
-        { "f_hz": 261.6, "A0": 13.7, "tau1": 0.41, "tau2": 3.73,
-          "a1": 0.82, "beat_hz": 0.17, "mono": False }
+        # k=1 — základní tón, nejsilnější, nejdelší decay
+        { "k": 1,  "f_hz":  261.7, "A0": 14.2, "tau1": 0.52, "tau2": 4.81, "a1": 0.84, "beat_hz": 0.12, "phi": 0.0 },
+        # k=2 — první overtón, mírný beating (dvě struny)
+        { "k": 2,  "f_hz":  523.5, "A0":  8.7, "tau1": 0.38, "tau2": 3.12, "a1": 0.79, "beat_hz": 0.31, "phi": 0.0 },
+        { "k": 3,  "f_hz":  785.4, "A0":  5.1, "tau1": 0.29, "tau2": 2.44, "a1": 0.75, "beat_hz": 0.08, "phi": 0.0 },
+        { "k": 4,  "f_hz": 1047.6, "A0":  3.8, "tau1": 0.23, "tau2": 1.97, "a1": 0.71, "beat_hz": 0.19, "phi": 0.0 },
+        { "k": 5,  "f_hz": 1310.1, "A0":  2.4, "tau1": 0.18, "tau2": 1.61, "a1": 0.68, "beat_hz": 0.42, "phi": 0.0 },
+        { "k": 6,  "f_hz": 1572.9, "A0":  1.9, "tau1": 0.14, "tau2": 1.33, "a1": 0.65, "beat_hz": 0.25, "phi": 0.0 },
+        { "k": 7,  "f_hz": 1836.1, "A0":  1.3, "tau1": 0.11, "tau2": 1.12, "a1": 0.62, "beat_hz": 0.51, "phi": 0.0 },
+        { "k": 8,  "f_hz": 2099.7, "A0":  0.9, "tau1": 0.09, "tau2": 0.94, "a1": 0.59, "beat_hz": 0.17, "phi": 0.0 },
+        # ... parciály k=9..18 pokračují s klesající amplitudou a tau
+        # až k=60 je alokováno (PIANO_MAX_PARTIALS), nevalidní mají A0≈0
       ],
       "noise": {
-        "attack_tau": 0.012,       # shodný klíč s PianoCore / SYSEX_PROTOCOL
-        "A_noise": 0.78,
-        "centroid_hz": 2400.0,
-        "spectral_slope_db_oct": -3.0
+        "attack_tau":          0.012,   # doba náběhu šumu [s]
+        "A_noise":             0.78,    # amplituda šumu
+        "centroid_hz":      2400.0,     # spektrální těžiště šumu
+        "spectral_slope_db_oct": -3.0   # sklon spektra šumu [dB/oct]
       },
-      "duration_s": 3.0
+      "rms_gain":   0.063,      # kalibrační zesílení pro target_rms
+      "duration_s": 3.0,        # délka rendrované noty
+      "_interpolated": False    # True = NN-generovaná nota (ne měřená)
     }
+    # ... 703 dalších not (88 MIDI × 8 vel)
   }
 }
 ```
+
+> **Počet parciálů:** reálně 8–20 validních pro střední polohu klaviatury
+> (C4 = MIDI 60), 3–8 pro krajní basy (MIDI 21–32), až 30+ pro výšky
+> kde jsou parciály v Nyquistovém pásmu kratší. `K_valid` udává počet
+> parciálů s dostatečným SNR; zbývající sloty do 60 jsou inicializovány
+> s `A0≈0` a exporter je nezahrnuje do výstupu.
 
 ### Poznámky
 
