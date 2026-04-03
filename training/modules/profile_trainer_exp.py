@@ -398,7 +398,7 @@ def _run_training_exp(
     lr:                float = 3e-3,
     eval_every:        int   = 50,
     verbose:           bool  = True,
-    plateau_patience:  int   = 3,    # eval intervals without improvement → expand
+    plateau_patience:  int   = 10,   # eval intervals without improvement → expand
     plateau_min_delta: float = 0.002,
     max_expansions:    int   = 2,
     all_params:        dict  = None,  # full params dict, needed by icr_evaluator
@@ -512,13 +512,14 @@ def _run_training_exp(
                               f"{icr_patience} evals (best={best_icr_mrstft:.4f})")
                     break
 
-            # ── Plateau → expand heads (only without icr_evaluator) ──────────
-            elif (_plateau_count >= plateau_patience
+            # ── Plateau → expand heads ───────────────────────────────────────
+            if (_plateau_count >= plateau_patience
                     and _expansions < max_expansions
                     and epoch < epochs - eval_every):
                 n = _expand_all_heads(model)
                 _expansions    += 1
                 _plateau_count  = 0
+                _icr_no_improve = 0   # give expanded model a fresh patience budget
                 new_lr          = lr * (0.5 ** _expansions)
                 opt   = optim.Adam(model.parameters(), lr=new_lr, weight_decay=1e-4)
                 remaining = epochs - epoch
