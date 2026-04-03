@@ -368,6 +368,131 @@ def _process_layer_vel(
     return updates, n_replaced, n_filled
 
 
+# ── Python API (for use in pipelines) ────────────────────────────────────────
+
+def apply_spline_fix_bank(
+    notes:            dict,
+    smooth_all:       bool             = False,
+    fix_interpolated: bool             = False,
+    fill_missing:     bool             = False,
+    auto_anchors:     int              = 0,
+    anchor_midi:      "list[int]|None" = None,
+    ref_keys:         "set[str]|None"  = None,
+    stiffness:        float            = 1.0,
+    degree:           int              = 3,
+    smooth_outliers:  "float|None"     = None,
+) -> "tuple[dict, dict]":
+    """
+    Apply spline fix to a notes dict (Python API — no file I/O).
+
+    Args:
+        notes:            The ``bank["notes"]`` dict from an exported soundbank.
+        smooth_all:       Replace all non-anchor values with spline.
+        fix_interpolated: Fit spline on measured notes only; replace NN notes.
+        fill_missing:     Fill MIDI positions absent from notes dict.
+        auto_anchors:     Number of anchors to auto-select by quality metric.
+        anchor_midi:      Additional hard-coded anchor MIDI numbers.
+        ref_keys:         Measured note keys (for older banks without _interpolated).
+        stiffness:        Spline stiffness (higher = more rigid).
+        degree:           Spline degree (1/2/3/5).
+        smooth_outliers:  Replace |value − spline| > K×std outliers.
+
+    Returns:
+        (fixed_notes, stats) where stats = {"replaced": int, "filled": int}.
+    """
+    import copy
+    out_notes = copy.deepcopy(notes)
+    all_layers = _detect_layers(notes)
+
+    anchor_set: set[int] = set(anchor_midi) if anchor_midi else set()
+    if auto_anchors > 0:
+        anchor_set |= _select_auto_anchors(notes, auto_anchors, ref_keys)
+    if anchor_set:
+        print(f"Anchors ({len(anchor_set)}): "
+              f"{[_midi_note_name(m) for m in sorted(anchor_set)]}")
+
+    total_replaced = 0
+    total_filled   = 0
+
+    for layer_id in all_layers:
+        log_sp = any(layer_id.startswith(p) or layer_id == p
+                     for p in _LOG_SPACE_PARAMS)
+        for vel in range(8):
+            if fix_interpolated:
+                measured_data = _extract_layer_vel(notes, layer_id, vel,
+                                                   measured_only=True,
+                                                   ref_keys=ref_keys)
+                interp_midis  = _interpolated_midis_vel(notes, vel, ref_keys)
+                if measured_data and interp_midis:
+                    work = {m: math.log(max(v, _LOG_EPS)) for m, v in measured_data.items()} \
+                           if log_sp else dict(measured_data)
+                    xs = np.array(sorted(work))
+                    ys = np.array([work[x] for x in xs])
+                    ws = np.array([10.0 if int(x) in anchor_set else 1.0 for x in xs])
+                    spline = _fit_spline(xs, ys, ws, degree, stiffness)
+                    if spline is not None:
+                        fix_updates = {
+                            midi: (math.exp(float(spline(midi))) if log_sp
+                                   else float(spline(midi)))
+                            for midi in interp_midis
+                        }
+                        _update_layer_vel(out_notes, layer_id, vel, fix_updates)
+                        total_replaced += len(fix_updates)
+
+            data = _extract_layer_vel(notes, layer_id, vel)
+            if not data:
+                continue
+            updates, n_rep, n_fill = _process_layer_vel(
+                data, anchor_set, smooth_outliers,
+                fill_missing, smooth_all, degree, stiffness, log_sp,
+            )
+            if updates:
+                _update_layer_vel(out_notes, layer_id, vel, updates)
+            total_replaced += n_rep
+            total_filled   += n_fill
+
+    print(f"Spline: replaced={total_replaced}  filled={total_filled}")
+    return out_notes, {"replaced": total_replaced, "filled": total_filled}
+
+
+def json_notes_to_samples(notes: dict, duration_s: float = 3.0) -> dict:
+    """
+    Convert exported JSON notes dict back to ``params['samples']`` format.
+
+    Used by pipelines that apply spline_fix before NN training — the smoothed
+    notes need to be passed back to the trainer as target samples.
+
+    The exported JSON stores A_noise / attack_tau at the top level; this
+    function re-packs them under the expected ``noise`` sub-dict.
+    The per-partial ``phi`` field is stripped (it is a rendering artefact,
+    not a training target).
+    """
+    samples: dict = {}
+    for key, note in notes.items():
+        partials = [
+            {k: v for k, v in p.items() if k != "phi"}
+            for p in note.get("partials", [])
+        ]
+        sample: dict = {
+            "midi":          int(note["midi"]),
+            "vel":           int(note["vel"]),
+            "f0_nominal_hz": float(note.get("f0_hz", 440.0)),
+            "B":             float(note.get("B", 0.0)),
+            "duration_s":    float(note.get("duration_s", duration_s)),
+            "partials":      partials,
+            "noise": {
+                "A_noise":    float(note.get("A_noise",    0.04)),
+                "attack_tau": float(note.get("attack_tau", 0.05)),
+            },
+        }
+        if note.get("spectral_eq"):
+            sample["spectral_eq"] = note["spectral_eq"]
+        if note.get("_interpolated"):
+            sample["_interpolated"] = True
+        samples[key] = sample
+    return samples
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 
 def run(args):

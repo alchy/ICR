@@ -173,7 +173,33 @@ def _build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--sr-tag",    default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
-    # ── icr-eval ─────────────────────���───────────────────────────────���────────
+    # ── smooth-icr-eval ──────────────────────────────────────────────────────
+    smi = sub.add_parser(
+        "smooth-icr-eval",
+        help="Extract -> EQ -> spline-smooth measured -> train NN (ICR eval) "
+             "-> export hybrid -> spline-fix NN notes",
+    )
+    smi.add_argument("--bank",          required=True, help="WAV bank directory")
+    smi.add_argument("--out",           default=None,
+                     help="Output JSON (default: soundbanks/params-{bank}-smooth-icr-eval.json)")
+    smi.add_argument("--workers",       type=int, default=None,
+                     help="Parallel workers (default: CPU count)")
+    smi.add_argument("--epochs",        type=int, default=5000,
+                     help="Max NN epochs (default: 5000, early stop may exit sooner)")
+    smi.add_argument("--icr-exe",       default="build/bin/Release/ICR.exe",
+                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    smi.add_argument("--note-dur",      type=float, default=3.0,
+                     help="ICR render duration per note in seconds (default: 3.0)")
+    smi.add_argument("--icr-patience",  type=int, default=15,
+                     help="Early stop after N evals without improvement (default: 15)")
+    smi.add_argument("--auto-anchors",  type=int, default=12,
+                     help="Auto-anchor count for spline smoothing (default: 12)")
+    smi.add_argument("--skip-outliers-detection", action="store_true",
+                     help="Skip structural outlier detection step")
+    smi.add_argument("--sr-tag",        default="f48",
+                     help="SR suffix in filenames: f44 or f48 (default: f48)")
+
+    # ── icr-eval ─────────────────────────────────────────────────────────────
     icr = sub.add_parser(
         "icr-eval",
         help="Like experimental, but ICR C++ renderer drives eval/early-stop (no finetuner)",
@@ -257,6 +283,23 @@ def main() -> int:
                 workers=args.workers,
                 skip_outliers=args.skip_outliers_detection,
                 sr_tag=args.sr_tag,
+            )
+            print(f"\nDone -> {out}")
+
+        elif args.cmd == "smooth-icr-eval":
+            out_path = args.out or _default_out(args.bank, "smooth-icr-eval")
+            from training.pipeline_smooth_icr_eval import run
+            model, out = run(
+                bank_dir      = args.bank,
+                out_path      = out_path,
+                epochs        = args.epochs,
+                workers       = args.workers,
+                skip_outliers = args.skip_outliers_detection,
+                sr_tag        = args.sr_tag,
+                icr_exe       = args.icr_exe,
+                note_dur      = args.note_dur,
+                icr_patience  = args.icr_patience,
+                auto_anchors  = args.auto_anchors,
             )
             print(f"\nDone -> {out}")
 
