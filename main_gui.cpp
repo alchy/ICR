@@ -66,6 +66,8 @@ int main(int argc, char* argv[]) {
     std::string core_name = "SineCore";
     std::string params_json;
     std::string config_json;
+    int         midi_from = 0;    // --midi-range-limit-from
+    int         midi_to   = 127;  // --midi-range-limit-to
     std::vector<std::pair<std::string,float>> core_params;
 
     for (int i = 1; i < argc; ++i) {
@@ -94,6 +96,10 @@ int main(int argc, char* argv[]) {
                              kv.c_str());
                 return 1;
             }
+        } else if (a == "--midi-range-limit-from" && i + 1 < argc) {
+            midi_from = std::atoi(argv[++i]);
+        } else if (a == "--midi-range-limit-to" && i + 1 < argc) {
+            midi_to = std::atoi(argv[++i]);
         } else {
             std::fprintf(stderr, "Unknown option: %s\n\n", a.c_str());
             printHelp(argv[0]);
@@ -107,7 +113,7 @@ int main(int argc, char* argv[]) {
 
     try {
         auto engine = std::make_unique<CoreEngine>();
-        if (!engine->initialize(core_name, params_json, config_json, logger)) {
+        if (!engine->initialize(core_name, params_json, config_json, logger, midi_from, midi_to)) {
             logger.log("main", LogSeverity::Error, "Engine init failed");
             return 1;
         }

@@ -209,8 +209,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Parallel workers (default: CPU count)")
     smi.add_argument("--epochs",           type=int, default=5000,
                      help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    smi.add_argument("--icr-exe",          default="build/bin/Release/ICR.exe",
-                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    smi.add_argument("--icr-exe",          default="build/bin/Release/icr.exe",
+                     help="Path to ICR.exe (default: build/bin/Release/icr.exe)")
     smi.add_argument("--note-dur",         type=float, default=3.0,
                      help="ICR render duration per note in seconds (default: 3.0)")
     smi.add_argument("--icr-patience",     type=int, default=15,
@@ -238,8 +238,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Parallel workers (default: CPU count)")
     srt.add_argument("--epochs",       type=int, default=5000,
                      help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    srt.add_argument("--icr-exe",      default="build/bin/Release/ICR.exe",
-                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    srt.add_argument("--icr-exe",      default="build/bin/Release/icr.exe",
+                     help="Path to ICR.exe (default: build/bin/Release/icr.exe)")
     srt.add_argument("--note-dur",     type=float, default=3.0,
                      help="ICR render duration per note in seconds (default: 3.0)")
     srt.add_argument("--icr-patience", type=int, default=15,
@@ -264,8 +264,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Parallel workers (default: CPU count)")
     sme.add_argument("--epochs",       type=int, default=5000,
                      help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    sme.add_argument("--icr-exe",      default="build/bin/Release/ICR.exe",
-                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    sme.add_argument("--icr-exe",      default="build/bin/Release/icr.exe",
+                     help="Path to ICR.exe (default: build/bin/Release/icr.exe)")
     sme.add_argument("--note-dur",     type=float, default=3.0,
                      help="ICR render duration per note in seconds (default: 3.0)")
     sme.add_argument("--icr-patience", type=int, default=15,
@@ -290,8 +290,8 @@ def _build_parser() -> argparse.ArgumentParser:
                       help="Parallel workers (default: CPU count)")
     sxrt.add_argument("--epochs",       type=int, default=5000,
                       help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    sxrt.add_argument("--icr-exe",      default="build/bin/Release/ICR.exe",
-                      help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    sxrt.add_argument("--icr-exe",      default="build/bin/Release/icr.exe",
+                      help="Path to ICR.exe (default: build/bin/Release/icr.exe)")
     sxrt.add_argument("--note-dur",     type=float, default=3.0,
                       help="ICR render duration per note in seconds (default: 3.0)")
     sxrt.add_argument("--icr-patience", type=int, default=15,
@@ -316,8 +316,8 @@ def _build_parser() -> argparse.ArgumentParser:
                      help="Parallel workers (default: CPU count)")
     icr.add_argument("--epochs",       type=int, default=5000,
                      help="Max NN training epochs (default: 5000, early stop may exit sooner)")
-    icr.add_argument("--icr-exe",      default="build/bin/Release/ICR.exe",
-                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    icr.add_argument("--icr-exe",      default="build/bin/Release/icr.exe",
+                     help="Path to ICR.exe (default: build/bin/Release/icr.exe)")
     icr.add_argument("--note-dur",     type=float, default=3.0,
                      help="ICR render duration per note in seconds (default: 3.0)")
     icr.add_argument("--icr-patience", type=int, default=15,

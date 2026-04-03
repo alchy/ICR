@@ -45,10 +45,14 @@ public:
     // ── Initialization ────────────────────────────────────────────────────────
 
     // Phase 1: instantiate core by name, load params, apply optional config JSON.
+    // midi_from / midi_to: optional MIDI note range filter (inclusive).
+    // Notes outside [midi_from, midi_to] are not loaded into the core.
     bool initialize(const std::string& core_name,
                     const std::string& params_path,
                     const std::string& config_json_path,
-                    Logger&            logger);
+                    Logger&            logger,
+                    int                midi_from = 0,
+                    int                midi_to   = 127);
 
     // Phase 2: open audio device and start RT callback.
     bool start();

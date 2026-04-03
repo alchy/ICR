@@ -105,7 +105,9 @@ static void applyConfigJson(const std::string& path, ISynthCore* core,
 bool CoreEngine::initialize(const std::string& core_name,
                              const std::string& params_path,
                              const std::string& config_json_path,
-                             Logger&            logger) {
+                             Logger&            logger,
+                             int                midi_from,
+                             int                midi_to) {
     logger_ = logger;
     logger_.log("CoreEngine", LogSeverity::Info,
                 "Initializing core: " + core_name);
@@ -119,7 +121,7 @@ bool CoreEngine::initialize(const std::string& core_name,
         return false;
     }
 
-    if (!core_->load(params_path, (float)sample_rate_, logger_)) {
+    if (!core_->load(params_path, (float)sample_rate_, logger_, midi_from, midi_to)) {
         logger_.log("CoreEngine", LogSeverity::Error, "Core load failed");
         return false;
     }

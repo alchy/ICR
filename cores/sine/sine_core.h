@@ -30,7 +30,8 @@ class SineCore final : public ISynthCore {
 public:
     SineCore();
 
-    bool load(const std::string& params_path, float sr, Logger& logger) override;
+    bool load(const std::string& params_path, float sr, Logger& logger,
+              int midi_from = 0, int midi_to = 127) override;
     void setSampleRate(float sr) override;
 
     void noteOn      (uint8_t midi, uint8_t velocity) override;

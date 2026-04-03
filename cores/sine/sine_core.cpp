@@ -20,7 +20,8 @@ SineCore::SineCore() {
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
-bool SineCore::load(const std::string& /*params_path*/, float sr, Logger& logger) {
+bool SineCore::load(const std::string& /*params_path*/, float sr, Logger& logger,
+                    int /*midi_from*/, int /*midi_to*/) {
     sample_rate_ = sr;
     loaded_      = true;
     // Recompute omega for voices already active (e.g. after setSampleRate call)

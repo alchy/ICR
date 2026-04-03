@@ -100,7 +100,9 @@ public:
     // Returns false on error; error description written to logger.
     virtual bool load(const std::string& params_path,
                       float              sr,
-                      Logger&            logger) = 0;
+                      Logger&            logger,
+                      int                midi_from = 0,
+                      int                midi_to   = 127) = 0;
 
     // Change sample rate after load (recomputes coefficients).
     // THREADING: must only be called before CoreEngine::start() or after

@@ -37,7 +37,8 @@ PianoCore::PianoCore() {
 
 // ── JSON loading ──────────────────────────────────────────────────────────────
 
-bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
+bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
+                     int midi_from, int midi_to) {
     sample_rate_ = sr;
     inv_sr_      = 1.f / sr;
 
@@ -81,6 +82,7 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
         int vel_idx = s["vel"].get<int>();
 
         if (midi < 0 || midi > 127 || vel_idx < 0 || vel_idx > 7) continue;
+        if (midi < midi_from || midi > midi_to) continue;
 
         PianoNoteParam& np = note_params_[midi][vel_idx];
         np.valid     = true;
@@ -134,9 +136,12 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger) {
         return false;
     }
 
+    std::string range_info = (midi_from > 0 || midi_to < 127)
+        ? ("  MIDI filter: " + std::to_string(midi_from) + "-" + std::to_string(midi_to))
+        : "";
     logger.log("PianoCore", LogSeverity::Info,
                "Loaded " + std::to_string(loaded_count) + " notes from " + params_path
-               + "  SR=" + std::to_string((int)sr));
+               + "  SR=" + std::to_string((int)sr) + range_info);
     return true;
 }
 

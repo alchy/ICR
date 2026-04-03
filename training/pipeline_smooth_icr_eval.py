@@ -34,7 +34,7 @@ Output files:
 
 Call via run-training.py or import directly:
     from training.pipeline_smooth_icr_eval import run
-    model, out_path = run(bank_dir, out_path, icr_exe="build/bin/Release/ICR.exe")
+    model, out_path = run(bank_dir, out_path, icr_exe="build/bin/Release/icr.exe")
     model, out_path = run(bank_dir, out_path, icr_exe=..., icr_round_trip=True)
 """
 
@@ -69,7 +69,7 @@ def run(
     workers:         int   = None,
     skip_outliers:   bool  = False,
     sr_tag:          str   = "f48",
-    icr_exe:         str   = "build/bin/Release/ICR.exe",
+    icr_exe:         str   = "build/bin/Release/icr.exe",
     note_dur:        float = 3.0,
     icr_patience:    int   = 15,
     sr:              int   = 48000,

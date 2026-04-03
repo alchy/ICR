@@ -32,7 +32,7 @@ Usage
 ─────
     from training.modules.icr_round_trip import ICRRoundTripProcessor
 
-    rt = ICRRoundTripProcessor(icr_exe="build/bin/Release/ICR.exe", sr=48000)
+    rt = ICRRoundTripProcessor(icr_exe="build/bin/Release/icr.exe", sr=48000)
     params_rt = rt.process(params_smooth, workers=8)
     # params_rt has same structure as params_smooth, physical params corrected
 """

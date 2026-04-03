@@ -106,17 +106,17 @@ macro(icr_platform_setup target)
     endif()
 endmacro()
 
-# ── ICR — headless real-time CLI ──────────────────────────────────────────────
+# ── icr — headless real-time CLI ──────────────────────────────────────────────
 
-add_executable(ICR
+add_executable(icr
     main.cpp
     ${ENGINE_SOURCES}
     ${CORE_SOURCES}
     ${DSP_SOURCES}
 )
 
-target_include_directories(ICR PRIVATE ${COMMON_INCLUDES})
-icr_platform_setup(ICR)
+target_include_directories(icr PRIVATE ${COMMON_INCLUDES})
+icr_platform_setup(icr)
 
 # ── ICRGUI — GUI application ──────────────────────────────────────────────────
 
@@ -130,7 +130,7 @@ set(IMGUI_SOURCES
     ${IMGUI_DIR}/backends/imgui_impl_opengl3.cpp
 )
 
-add_executable(ICRGUI
+add_executable(icrgui
     main_gui.cpp
     gui/resonator_gui.cpp
     ${ENGINE_SOURCES}
@@ -139,18 +139,18 @@ add_executable(ICRGUI
     ${IMGUI_SOURCES}
 )
 
-target_include_directories(ICRGUI PRIVATE
+target_include_directories(icrgui PRIVATE
     ${COMMON_INCLUDES}
     ${IMGUI_DIR}
     ${IMGUI_DIR}/backends
 )
 
 if (WIN32)
-    target_compile_definitions(ICRGUI PRIVATE __WINDOWS_MM__ _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN)
-    target_link_libraries(ICRGUI PRIVATE ole32 winmm glfw OpenGL::GL)
+    target_compile_definitions(icrgui PRIVATE __WINDOWS_MM__ _CRT_SECURE_NO_WARNINGS WIN32_LEAN_AND_MEAN)
+    target_link_libraries(icrgui PRIVATE ole32 winmm glfw OpenGL::GL)
 elseif (APPLE)
-    target_compile_definitions(ICRGUI PRIVATE __MACOSX_CORE__)
-    target_link_libraries(ICRGUI PRIVATE glfw OpenGL::GL
+    target_compile_definitions(icrgui PRIVATE __MACOSX_CORE__)
+    target_link_libraries(icrgui PRIVATE glfw OpenGL::GL
         "-framework CoreAudio" "-framework AudioToolbox"
         "-framework CoreFoundation" "-framework CoreMIDI")
 else()
@@ -159,36 +159,36 @@ else()
         pkg_check_modules(JACK QUIET jack)
     endif()
     if (JACK_FOUND)
-        target_compile_definitions(ICRGUI PRIVATE __UNIX_JACK__)
-        target_link_libraries(ICRGUI PRIVATE ${JACK_LIBRARIES})
+        target_compile_definitions(icrgui PRIVATE __UNIX_JACK__)
+        target_link_libraries(icrgui PRIVATE ${JACK_LIBRARIES})
     else()
-        target_compile_definitions(ICRGUI PRIVATE __LINUX_ALSA__)
-        target_link_libraries(ICRGUI PRIVATE asound)
+        target_compile_definitions(icrgui PRIVATE __LINUX_ALSA__)
+        target_link_libraries(icrgui PRIVATE asound)
     endif()
-    target_link_libraries(ICRGUI PRIVATE glfw OpenGL::GL pthread m dl)
+    target_link_libraries(icrgui PRIVATE glfw OpenGL::GL pthread m dl)
 endif()
 
 if (CMAKE_SYSTEM_PROCESSOR MATCHES "AMD64|x86_64|X86_64")
     if (MSVC)
-        target_compile_options(ICRGUI PRIVATE /arch:AVX2)
+        target_compile_options(icrgui PRIVATE /arch:AVX2)
     else()
-        target_compile_options(ICRGUI PRIVATE -mavx2 -mfma)
+        target_compile_options(icrgui PRIVATE -mavx2 -mfma)
     endif()
 endif()
 
 if (MSVC)
-    target_compile_options(ICRGUI PRIVATE
+    target_compile_options(icrgui PRIVATE
         $<$<CONFIG:Debug>:/Od /Zi>
         $<$<CONFIG:Release>:/O2 /DNDEBUG>)
 else()
-    target_compile_options(ICRGUI PRIVATE
+    target_compile_options(icrgui PRIVATE
         $<$<CONFIG:Debug>:-g -O0>
         $<$<CONFIG:Release>:-O3 -DNDEBUG>)
 endif()
 
 # ── Copy soundbanks/ next to each executable ──────────────────────────────────
 
-foreach(_target ICR ICRGUI)
+foreach(_target icr icrgui)
     add_custom_command(TARGET ${_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_directory
             ${CMAKE_SOURCE_DIR}/soundbanks
@@ -200,9 +200,9 @@ endforeach()
 # ── Custom targets ────────────────────────────────────────────────────────────
 
 add_custom_target(run
-    COMMAND $<TARGET_FILE:ICR> --core SineCore
-    DEPENDS ICR
-    WORKING_DIRECTORY $<TARGET_FILE_DIR:ICR>
+    COMMAND $<TARGET_FILE:icr> --core SineCore
+    DEPENDS icr
+    WORKING_DIRECTORY $<TARGET_FILE_DIR:icr>
 )
 
 add_custom_target(clean-exports
