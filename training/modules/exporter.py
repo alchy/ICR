@@ -236,6 +236,10 @@ class SoundbankExporter:
         spectral_eq = sample.get("spectral_eq")
         if spectral_eq:
             note["spectral_eq"] = spectral_eq
+        # Preserve _interpolated flag so post-processing tools can distinguish
+        # NN-generated notes from measured ones.
+        if sample.get("_interpolated"):
+            note["_interpolated"] = True
         return note
 
     def _build_partial(self, p: dict, phi: float, k_idx: int = 0) -> dict:
