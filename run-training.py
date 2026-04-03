@@ -17,6 +17,9 @@ Subcommands
                       -> hybrid (raw measured + NN) + pure-NN export
   smooth-ext-icr-eval Same as smooth-icr-eval + measured notes extended to max partial
                       count before training (NN trains on complete harmonic targets)
+  smooth-rt-icr-eval  Same as smooth-icr-eval + ICR round-trip correction:
+                      smooth params → ICR render → re-extract → training targets
+                      (NN converges to what ICR actually produces)
   nn                  Extract -> filter -> EQ -> train NN (shared encoders) -> export
   full                Extract -> filter -> EQ -> train NN -> MRSTFT finetune -> export hybrid
   experimental        Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
@@ -30,6 +33,7 @@ Output naming (--out optional)
   soundbanks/params-{bank_name}-icr-eval.json
   soundbanks/params-{bank_name}-smooth-icr-eval.json
   soundbanks/params-{bank_name}-smooth-ext-icr-eval.json
+  soundbanks/params-{bank_name}-smooth-rt-icr-eval.json
 
 All console output is also written to:
   training-logs/run-{cmd}-{bank_name}-{timestamp}.log
@@ -210,6 +214,32 @@ def _build_parser() -> argparse.ArgumentParser:
     smi.add_argument("--sr-tag",           default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
+    # ── smooth-rt-icr-eval ───────────────────────────────────────────────────
+    srt = sub.add_parser(
+        "smooth-rt-icr-eval",
+        help="smooth-icr-eval + ICR round-trip: smooth params → ICR render → "
+             "re-extract → training targets (NN learns ICR's actual transfer function)",
+    )
+    srt.add_argument("--bank",         required=True, help="WAV bank directory")
+    srt.add_argument("--out",          default=None,
+                     help="Output JSON (default: soundbanks/params-{bank}-smooth-rt-icr-eval.json)")
+    srt.add_argument("--workers",      type=int, default=None,
+                     help="Parallel workers (default: CPU count)")
+    srt.add_argument("--epochs",       type=int, default=5000,
+                     help="Max NN epochs (default: 5000, early stop may exit sooner)")
+    srt.add_argument("--icr-exe",      default="build/bin/Release/ICR.exe",
+                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    srt.add_argument("--note-dur",     type=float, default=3.0,
+                     help="ICR render duration per note in seconds (default: 3.0)")
+    srt.add_argument("--icr-patience", type=int, default=15,
+                     help="Early stop after N evals without improvement (default: 15)")
+    srt.add_argument("--auto-anchors", type=int, default=12,
+                     help="Auto-anchor count for spline smoothing (default: 12)")
+    srt.add_argument("--skip-outliers-detection", action="store_true",
+                     help="Skip structural outlier detection step")
+    srt.add_argument("--sr-tag",       default="f48",
+                     help="SR suffix in filenames: f44 or f48 (default: f48)")
+
     # ── smooth-ext-icr-eval ──────────────────────────────────────────────────
     sme = sub.add_parser(
         "smooth-ext-icr-eval",
@@ -338,6 +368,24 @@ def main() -> int:
                 icr_patience    = args.icr_patience,
                 auto_anchors    = args.auto_anchors,
                 extend_partials = args.extend_partials,
+            )
+            print(f"\nDone -> {out}")
+
+        elif args.cmd == "smooth-rt-icr-eval":
+            out_path = args.out or _default_out(args.bank, "smooth-rt-icr-eval")
+            from training.pipeline_smooth_icr_eval import run
+            model, out = run(
+                bank_dir        = args.bank,
+                out_path        = out_path,
+                epochs          = args.epochs,
+                workers         = args.workers,
+                skip_outliers   = args.skip_outliers_detection,
+                sr_tag          = args.sr_tag,
+                icr_exe         = args.icr_exe,
+                note_dur        = args.note_dur,
+                icr_patience    = args.icr_patience,
+                auto_anchors    = args.auto_anchors,
+                icr_round_trip  = True,
             )
             print(f"\nDone -> {out}")
 

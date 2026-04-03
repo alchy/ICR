@@ -1,32 +1,41 @@
 """
 training/pipeline_smooth_icr_eval.py
 ──────────────────────────────────────
-Extract -> filter -> EQ -> spline-smooth measured params (+ optional extend partials)
--> train NN (ICR eval) -> export hybrid + pure-NN.
+Extract -> filter -> EQ -> spline-smooth -> [ICR round-trip] -> train NN
+(ICR eval) -> export hybrid + pure-NN.
 
-Difference from pipeline_icr_eval:
-    - After extraction the measured params are smoothed with spline_fix
-      (auto-anchors selected by extraction quality: K_valid × tau2/tau1 × a1).
-    - Optionally the measured partials are extended to the maximum measured
-      partial count before training (--extend-partials).  This gives the NN
-      complete harmonic targets for every measured note so it naturally
-      predicts full partial counts for unmeasured positions too.
-    - The NN trains on these smoother, complete targets → better generalisation.
-    - The hybrid bank preserves the RAW measured notes (ground truth) and uses
-      the NN output directly for unmeasured positions — no second spline pass.
+Pipeline variants (controlled by flags):
+    default              spline-smooth measured params as NN targets
+    --extend-partials    extend measured to max partial count before training
+    --icr-round-trip     run ICR round-trip after spline-smooth:
+                           smooth_params → ICR render → re-extract → params_rt
+                         NN trains on params_rt — converges to what ICR actually
+                         produces, not what the extractor measured from real piano.
 
-Replaces full-spline-icr-eval and b-spline-icr-eval (both were redundant after
-the NoB refactor; extend_partials is now a flag here).
+Why round-trip matters
+──────────────────────
+The extractor measures raw piano recordings. ICR synthesis has its own transfer
+function — the same params fed to ICR produce a signal that, when re-extracted,
+gives slightly different values (systematic offset per parameter). Training on
+params_rt corrects for this offset: the NN learns what ICR needs as input to
+reproduce the intended sound.
+
+EQ handling in round-trip
+─────────────────────────
+spectral_eq is excluded from the round-trip (neutral EQ used for rendering).
+EQ will be handled as a separate training branch in a future refactor.
 
 Output files:
     <out_path>                           final hybrid bank
     <stem>-pre-smooth.json               measured-only raw export (intermediate)
     <stem>-pre-smooth-spline.json        spline-smoothed measured (training targets)
+    <stem>-pre-smooth-rt.json            round-trip corrected targets (if --icr-round-trip)
     <stem>-pure-nn.json                  all 704 notes from NN (A/B comparison)
 
 Call via run-training.py or import directly:
     from training.pipeline_smooth_icr_eval import run
     model, out_path = run(bank_dir, out_path, icr_exe="build/bin/Release/ICR.exe")
+    model, out_path = run(bank_dir, out_path, icr_exe=..., icr_round_trip=True)
 """
 
 from __future__ import annotations
@@ -66,6 +75,7 @@ def run(
     sr:              int   = 48000,
     auto_anchors:    int   = 12,
     extend_partials: bool  = False,
+    icr_round_trip:  bool  = False,
 ) -> tuple:
     """
     Smooth-ICR-eval pipeline:
@@ -87,6 +97,10 @@ def run(
         extend_partials: Extend measured notes to max measured partial count
                          before training.  New partial values are filled by the
                          spline so the NN trains on complete harmonic targets.
+        icr_round_trip:  After spline-smooth, render all measured notes through
+                         ICR, re-extract params, and use round-trip params as
+                         training targets.  Corrects for systematic ICR synthesis
+                         offsets — NN converges to what ICR actually produces.
 
     Returns:
         (model, out_path) -- trained model and path to final soundbank JSON.
@@ -119,6 +133,28 @@ def run(
     smooth_samples = json_notes_to_samples(smooth_bank["notes"], duration_s)
     smooth_params  = {**params, "samples": smooth_samples}
     print(f"  Smooth params: {len(smooth_samples)} notes loaded as training targets")
+
+    # ── Step 2b (optional): ICR round-trip correction ─────────────────────────
+    if icr_round_trip:
+        icr_exe_path = _resolve_icr_exe(icr_exe)
+        if not Path(icr_exe_path).exists():
+            raise FileNotFoundError(
+                f"ICR.exe not found at '{icr_exe_path}'. "
+                f"Required for --icr-round-trip."
+            )
+        from training.modules.icr_round_trip import ICRRoundTripProcessor
+        rt_path    = str(parent / (stem + "-pre-smooth-rt.json"))
+        smooth_params = ICRRoundTripProcessor(
+            icr_exe  = icr_exe_path,
+            sr       = sr,
+            sr_tag   = sr_tag,
+            note_dur = note_dur,
+        ).process(smooth_params, workers=workers)
+        # Save round-trip params for inspection
+        rt_bank = {**smooth_bank,
+                   "notes": {k: v for k, v in smooth_params["samples"].items()}}
+        Path(rt_path).write_text(json.dumps(rt_bank, separators=(",", ":")))
+        print(f"  Round-trip targets written: {rt_path}")
 
     # ── Step 3: Train NN with ICR eval/early-stop ─────────────────────────────
     icr_exe_path = _resolve_icr_exe(icr_exe)

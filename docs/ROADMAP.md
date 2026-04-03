@@ -5,7 +5,20 @@ Items ordered by priority. Updated after consolidation to 3 workflows
 
 ---
 
-## Aktivní — čeká na výsledky tréninku
+## Aktivní — čeká na výsledky tréninku (smooth-rt-icr-eval běží)
+
+### 0. spectral_eq — separátní větev tréninku (plánováno)
+
+**Kontext:** EQ hlava tvoří ~45 % val lossu a bude řešena samostatně.
+Při ICR round-tripu se používají neutrální (identity) biquady — ICR renderuje
+bez EQ aplikace. `spectral_eq` se přenáší z original smooth_params beze změny.
+
+**Plán:**
+- Zmrazit EQ hlavu během hlavního NN tréninku (nebo ji oddělit do vlastního optimizeru)
+- Po hlavním tréninku: dotrénovat EQ hlavu zvlášť, nebo fitovat post-hoc z ICR-rendered WAVs
+- `smooth-rt-icr-eval` připraven pro round-trip bez EQ — základ pro tuto větev
+
+---
 
 ### 1. EQ hlavu oddělit od hlavního lossu — střední priorita
 
