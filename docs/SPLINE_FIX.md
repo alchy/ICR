@@ -220,22 +220,54 @@ Three pipelines are available, producing comparable output for A/B listening:
 | **icr-eval** | `python run-training.py icr-eval --bank ...` | Baseline — NN trained directly on extracted params |
 | **smooth-icr-eval** | `python run-training.py smooth-icr-eval --bank ...` | Measured params spline-smoothed before training; NN notes replaced by spline post-export |
 | **full-spline-icr-eval** | `python run-training.py full-spline-icr-eval --bank ...` | Same as smooth-icr-eval + NN notes extended to max measured partial count |
+| **b-spline-icr-eval** | `python run-training.py b-spline-icr-eval --bank ...` | B excluded from NN (spline only); smooth targets; eliminates dominant loss term |
 
-Output files per workflow:
+### Output files per workflow
 
+All pipelines write to `soundbanks/` using `{bank}` = WAV directory name (e.g. `vv-rhodes`).
+
+#### icr-eval
 ```
-soundbanks/params-{bank}-icr-eval.json
-soundbanks/params-{bank}-smooth-icr-eval.json
-soundbanks/params-{bank}-full-spline-icr-eval.json
+params-{bank}-icr-eval.json                  final: hybrid (measured + NN)
+params-{bank}-icr-eval-pure-nn.json          all 704 notes from NN only
 ```
 
-`full-spline-icr-eval` additionally produces intermediate files:
+#### smooth-icr-eval
+```
+params-{bank}-smooth-icr-eval-pre-smooth.json          intermediate: measured only
+params-{bank}-smooth-icr-eval-pre-smooth-spline.json   intermediate: spline-smoothed measured
+params-{bank}-smooth-icr-eval-hybrid-raw.json          intermediate: hybrid before spline_fix
+params-{bank}-smooth-icr-eval.json                     final: hybrid + spline-fixed
+params-{bank}-smooth-icr-eval-pure-nn.json             all 704 notes from NN only
+```
 
+#### full-spline-icr-eval
 ```
-params-{bank}-full-spline-icr-eval-pre-smooth.json        measured-only simple export
-params-{bank}-full-spline-icr-eval-pre-smooth-spline.json spline-smoothed measured params
-params-{bank}-full-spline-icr-eval-hybrid-raw.json        raw NN hybrid before spline fix
+params-{bank}-full-spline-icr-eval-pre-smooth.json
+params-{bank}-full-spline-icr-eval-pre-smooth-spline.json
+params-{bank}-full-spline-icr-eval-hybrid-raw.json
+params-{bank}-full-spline-icr-eval.json                final: hybrid + spline-fixed + extended partials
+params-{bank}-full-spline-icr-eval-pure-nn.json        all 704 notes from NN only
 ```
+
+#### b-spline-icr-eval
+```
+params-{bank}-b-spline-icr-eval-pre-smooth.json
+params-{bank}-b-spline-icr-eval-pre-smooth-spline.json
+params-{bank}-b-spline-icr-eval-hybrid-raw.json
+params-{bank}-b-spline-icr-eval.json                   final: hybrid + spline-fixed (B from spline)
+params-{bank}-b-spline-icr-eval-pure-nn.json           all 704 notes from NN only
+```
+
+#### File legend
+
+| Suffix | Obsah | Určení |
+|---|---|---|
+| *(žádný)* | finální banka — měřené zachovány, NN doplňuje chybějící | **player** |
+| `-pure-nn` | všech 704 not z NN, žádné měřené nezachováno | A/B poslech |
+| `-hybrid-raw` | NN + měřené, před spline_fix | debug |
+| `-pre-smooth` | jen měřené noty bez vyhlazení | debug / reference |
+| `-pre-smooth-spline` | měřené po spline vyhlazení | trénovací targety NN |
 
 ---
 
