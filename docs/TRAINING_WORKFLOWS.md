@@ -75,38 +75,19 @@ NN trénuje na surových extrahovaných parametrech. Výstup NN je zašuměný
 
 ### Schéma
 
-```
-WAV soubory
-    │
-    ▼
-[1] ParamExtractor          ← extrakce fyzikálních parametrů
-    │  (raw, zašuměné)
-    ▼
-[2] StructuralOutlierFilter
-    │
-    ▼
-[3] EQFitter
-    │
-    │  params (measured, raw)
-    ├────────────────────────────────────────────────┐
-    ▼                                                │ orig_samples
-[4] ProfileTrainerEncExp.train()                     │
-    │  targety: raw extracted params                 │
-    │  early stop: ICR-MRSTFT (ICRBatchEvaluator)   │
-    ▼                                                │
-[5] SoundbankExporter.hybrid()  ◄────────────────────┘
-    │  measured: orig_samples (raw)
-    │  NN pozice: NN výstup
-    ▼
-[6] spline_fix(fix_interpolated=True)
-    │  NN pozice NAHRAZENY splinem z measured
-    │  → eliminuje šum raw-trained NN
-    ▼
-[7] SoundbankExporter.pure_nn()
-    ▼
-VÝSTUP:
-  params-{bank}-raw-nn-icreval.json          ← hybrid: raw measured + spline(NN pozice)
-  params-{bank}-raw-nn-icreval-pure-nn.json  ← čistá NN (pro A/B)
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")]
+    WAV --> EXT["ParamExtractor\nextrakce fyzikálních parametrů"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw, zašuměné)"| TRAIN["ProfileTrainerEncExp\ntargety: raw params\nearly stop: ICR-MRSTFT"]
+    EQF -->|orig_samples| HYB
+    TRAIN -->|"NN výstup (zašuměný)"| SFIX["spline_fix\nfix_interpolated=True\nNN pozice → spline z measured"]
+    SFIX --> HYB["SoundbankExporter.hybrid\nmeasured = orig_samples raw\nNN pozice = spline výstup"]
+    HYB --> PNN["SoundbankExporter.pure_nn"]
+    HYB --> OUT1[("-raw-nn-icreval-hybrid.json")]
+    PNN --> OUT2[("-raw-nn-icreval-nn.json")]
 ```
 
 ### API
@@ -146,39 +127,21 @@ targety a sama produkuje hladký výstup. `spline_fix` po exportu se neprovádí
 
 ### Schéma
 
-```
-WAV soubory
-    │
-    ▼
-[1] ParamExtractor
-    │  (raw, zašuměné)
-    ▼
-[2] StructuralOutlierFilter
-    │
-    ▼
-[3] EQFitter
-    │
-    │  params (measured, raw)           ← uložit jako -pre-smooth.json
-    ├──────────────────────────────────────────────────────────────┐
-    ▼                                                              │ orig_samples
-[4] spline_fix(smooth_all, auto_anchors)                           │
-    │  → smooth_params                  ← uložit jako -pre-smooth-spline.json
-    ▼                                                              │
-[5] ProfileTrainerEncExp.train(smooth_params)                      │
-    │  targety: spline-vyhlazené measured params                   │
-    │  early stop: ICR-MRSTFT                                      │
-    ▼                                                              │
-[6] SoundbankExporter.hybrid(model, params)  ◄─────────────────────┘
-    │  measured: orig_samples (RAW — ne smoothed!)
-    │  NN pozice: NN výstup (smooth, protože NN trénovala na smooth datech)
-    │  !! BEZ spline_fix !! NN je finální autorita
-    ▼
-[7] SoundbankExporter.pure_nn()
-    ▼
-VÝSTUP:
-  params-{bank}-spl-nn-icreval.json          ← hybrid: raw measured + NN(smooth)
-  params-{bank}-spl-nn-icreval-pure-nn.json  ← čistá NN
-  (+ intermediate: -pre-smooth.json, -pre-smooth-spline.json)
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")]
+    WAV --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw)"| PRE[("-pre-smooth.json")]
+    EQF -->|"params (raw)"| SPL["spline_fix\nsmooth_all, auto_anchors"]
+    EQF -->|orig_samples| HYB
+    SPL --> SPLJ[("-pre-smooth-spline.json")]
+    SPL -->|smooth_params| TRAIN["ProfileTrainerEncExp\ntargety: spline-smooth params\nearly stop: ICR-MRSTFT"]
+    TRAIN -->|"NN výstup (hladký)"| HYB["SoundbankExporter.hybrid\nmeasured = orig_samples raw\nNN pozice = NN výstup"]
+    HYB --> PNN["SoundbankExporter.pure_nn"]
+    HYB --> OUT1[("-spl-nn-icreval-hybrid.json")]
+    PNN --> OUT2[("-spl-nn-icreval-nn.json")]
 ```
 
 ### API
@@ -201,24 +164,41 @@ model, out_path = run(
 
 **CLI:** `python run-training.py spl-ext-nn-icreval --bank <dir>`
 
-Jako `smooth-icr-eval`, ale před tréninkem se každá measured nota rozšíří
+Jako `spl-nn-icreval`, ale před tréninkem se každá measured nota rozšíří
 na maximální počet parciálů (`extend_partials=True`). Nové parciály jsou
 inicializovány splinem z okolních not. NN se tak učí přirozeně predikovat
 plný počet parciálů pro všechny pozice.
 
+### Schéma
+
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")]
+    WAV --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw)"| PRE[("-pre-smooth.json")]
+    EQF -->|"params (raw)"| SPL["spline_fix\nsmooth_all, extend_partials=True\nauto_anchors"]
+    EQF -->|orig_samples| HYB
+    SPL --> SPLJ[("-pre-smooth-spline.json\n(každá nota má plný počet parciálů)")]
+    SPL -->|smooth_params| TRAIN["ProfileTrainerEncExp\ntargety: spline-smooth + plné parciály\nearly stop: ICR-MRSTFT"]
+    TRAIN -->|"NN výstup (hladký)"| HYB["SoundbankExporter.hybrid\nmeasured = orig_samples raw\nNN pozice = NN výstup"]
+    HYB --> PNN["SoundbankExporter.pure_nn"]
+    HYB --> OUT1[("-spl-ext-nn-icreval-hybrid.json")]
+    PNN --> OUT2[("-spl-ext-nn-icreval-nn.json")]
+```
+
 ### Co se mění oproti `spl-nn-icreval`
 
+```python
+apply_spline_fix_bank(notes,
+                      smooth_all      = True,
+                      extend_partials = True,   # ← přidáno
+                      auto_anchors    = N)
 ```
-Krok [4] spline_fix dostane navíc extend_partials=True:
-
-    apply_spline_fix_bank(notes,
-                          smooth_all      = True,
-                          extend_partials = True,   ← přidáno
-                          auto_anchors    = N)
 
 Výsledek: každá measured nota má plný počet parciálů (max přes všechny measured).
 NN trénuje na kompletních harmonických targetech od prvního epoch.
-```
 
 ### API
 
@@ -262,41 +242,25 @@ S round-tripem:    NN → params_rt → ICR → zvuk ≈ cílový zvuk
 
 ### Schéma
 
-```
-WAV soubory
-    │
-    ▼
-[1] ParamExtractor
-    ▼
-[2] StructuralOutlierFilter
-    ▼
-[3] EQFitter
-    │
-    │  params (measured, raw)           ← -pre-smooth.json
-    ├──────────────────────────────────────────────────────────────┐
-    ▼                                                              │ orig_samples
-[4] spline_fix(smooth_all, auto_anchors)                           │
-    │  → smooth_params                  ← -pre-smooth-spline.json  │
-    ▼                                                              │
-[5] ICRRoundTripProcessor.process(smooth_params)                   │
-    │  měřené noty → ICR render (neutral EQ) → re-extract          │
-    │  → params_rt                      ← -pre-smooth-rt.json      │
-    │  spectral_eq zachováno z smooth_params                       │
-    ▼                                                              │
-[6] ProfileTrainerEncExp.train(params_rt)                          │
-    │  targety: round-trip extrahované params                      │
-    │  early stop: ICR-MRSTFT                                      │
-    ▼                                                              │
-[7] SoundbankExporter.hybrid(model, params)  ◄─────────────────────┘
-    │  measured: orig_samples (RAW)
-    │  NN pozice: NN výstup
-    ▼
-[8] SoundbankExporter.pure_nn()
-    ▼
-VÝSTUP:
-  params-{bank}-spl-icrtarget-nn-icreval.json          ← hybrid
-  params-{bank}-spl-icrtarget-nn-icreval-pure-nn.json  ← čistá NN
-  (+ intermediate: -pre-smooth.json, -pre-smooth-spline.json, -pre-smooth-rt.json)
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")]
+    WAV --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw)"| PRE[("-pre-smooth.json")]
+    EQF -->|"params (raw)"| SPL["spline_fix\nsmooth_all, auto_anchors"]
+    EQF -->|orig_samples| HYB
+    SPL --> SPLJ[("-pre-smooth-spline.json")]
+    SPL -->|smooth_params| RT["ICRRoundTripProcessor\nper-nota délka = duration_s\nneutrální EQ\nmeasured noty → ICR render → re-extract"]
+    RT --> RTJ[("-pre-smooth-rt.json\n(raw RT, zašuměný)")]
+    RT -->|"params_rt (zašuměný)"| SPL2["spline_fix\nsmooth_all, auto_anchors"]
+    SPL2 --> RTSJ[("-pre-smooth-rt-spl.json\n(smooth RT targety)")]
+    SPL2 -->|"smooth params_rt"| TRAIN["ProfileTrainerEncExp\ntargety: smooth round-trip params\nearly stop: ICR-MRSTFT"]
+    TRAIN -->|"NN výstup"| HYB["SoundbankExporter.hybrid\nmeasured = orig_samples raw\nNN pozice = NN výstup"]
+    HYB --> PNN["SoundbankExporter.pure_nn"]
+    HYB --> OUT1[("-spl-icrtarget-nn-icreval-hybrid.json")]
+    PNN --> OUT2[("-spl-icrtarget-nn-icreval-nn.json")]
 ```
 
 ### API
@@ -314,9 +278,13 @@ model, out_path = run(
 
 ### Časová náročnost
 
-Round-trip přidává před trénink jeden průchod ICR renderem a re-extrakcí
-(~5–15 min podle počtu measured not a hardware). Zbytek pipeline identický
-se `smooth-icr-eval`.
+Round-trip přidává před trénink:
+1. ICR render všech measured not (per-nota délka = `duration_s` z extraktu)
+2. Re-extrakci params z rendered WAVů
+3. Druhý spline pass na RT targetech
+
+Celkový overhead ~10–30 min podle počtu measured not, délky not a hardware.
+Zbytek pipeline identický se `spl-nn-icreval`.
 
 ---
 
@@ -329,16 +297,37 @@ nejprve rozšířeny na plný počet parciálů, vyhlazeny splinem a pak projdou
 round-tripem. NN dostane jako targety nejkompletnější a nejpřesnější data:
 kompletní harmonická struktura + korekce ICR přenosové funkce.
 
+### Schéma
+
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")]
+    WAV --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw)"| PRE[("-pre-smooth.json")]
+    EQF -->|"params (raw)"| SPL["spline_fix\nsmooth_all, extend_partials=True\nauto_anchors"]
+    EQF -->|orig_samples| HYB
+    SPL --> SPLJ[("-pre-smooth-spline.json\n(každá nota má plný počet parciálů)")]
+    SPL -->|"smooth_params (plné parciály)"| RT["ICRRoundTripProcessor\nper-nota délka = duration_s\nneutrální EQ\nmeasured noty → ICR render → re-extract"]
+    RT --> RTJ[("-pre-smooth-rt.json\n(raw RT, zašuměný)")]
+    RT -->|"params_rt (zašuměný)"| SPL2["spline_fix\nsmooth_all, auto_anchors"]
+    SPL2 --> RTSJ[("-pre-smooth-rt-spl.json\n(smooth RT targety)")]
+    SPL2 -->|"smooth params_rt"| TRAIN["ProfileTrainerEncExp\ntargety: smooth RT + plné parciály\nearly stop: ICR-MRSTFT"]
+    TRAIN -->|"NN výstup"| HYB["SoundbankExporter.hybrid\nmeasured = orig_samples raw\nNN pozice = NN výstup"]
+    HYB --> PNN["SoundbankExporter.pure_nn"]
+    HYB --> OUT1[("-spl-ext-icrtarget-nn-icreval-hybrid.json")]
+    PNN --> OUT2[("-spl-ext-icrtarget-nn-icreval-nn.json")]
+```
+
 ### Co se mění oproti `spl-icrtarget-nn-icreval`
 
-```
-Krok [4] spline_fix s extend_partials=True + round-trip:
-
-    apply_spline_fix_bank(notes,
-                          smooth_all      = True,
-                          extend_partials = True,   ← měřené noty mají plný počet parciálů
-                          auto_anchors    = N)
-    → ICRRoundTripProcessor.process(smooth_params)  ← round-trip na rozšířených datech
+```python
+apply_spline_fix_bank(notes,
+                      smooth_all      = True,
+                      extend_partials = True,   # ← měřené noty mají plný počet parciálů
+                      auto_anchors    = N)
+# → ICRRoundTripProcessor.process(smooth_params)  ← round-trip na rozšířených datech
 ```
 
 Round-trip tak koriguje ICR offset i pro vyšší parciály, které byly doplněny splinem.
@@ -366,13 +355,15 @@ se doporučuje použít výše popsané `icr-eval` varianty.
 
 ### `simple`
 
-```
-extract → filter → EQ → export JSON  (bez NN, ~15 min)
-```
+Bez NN — pouze extrakce a export.
 
-```python
-from training.pipeline_simple import run
-out_path = run(bank_dir, out_path, workers=8, sr_tag="f48")
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")] --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF --> EXP["SoundbankExporter.from_params"]
+    EXP --> OUT[("-simple.json")]
 ```
 
 ```bash
@@ -381,9 +372,17 @@ python run-training.py simple --bank C:/SoundBanks/IthacaPlayer/ks-grand
 
 ### `nn`
 
-```
-extract → filter → EQ → ProfileTrainerEncExp → hybrid  (~30 min)
-Early stop: val data-loss (ne ICR-MRSTFT)
+NN bez ICR early stop — early stop řídí val data-loss.
+
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")] --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw)"| TRAIN["ProfileTrainerEncExp\ntargety: raw params\nearly stop: val data-loss"]
+    EQF -->|orig_samples| HYB
+    TRAIN --> HYB["SoundbankExporter.hybrid"]
+    HYB --> OUT[("-nn.json")]
 ```
 
 ```bash
@@ -392,8 +391,18 @@ python run-training.py nn --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
 
 ### `full`
 
-```
-extract → filter → EQ → ProfileTrainer → MRSTFTFinetuner → hybrid  (~60 min)
+NN + MRSTFT finetuner (Python renderer, pomalé).
+
+```mermaid
+flowchart TD
+    WAV[("WAV soubory")] --> EXT["ParamExtractor"]
+    EXT --> SOF["StructuralOutlierFilter"]
+    SOF --> EQF["EQFitter"]
+    EQF -->|"params (raw)"| TRAIN["ProfileTrainer\ntargety: raw params\nearly stop: val data-loss"]
+    EQF -->|orig_samples| HYB
+    TRAIN --> FT["MRSTFTFinetuner\nft_epochs, Python DifferentiableRenderer"]
+    FT --> HYB["SoundbankExporter.hybrid"]
+    HYB --> OUT[("-full.json")]
 ```
 
 ```bash
