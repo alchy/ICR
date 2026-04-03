@@ -661,6 +661,7 @@ def generate_profile_exp(
 
                 sample = {
                     "midi": midi, "vel": vel,
+                    "f0_nominal_hz": round(f0, 6),
                     "B": round(float(B), 8), "duration_s": round(float(dur), 3),
                     "partials": partials, "noise": noise_out,
                     "_interpolated": True,
