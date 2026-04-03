@@ -9,7 +9,8 @@ Pipeline variants (controlled by flags):
     --extend-partials    extend measured to max partial count before training
     --icr-round-trip     run ICR round-trip after spline-smooth:
                            smooth_params → ICR render → re-extract → params_rt
-                         NN trains on params_rt — converges to what ICR actually
+                                       → spline-smooth params_rt → training targets
+                         NN trains on smooth params_rt — converges to what ICR actually
                          produces, not what the extractor measured from real piano.
 
 Why round-trip matters
@@ -20,6 +21,23 @@ gives slightly different values (systematic offset per parameter). Training on
 params_rt corrects for this offset: the NN learns what ICR needs as input to
 reproduce the intended sound.
 
+Why a second spline pass after round-trip
+─────────────────────────────────────────
+Re-extracting from ICR-rendered audio introduces the same per-note estimation noise
+as extracting from real piano audio (windowed FFT variance, DF resolution limits,
+bi-exp fitting uncertainty). Without a second spline pass these noisy per-note values
+become training targets directly. The systematic ICR transfer-function correction is
+smooth across MIDI notes and survives spline fitting; the per-note noise does not.
+
+Why full-duration renders
+─────────────────────────
+Each note is rendered for its full natural duration (duration_s from smooth_params).
+Short fixed renders (e.g. 3 s) limit:
+  - DF estimation: frequency resolution = 1/duration; slow beats (< 0.3 Hz) in the
+    bass register are invisible in a 3 s window.
+  - tau2 estimation: bi-exp fitting uses t[-1]*0.9 as upper bound; 3 s caps tau2 at
+    2.7 s, too short for bass notes where tau2 can reach 8–15 s.
+
 EQ handling in round-trip
 ─────────────────────────
 spectral_eq is excluded from the round-trip (neutral EQ used for rendering).
@@ -29,7 +47,8 @@ Output files:
     <out_path>                           final hybrid bank
     <stem>-pre-smooth.json               measured-only raw export (intermediate)
     <stem>-pre-smooth-spline.json        spline-smoothed measured (training targets)
-    <stem>-pre-smooth-rt.json            round-trip corrected targets (if --icr-round-trip)
+    <stem>-pre-smooth-rt.json            raw round-trip targets before second spline (if --icr-round-trip)
+    <stem>-pre-smooth-rt-spl.json        spline-smoothed round-trip targets (training targets, if --icr-round-trip)
     <stem>-pure-nn.json                  all 704 notes from NN (A/B comparison)
 
 Call via run-training.py or import directly:
@@ -98,9 +117,11 @@ def run(
                          before training.  New partial values are filled by the
                          spline so the NN trains on complete harmonic targets.
         icr_round_trip:  After spline-smooth, render all measured notes through
-                         ICR, re-extract params, and use round-trip params as
-                         training targets.  Corrects for systematic ICR synthesis
-                         offsets — NN converges to what ICR actually produces.
+                         ICR (at full natural duration per note), re-extract params,
+                         apply a second spline pass to remove per-note extraction
+                         noise, and use the smoothed round-trip params as training
+                         targets.  Corrects for systematic ICR synthesis offsets —
+                         NN converges to what ICR actually produces.
 
     Returns:
         (model, out_path) -- trained model and path to final soundbank JSON.
@@ -155,6 +176,17 @@ def run(
                    "notes": {k: v for k, v in smooth_params["samples"].items()}}
         Path(rt_path).write_text(json.dumps(rt_bank, separators=(",", ":")))
         print(f"  Round-trip targets written: {rt_path}")
+
+        # Second spline pass: remove per-note extraction noise from round-trip
+        # targets while preserving the systematic ICR transfer-function correction
+        # (which is smooth across MIDI notes and survives spline fitting).
+        rt_spl_path = str(parent / (stem + "-pre-smooth-rt-spl.json"))
+        print(f"  Spline-smoothing round-trip targets (auto_anchors={auto_anchors})...")
+        _spline_smooth_simple(rt_path, rt_spl_path, auto_anchors, extend_partials=False)
+        rt_spl_bank    = json.loads(Path(rt_spl_path).read_text())
+        smooth_samples = json_notes_to_samples(rt_spl_bank["notes"], duration_s)
+        smooth_params  = {**params, "samples": smooth_samples}
+        print(f"  Smooth round-trip params: {len(smooth_samples)} notes as training targets")
 
     # ── Step 3: Train NN with ICR eval/early-stop ─────────────────────────────
     icr_exe_path = _resolve_icr_exe(icr_exe)

@@ -22,6 +22,15 @@ piano (smooth_params) and what it measures from ICR-rendered audio of those same
 (params_rt). The NN output is thus calibrated to ICR's operating range, not to raw
 physical measurements.
 
+Render duration
+───────────────
+Each note is rendered for its full natural duration (duration_s from smooth_params)
+rather than a fixed short window. This is critical for:
+  - DF (beating) estimation: frequency resolution = 1/duration; short renders cannot
+    resolve slow beat frequencies (< 0.3 Hz) common in the bass register.
+  - tau2 estimation: bi-exponential fitting requires t[-1]*0.9 > tau2; a 3 s render
+    caps tau2_max at 2.7 s, which is too short for bass notes with tau2 ~ 8–15 s.
+
 EQ handling
 ───────────
 spectral_eq / eq_biquads are excluded from the round-trip (neutral EQ used for
@@ -114,10 +123,13 @@ class ICRRoundTripProcessor:
             self._export_neutral(params_smooth, measured, bank_json)
 
             # ── 2. Build batch spec for all measured notes ───────────────────
+            # Use per-note duration_s from smooth_params (matches original WAV
+            # duration) so the extractor sees the full decay and beating signal.
+            # Falls back to self.note_dur if duration_s is missing.
             batch_json = os.path.join(tmp_bank, "batch.json")
             batch = [
                 {"midi": int(v["midi"]), "vel_idx": int(v["vel"]),
-                 "duration_s": self.note_dur}
+                 "duration_s": float(v.get("duration_s", self.note_dur))}
                 for v in measured.values()
             ]
             with open(batch_json, "w") as f:
