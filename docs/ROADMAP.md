@@ -1,45 +1,13 @@
 # Roadmap — ICR Training Pipeline
 
-Items ordered by priority. Parked here for evaluation after current training experiment concludes.
+Items ordered by priority. Updated after consolidation to 3 workflows
+(icr-eval / smooth-icr-eval / smooth-ext-icr-eval).
 
 ---
 
-## Po dokončení tréninku (icr-eval / smooth-icr-eval)
+## Aktivní — čeká na výsledky tréninku
 
-### 1. B vyčlenit ze NN — vysoká priorita
-
-**Pozorování:** B loss dominuje všechny runy (6–8×), přitom inharmonicita je fyzikálně
-velocity-independent — závisí na struně, ne na síle úderu.
-
-**Návrh:**
-- Fit B jako 1D spline přes MIDI z naměřených not (před NN tréninkem)
-- NN predikuje B vůbec — o 1 výstup méně
-- Gradient se přesměruje na tau1/tau2/A0/eq kde velocity hraje skutečnou roli
-
-**Očekávaný efekt:** výrazné snížení celkové val loss, lepší kapacita pro ostatní parametry.
-
----
-
-### 2. B_g / B_v vyhodit z smooth penalty — nízká priorita, snadná oprava
-
-**Pozorování:** V NoB modelu vrací `forward_B()` samé nuly. Smooth penalty přesto
-počítá `(B_g[1:]-B_g[:-1]).pow(2).mean()` a `(B_v[1:]-B_v[:-1]).pow(2).mean()` —
-výsledek je vždy 0, ale zbytečně zatěžuje každou iteraci.
-
-**Oprava:** Vyhodit `B_g` a `B_v` z `_run_training_exp` smooth penalty bloku.
-Řádky v `profile_trainer_exp.py`:
-```python
-B_g   = model.forward_B(mf_grid, vf_ref).squeeze(-1)   # ← odstranit
-...
-smooth_midi += (B_g[1:]-B_g[:-1]).pow(2).mean()         # ← odstranit
-
-B_v   = model.forward_B(mf60, vf_grid).squeeze(-1)      # ← odstranit
-smooth_vel += (B_v[1:]-B_v[:-1]).pow(2).mean()          # ← odstranit
-```
-
----
-
-### 3. EQ hlavu oddělit od hlavního lossu — střední priorita
+### 1. EQ hlavu oddělit od hlavního lossu — střední priorita
 
 **Pozorování (ep. 400–650):** `eq` tvoří ~45 % val lossu (eq≈2.7 vs ostatní ≤1.3).
 EQFitter předvýpočítá biquady před tréninkem — NN EQ hlava dolaďuje zbytek, ale
@@ -55,27 +23,18 @@ nebo jen přetěžuje trénink? Pokud bez ní zní banka stejně → kandidát n
 
 ---
 
-### 4. tau2 loss ve spline pipelinech — sledovat
+### 2. tau2 loss ve smooth pipeline — sledovat
 
-**Pozorování (ep.350):** smooth/full-spline mají tau2=1.26 vs icr-eval tau2=0.84, a roste.
+**Pozorování (ep.350–650):** smooth/smooth-ext mají tau2≈1.2 vs icr-eval tau2≈0.8.
 Spline-smoothed targety mají přísnější tau2 křivku než raw extrakty.
 
 **Akce po tréninku:**
-- Pokud tau2 do ep.600 neotočí → snížit stiffness spline fitu pro tau2 zvlášť
+- Pokud tau2 vysoké i v konečné bance → snížit stiffness spline fitu pro tau2 zvlášť
 - Nebo snížit loss weight tau2 v smooth pipeline
 
 ---
 
-### 5. sm_vel penalizaci odstranit — nízká priorita
-
-**Pozorování:** sm_vel ≈ 0 ve všech runech od začátku. NN přirozeně produkuje hladké
-velocity křivky → penalizace nedělá nic, jen zatěžuje loss breakdown.
-
-**Návrh:** Odstranit sm_vel weight, nebo přesunout jako diagnostický výpis mimo loss.
-
----
-
-### 6. ICR early-stop averaging — střední priorita
+### 3. ICR early-stop averaging — střední priorita
 
 **Pozorování:** ICR-MRSTFT metriky oscilují (~0.02 mezi evaly) kvůli renderovací
 variabilitě. Early-stop rozhodnutí na základě jednoho evalu je hlučné.
@@ -84,17 +43,26 @@ variabilitě. Early-stop rozhodnutí na základě jednoho evalu je hlučné.
 
 ---
 
-### 7. full-spline-icr-eval vs smooth-icr-eval — rozhodnutí
+### 4. sm_vel penalizaci odstranit — nízká priorita
 
-**Pozorování (ep.350):** ICR-MRSTFT rozdíl pouze 0.005 — v rámci šumu.
-`extend_partials` nepřináší měřitelný benefit v metrice.
+**Pozorování:** sm_vel ≈ 0 ve všech runech od začátku. NN přirozeně produkuje hladké
+velocity křivky → penalizace nedělá nic, jen zatěžuje loss breakdown.
 
-**Akce po tréninku:** A/B poslech extrapolační zóny (MIDI 21–32, 90–108).
-Pokud bez auditelného rozdílu → full-spline-icr-eval zrušit, snížit počet workflows na 2.
+**Návrh:** Odstranit sm_vel weight, nebo přesunout jako diagnostický výpis mimo loss.
 
 ---
 
-### 8. Train/val shuffle — diskutováno, odloženo
+### 5. Smooth penalty pouze na vel=4 — střední priorita
+
+**Pozorování:** MIDI smoothness se počítá výhradně při `vel=4`. NN se tak učí být
+hladká přes klaviaturu jen pro střední velocity; `vel=0` nebo `vel=7` nejsou penalizovány.
+
+**Návrh:** Rozšířit smooth_midi penalty na více velocity (např. 0, 4, 7) nebo
+průměrovat přes celý vel grid.
+
+---
+
+### 6. Train/val shuffle — diskutováno, odloženo
 
 **Kontext:** Val set (65 sampů, 17 %) je deterministicky fixní split po MIDI pozicích (každá 5. nota).
 Zvažovali jsme periodický resplit mezi tréninkovými cykly, aby NN viděla postupně všechna měřená data.
@@ -115,3 +83,17 @@ Zvažovali jsme periodický resplit mezi tréninkovými cykly, aby NN viděla po
 
 - **Convolution IR extraction** — viz `docs/CONVOLUTION_REVERB.md`
 - **macOS port** — viz `docs/MAC_OS_CHANGES.md`
+
+---
+
+## Dokončeno
+
+- **B vyčlenit ze NN** — `InstrumentProfileEncExp` je nyní default NoB model;
+  B z `BSplneFitter`; všechny 3 workflow používají NoB automaticky.
+- **B_g / B_v dead code v smooth penalty** — odstraněno z `profile_trainer_exp.py`.
+- **Pipeline konsolidace** — `full-spline-icr-eval` a `b-spline-icr-eval` sloučeny
+  do `smooth-ext-icr-eval` resp. odstraněny jako redundantní.
+- **Double-spline bug** — smooth pipeline volala `spline_fix` po exportu i přes to,
+  že NN trénovala na smooth datech; opraveno — NN výstup je nyní finální autorita.
+- **extend_partials přesunuto pre-training** — parciály se rozšiřují před tréninkem
+  jako součást spline-smooth kroku, ne post-export via spline_fix.

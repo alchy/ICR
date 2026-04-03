@@ -51,7 +51,7 @@ python tools/spline_fix.py --file-in PATH [options]
 | Flag | Description |
 |---|---|
 | `--fix-interpolated` | Fit spline on measured notes only; replace every NN-interpolated note with the spline value. Best fix for NN-generated soundbanks. |
-| `--extend-partials` | Extend NN notes to the maximum partial count of measured notes before applying the spline. New partials are initialised with inharmonic `f_hz` and values from the last existing partial; the spline then fills in correct `tau1`, `tau2`, `A0`, etc. **Requires `--fix-interpolated`.** |
+| `--extend-partials` | Extend notes to the maximum partial count of measured notes. New partials are initialised with inharmonic `f_hz` and values from the last existing partial; the spline fills in correct `tau1`, `tau2`, `A0`, etc. Two modes: with `--fix-interpolated` extends only NN-generated notes (post-training); with `--smooth-all` extends all notes including measured (pre-training — enriches NN training targets). |
 | `--smooth-outliers K` | Replace any point where `|value − spline| > K × std` with the spline value. `K=3.0` is a safe starting point. |
 | `--smooth-all` | Replace every non-anchor value with the smooth spline. Maximum smoothing. |
 | `--fill-missing` | Add values for MIDI positions that have no data at all (21–108). |
