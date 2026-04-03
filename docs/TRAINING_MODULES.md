@@ -480,6 +480,28 @@ Python rendereru spouští C++ `ICR.exe --render-batch`, čte vygenerované WAV
 soubory a počítá identickou MRSTFT loss — ale na zvuku přesně tak, jak ho
 PianoCore syntetizuje v produkci.
 
+### Přenos banky do ICR: soubor, ne SysEx
+
+Banka se předá ICR.exe přes **JSON soubor** (temp dir), nikoliv přes SysEx:
+
+```
+ProfileTrainerEncExp
+  → SoundbankExporter → temp/icr_bank_xxxx.json
+  → ICR.exe --params temp/icr_bank_xxxx.json --render-batch eval_notes.json
+  → WAV soubory v temp/
+  → MRSTFT výpočet
+```
+
+SysEx pipeline slouží pro **interaktivní editaci** — posílání živých změn do
+běžící instance ICR přes MIDI protokol.  Pro batch rendering by bylo SysEx
+pomalé a zbytečně složité (každá nota by musela projít MIDI protokolem).
+
+`--render-batch` mode je navržen přesně pro offline evaluaci: načte banku
+z JSON, vyrenderuje požadované noty jako WAV soubory a skončí — žádné GUI,
+žádný audio výstup, jen soubory.  Každý ICRBatchEvaluator instance používá
+vlastní `tempfile.mkdtemp()` temp dir → paralelní spuštění více instancí
+(různé pipeline runy) nekoliduje.
+
 Výhody oproti `MRSTFTFinetuner`:
 - Rychlejší render (C++ vs Python/PyTorch na CPU)
 - Ground-truth metrika — stejný kód co uživatel slyší
