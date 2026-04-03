@@ -61,6 +61,8 @@ python tools/spline_fix.py --file-in PATH [options]
 | Flag | Description |
 |---|---|
 | `--anchor-midi N [N ...]` | Lock the spline at these MIDI positions. Anchor notes are never replaced and pull the spline toward their values (weight ×10). Use well-sounding notes as anchors. |
+| `--auto-anchors N` | Automatically select N best-measured notes as anchors, spread evenly across the keyboard. Quality metric: `K_valid × min(tau2/tau1, 10) × a1_quality`. Rewards notes with many valid partials and clear bi-exponential decay — i.e. notes where the extractor was most reliable. Can be combined with `--anchor-midi` (anchors are merged). |
+| `--report-anchors` | Print the auto-selected anchors (MIDI, note name, score, K_valid, tau2/tau1) and exit without processing. Use this to inspect anchor selection before committing to a run. |
 
 ### Identifying NN notes
 
@@ -118,6 +120,16 @@ python tools/spline_fix.py \
     --report
 ```
 
+### Preview auto-anchor selection before processing
+
+```
+python tools/spline_fix.py \
+    --file-in soundbanks/params-vv-rhodes-icr-eval.json \
+    --auto-anchors 12 --report-anchors
+```
+
+Output shows a table with MIDI number, note name, score, K_valid, and tau2/tau1 for each selected anchor.
+
 ### Fix NN notes in an icr-eval bank (has `_interpolated` flag)
 
 ```
@@ -125,7 +137,7 @@ python tools/spline_fix.py \
     --file-in  soundbanks/params-vv-rhodes-icr-eval.json \
     --file-out soundbanks/params-vv-rhodes-icr-eval-spline.json \
     --fix-interpolated \
-    --anchor-midi 89 81 72 69 60 49 36
+    --auto-anchors 12
 ```
 
 ### Fix NN notes in an older bank (no `_interpolated` flag)
@@ -135,9 +147,24 @@ python tools/spline_fix.py \
     --file-in   soundbanks/params-vv-rhodes-nn.json \
     --ref-bank  soundbanks/params-vv-rhodes.json \
     --fix-interpolated \
-    --anchor-midi 89 81 72 69 60 49 36 \
+    --auto-anchors 12 \
     --file-out  soundbanks/params-vv-rhodes-nn-spline.json
 ```
+
+`--ref-bank` is required for older banks to correctly identify which notes are measured vs NN-generated. It also enables proper anchor scoring.
+
+### Combine auto-anchors with manual anchors
+
+```
+python tools/spline_fix.py \
+    --file-in soundbanks/params-vv-rhodes-icr-eval.json \
+    --fix-interpolated \
+    --auto-anchors 10 \
+    --anchor-midi 65 \
+    --file-out soundbanks/params-vv-rhodes-final.json
+```
+
+Anchors from both flags are merged. Use `--anchor-midi` to force-lock a specific note you know sounds good.
 
 ### Fix only rms_gain outliers
 
