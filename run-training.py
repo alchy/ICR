@@ -4,24 +4,30 @@ run-training.py  —  ICR training pipeline launcher
 Run from anywhere (repo root, IDE, double-click):
 
     python run-training.py simple --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-    python run-training.py full   --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
+    python run-training.py icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
+    python run-training.py smooth-icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
 
 Subcommands
 ───────────
-  simple        Extract -> filter -> EQ -> export soundbank (no NN)
-  full          Extract -> filter -> EQ -> train NN -> MRSTFT finetune -> export hybrid
-  nn            Extract -> filter -> EQ -> train NN (shared encoders) -> export  (no finetuner)
-  icr-eval      Like nn, but ICR C++ renderer drives eval/early-stop
-                (no MRSTFTFinetuner; requires build/bin/Release/ICR.exe)
-  experimental  Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
+  simple          Extract -> filter -> EQ -> export soundbank (no NN)
+  icr-eval        Extract -> filter -> EQ -> train NN (raw targets, ICR early-stop)
+                  -> hybrid + spline-fix NN notes + pure-NN export
+  smooth-icr-eval Extract -> filter -> EQ -> spline-smooth measured params
+                  -> train NN (smooth targets, ICR early-stop)
+                  -> hybrid (raw measured + NN) + pure-NN export
+                  --extend-partials  extend measured to max partial count before training
+  nn              Extract -> filter -> EQ -> train NN (shared encoders) -> export
+  full            Extract -> filter -> EQ -> train NN -> MRSTFT finetune -> export hybrid
+  experimental    Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
+
+Key difference between icr-eval and smooth-icr-eval:
+  icr-eval        NN trains on raw extracted params; spline_fix cleans NN output post-export
+  smooth-icr-eval NN trains on spline-smoothed params; NN output is final (no second spline)
 
 Output naming (--out optional)
 ───────────────────────────────
-  soundbanks/params-{bank_name}-simple.json
-  soundbanks/params-{bank_name}-full.json
-  soundbanks/params-{bank_name}-nn.json
   soundbanks/params-{bank_name}-icr-eval.json
-  soundbanks/params-{bank_name}-experimental.json
+  soundbanks/params-{bank_name}-smooth-icr-eval.json
 
 All console output is also written to:
   training-logs/run-{cmd}-{bank_name}-{timestamp}.log
@@ -176,74 +182,30 @@ def _build_parser() -> argparse.ArgumentParser:
     # ── smooth-icr-eval ──────────────────────────────────────────────────────
     smi = sub.add_parser(
         "smooth-icr-eval",
-        help="Extract -> EQ -> spline-smooth measured -> train NN (ICR eval) "
-             "-> export hybrid -> spline-fix NN notes",
+        help="Extract -> EQ -> spline-smooth measured params -> train NN (ICR eval) "
+             "-> hybrid (raw measured + NN) + pure-NN export",
     )
-    smi.add_argument("--bank",          required=True, help="WAV bank directory")
-    smi.add_argument("--out",           default=None,
+    smi.add_argument("--bank",             required=True, help="WAV bank directory")
+    smi.add_argument("--out",              default=None,
                      help="Output JSON (default: soundbanks/params-{bank}-smooth-icr-eval.json)")
-    smi.add_argument("--workers",       type=int, default=None,
+    smi.add_argument("--workers",          type=int, default=None,
                      help="Parallel workers (default: CPU count)")
-    smi.add_argument("--epochs",        type=int, default=5000,
+    smi.add_argument("--epochs",           type=int, default=5000,
                      help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    smi.add_argument("--icr-exe",       default="build/bin/Release/ICR.exe",
+    smi.add_argument("--icr-exe",          default="build/bin/Release/ICR.exe",
                      help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
-    smi.add_argument("--note-dur",      type=float, default=3.0,
+    smi.add_argument("--note-dur",         type=float, default=3.0,
                      help="ICR render duration per note in seconds (default: 3.0)")
-    smi.add_argument("--icr-patience",  type=int, default=15,
+    smi.add_argument("--icr-patience",     type=int, default=15,
                      help="Early stop after N evals without improvement (default: 15)")
-    smi.add_argument("--auto-anchors",  type=int, default=12,
+    smi.add_argument("--auto-anchors",     type=int, default=12,
                      help="Auto-anchor count for spline smoothing (default: 12)")
+    smi.add_argument("--extend-partials",  action="store_true",
+                     help="Extend measured notes to max partial count before training "
+                          "(NN trains on complete harmonic targets)")
     smi.add_argument("--skip-outliers-detection", action="store_true",
                      help="Skip structural outlier detection step")
-    smi.add_argument("--sr-tag",        default="f48",
-                     help="SR suffix in filenames: f44 or f48 (default: f48)")
-
-    # ── full-spline-icr-eval ─────────────────────────────────────────────────
-    fsi = sub.add_parser(
-        "full-spline-icr-eval",
-        help="Like smooth-icr-eval but also extends NN notes to max measured "
-             "partial count (full harmonic content from spline)",
-    )
-    fsi.add_argument("--bank",          required=True, help="WAV bank directory")
-    fsi.add_argument("--out",           default=None,
-                     help="Output JSON (default: soundbanks/params-{bank}-full-spline-icr-eval.json)")
-    fsi.add_argument("--workers",       type=int, default=None)
-    fsi.add_argument("--epochs",        type=int, default=5000)
-    fsi.add_argument("--icr-exe",       default="build/bin/Release/ICR.exe")
-    fsi.add_argument("--note-dur",      type=float, default=3.0)
-    fsi.add_argument("--icr-patience",  type=int, default=15)
-    fsi.add_argument("--auto-anchors",  type=int, default=12)
-    fsi.add_argument("--skip-outliers-detection", action="store_true")
-    fsi.add_argument("--sr-tag",        default="f48")
-
-    # ── b-spline-icr-eval ────────────────────────────────────────────────────
-    bsi = sub.add_parser(
-        "b-spline-icr-eval",
-        help="Like smooth-icr-eval but B (inharmonicity) is fitted as a spline "
-             "from measured notes and excluded from NN training — eliminates the "
-             "dominant loss term and frees gradient capacity for other parameters",
-    )
-    bsi.add_argument("--bank",          required=True, help="WAV bank directory")
-    bsi.add_argument("--out",           default=None,
-                     help="Output JSON (default: soundbanks/params-{bank}-b-spline-icr-eval.json)")
-    bsi.add_argument("--workers",       type=int, default=None,
-                     help="Parallel workers (default: CPU count)")
-    bsi.add_argument("--epochs",        type=int, default=5000,
-                     help="Max NN epochs (default: 5000, early stop may exit sooner)")
-    bsi.add_argument("--icr-exe",       default="build/bin/Release/ICR.exe",
-                     help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
-    bsi.add_argument("--note-dur",      type=float, default=3.0,
-                     help="ICR render duration per note in seconds (default: 3.0)")
-    bsi.add_argument("--icr-patience",  type=int, default=15,
-                     help="Early stop after N evals without improvement (default: 15)")
-    bsi.add_argument("--auto-anchors",  type=int, default=12,
-                     help="Auto-anchor count for spline smoothing (default: 12)")
-    bsi.add_argument("--b-stiffness",   type=float, default=2.0,
-                     help="B spline stiffness — higher = smoother B curve (default: 2.0)")
-    bsi.add_argument("--skip-outliers-detection", action="store_true",
-                     help="Skip structural outlier detection step")
-    bsi.add_argument("--sr-tag",        default="f48",
+    smi.add_argument("--sr-tag",           default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
     # ── icr-eval ─────────────────────────────────────────────────────────────
@@ -333,55 +295,21 @@ def main() -> int:
             )
             print(f"\nDone -> {out}")
 
-        elif args.cmd == "full-spline-icr-eval":
-            out_path = args.out or _default_out(args.bank, "full-spline-icr-eval")
-            from training.pipeline_full_spline_icr_eval import run
-            model, out = run(
-                bank_dir      = args.bank,
-                out_path      = out_path,
-                epochs        = args.epochs,
-                workers       = args.workers,
-                skip_outliers = args.skip_outliers_detection,
-                sr_tag        = args.sr_tag,
-                icr_exe       = args.icr_exe,
-                note_dur      = args.note_dur,
-                icr_patience  = args.icr_patience,
-                auto_anchors  = args.auto_anchors,
-            )
-            print(f"\nDone -> {out}")
-
         elif args.cmd == "smooth-icr-eval":
             out_path = args.out or _default_out(args.bank, "smooth-icr-eval")
             from training.pipeline_smooth_icr_eval import run
             model, out = run(
-                bank_dir      = args.bank,
-                out_path      = out_path,
-                epochs        = args.epochs,
-                workers       = args.workers,
-                skip_outliers = args.skip_outliers_detection,
-                sr_tag        = args.sr_tag,
-                icr_exe       = args.icr_exe,
-                note_dur      = args.note_dur,
-                icr_patience  = args.icr_patience,
-                auto_anchors  = args.auto_anchors,
-            )
-            print(f"\nDone -> {out}")
-
-        elif args.cmd == "b-spline-icr-eval":
-            out_path = args.out or _default_out(args.bank, "b-spline-icr-eval")
-            from training.pipeline_b_spline_icr_eval import run
-            model, b_fitter, out = run(
-                bank_dir      = args.bank,
-                out_path      = out_path,
-                epochs        = args.epochs,
-                workers       = args.workers,
-                skip_outliers = args.skip_outliers_detection,
-                sr_tag        = args.sr_tag,
-                icr_exe       = args.icr_exe,
-                note_dur      = args.note_dur,
-                icr_patience  = args.icr_patience,
-                auto_anchors  = args.auto_anchors,
-                b_stiffness   = args.b_stiffness,
+                bank_dir        = args.bank,
+                out_path        = out_path,
+                epochs          = args.epochs,
+                workers         = args.workers,
+                skip_outliers   = args.skip_outliers_detection,
+                sr_tag          = args.sr_tag,
+                icr_exe         = args.icr_exe,
+                note_dur        = args.note_dur,
+                icr_patience    = args.icr_patience,
+                auto_anchors    = args.auto_anchors,
+                extend_partials = args.extend_partials,
             )
             print(f"\nDone -> {out}")
 

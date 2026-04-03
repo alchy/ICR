@@ -776,6 +776,137 @@ banka může být použita jako vstup do dalšího tréninku.
 
 ---
 
+## Správná logika pipeline — referenční schémata
+
+Tato sekce popisuje **zamýšlený** datový tok každé pipeline. Slouží jako reference
+při implementaci oprav a budoucích úpravách.
+
+### Klíčový princip: co je finální autorita pro neměřené MIDI pozice
+
+| Workflow | Trénink na | Finální hodnoty neměřených pozic |
+|---|---|---|
+| **icr-eval** | raw extracted (zašuměné) | spline fit z measured → spline_fix odstraní NN šum |
+| **smooth-icr-eval** | spline-vyhlazené measured | **NN výstup** — NN naučená na smooth datech je důvěryhodná |
+| **smooth-icr-eval --extend-partials** | smooth + rozšířené parciály | **NN výstup** s plným počtem parciálů |
+
+> **Zrušené workflows:** `full-spline-icr-eval` a `b-spline-icr-eval` byly sloučeny do
+> `smooth-icr-eval` jako flag `--extend-partials`. `b-spline-icr-eval` byl redundantní
+> po NoB refaktoru (všechny pipeline už vylučují B z NN).
+>
+> **Opravená chyba:** původní smooth pipeline volala `spline_fix` i po tréninku →
+> double-spline, NN výstup zahozen. Spline_fix náleží pouze `icr-eval`.
+
+---
+
+### icr-eval — referenční schéma
+
+```
+WAV soubory
+    │
+    ▼
+[1] ParamExtractor          ← ICR extrakce parametrů z každé nahrávky
+    │  (raw, zašuměné)
+    ▼
+[2] StructuralOutlierFilter ← odstraní strukturálně vadné noty
+    │
+    ▼
+[3] EQFitter                ← fituje biquad EQ na spektrum
+    │
+    │  params (measured, raw)
+    ├─────────────────────────────────────────┐
+    ▼                                         │ orig_samples
+[4] ProfileTrainerEncExp.train()              │
+    │  targety: raw extracted params          │
+    │  early stop: ICR-MRSTFT                 │
+    ▼                                         │
+[5] SoundbankExporter.hybrid()  ◄─────────────┘
+    │  measured pozice: orig_samples (raw)
+    │  NN pozice: NN výstup
+    ▼
+[6] spline_fix(fix_interpolated=True)
+    │  NN pozice NAHRAZENY splinem z measured
+    │  → eliminuje šum raw-trained NN
+    ▼
+[7] SoundbankExporter.pure_nn()
+    │  všech 704 not z NN (pro A/B srovnání)
+    ▼
+VÝSTUP:
+  params-{bank}-icr-eval.json          ← hybrid: measured + spline(NN pozice)
+  params-{bank}-icr-eval-pure-nn.json  ← čistá NN
+```
+
+---
+
+### smooth-icr-eval — referenční schéma (OPRAVENÁ verze)
+
+```
+WAV soubory
+    │
+    ▼
+[1] ParamExtractor
+    │  (raw, zašuměné)
+    ▼
+[2] StructuralOutlierFilter
+    │
+    ▼
+[3] EQFitter
+    │
+    │  params (measured, raw)           ← uložit jako -pre-smooth.json
+    ├──────────────────────────────────────────────────────┐
+    ▼                                                      │ orig_samples
+[4] spline_fix(smooth_all, auto_anchors)                   │
+    │  → smooth_params                  ← uložit jako -pre-smooth-spline.json
+    │  POUZE pro trénovací targety, ne pro finální export  │
+    ▼                                                      │
+[5] ProfileTrainerEncExp.train(smooth_params)              │
+    │  targety: spline-vyhlazené measured params           │
+    │  early stop: ICR-MRSTFT                              │
+    │  NN se učí hladké křivky → výstup pro                │
+    │  neměřené pozice je důvěryhodný                      │
+    ▼                                                      │
+[6] SoundbankExporter.hybrid()  ◄──────────────────────────┘
+    │  measured pozice: orig_samples (RAW, ne smoothed!)
+    │  NN pozice: NN výstup (smooth, protože NN trénovala na smooth datech)
+    │  → uložit jako -hybrid-raw.json
+    │
+    │  !! BEZ spline_fix !! NN je finální autorita pro neměřené pozice
+    ▼
+[7] SoundbankExporter.pure_nn()
+    ▼
+VÝSTUP:
+  params-{bank}-smooth-icr-eval.json          ← hybrid: raw measured + NN(smooth)
+  params-{bank}-smooth-icr-eval-pure-nn.json  ← čistá NN
+  (+ intermediate: -pre-smooth, -pre-smooth-spline, -hybrid-raw)
+```
+
+---
+
+### smooth-icr-eval --extend-partials — co se mění
+
+```
+Krok [4] spline_fix dostane navíc extend_partials=True:
+
+    apply_spline_fix_bank(notes, smooth_all=True,
+                          extend_partials=True,   ← přidáno
+                          auto_anchors=N)
+
+Výsledek: každá measured nota má plný počet parciálů (max přes všechny measured).
+Nové parciály jsou inicializovány a hodnoty doplněny splinem ještě PŘED tréninkem.
+NN se tak učí přirozeně predikovat plný počet parciálů pro všechny pozice.
+```
+
+---
+
+### Shrnutí: kdy použít spline_fix po exportu
+
+```
+icr-eval                        → spline_fix ANO  (raw NN je zašuměná)
+smooth-icr-eval                 → spline_fix NE   (NN trénovaná na smooth datech)
+smooth-icr-eval --extend-partials → spline_fix NE  (stejný důvod; extend proběhl před tréninkem)
+```
+
+---
+
 ## Pipelines
 
 ### pipeline_simple.py

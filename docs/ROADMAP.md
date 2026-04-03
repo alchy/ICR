@@ -59,6 +59,23 @@ Pokud bez auditelného rozdílu → full-spline-icr-eval zrušit, snížit poče
 
 ---
 
+### 6. Train/val shuffle — diskutováno, odloženo
+
+**Kontext:** Val set (65 sampů, 17 %) je deterministicky fixní split po MIDI pozicích (každá 5. nota).
+Zvažovali jsme periodický resplit mezi tréninkovými cykly, aby NN viděla postupně všechna měřená data.
+
+**Proč zatím ne:**
+- Split je záměrně po MIDI (ne po samplu) — měří generalizaci do neviděných poloh; resplit by tuto vlastnost zrušil
+- `_plateau_count` sleduje val_loss jako konzistentní časovou řadu; po resplitu by čísla nebyla porovnatelná → expanze hlav by se spouštěla na základě artefaktu
+- ICR-MRSTFT je stejně pravý soudce; val je jen doplněk pro plateau detekci
+
+**Možné alternativy (pokud bude NN slabě generalizovat do krajů):**
+- K-fold přes MIDI (5 foldů) — 5× delší trénink
+- `val_frac=0` + plateau řídit přímo z `icr_no_improve`
+- Nahrát více not v extrapolační zóně (MIDI 21–32, 90–108)
+
+---
+
 ## Dlouhodobé / parkovano
 
 - **Convolution IR extraction** — viz `docs/CONVOLUTION_REVERB.md`

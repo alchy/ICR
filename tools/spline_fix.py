@@ -447,9 +447,12 @@ def apply_spline_fix_bank(
         smooth_all:       Replace all non-anchor values with spline.
         fix_interpolated: Fit spline on measured notes only; replace NN notes.
         fill_missing:     Fill MIDI positions absent from notes dict.
-        extend_partials:  Extend NN notes to the max partial count of measured
-                          notes, then fill new partial values via spline.
-                          Only effective when fix_interpolated=True.
+        extend_partials:  Extend notes to the max partial count of measured notes,
+                          then fill new partial values via spline.
+                          When fix_interpolated=True: extends only NN-generated notes
+                          (post-training use case).
+                          When smooth_all=True: extends ALL notes including measured
+                          (pre-training use case — enrich training targets).
         auto_anchors:     Number of anchors to auto-select by quality metric.
         anchor_midi:      Additional hard-coded anchor MIDI numbers.
         ref_keys:         Measured note keys (for older banks without _interpolated).
@@ -464,21 +467,23 @@ def apply_spline_fix_bank(
     import copy
     out_notes = copy.deepcopy(notes)
 
-    # ── Extend NN note partials to max measured count (before layer detection) ──
+    # ── Extend note partials to max measured count (before layer detection) ──
     total_extended = 0
-    if extend_partials and fix_interpolated:
+    if extend_partials and (fix_interpolated or smooth_all):
         max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
         for key, note in out_notes.items():
             is_nn = note.get("_interpolated", False) or (
                 ref_keys is not None and key not in ref_keys)
-            if not is_nn:
+            # post-training: extend only NN notes; pre-training (smooth_all): extend all
+            if fix_interpolated and not is_nn:
                 continue
-            vel     = int(key.split("_vel")[1])
-            max_k   = max_per_vel.get(vel, 0)
-            before  = len(note.get("partials", []))
+            vel    = int(key.split("_vel")[1])
+            max_k  = max_per_vel.get(vel, 0)
+            before = len(note.get("partials", []))
             _extend_note_partials(note, max_k)
             total_extended += len(note.get("partials", [])) - before
-        print(f"Partials extended: +{total_extended} across NN notes")
+        scope = "NN notes" if fix_interpolated else "all notes"
+        print(f"Partials extended: +{total_extended} across {scope}")
 
     # Detect layers after potential extension so new per-partial layers are included
     all_layers = _detect_layers(out_notes)
