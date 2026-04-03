@@ -217,9 +217,9 @@ static void drawCorePanel(CoreEngine& engine) {
 
     const CoreVoiceViz& ln = viz.last_note;
     ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255,220,100,255));
-    ImGui::Text("LAST NOTE  %s%d  (MIDI %d)  vel %d  %.2f Hz",
+    ImGui::Text("LAST NOTE  %s%d  (MIDI %d)  vel %d  %.2f Hz  B=%.2e",
         noteName(ln.midi), ln.midi / 12 - 1,
-        ln.midi, ln.vel, ln.f0_hz);
+        ln.midi, ln.vel, ln.f0_hz, ln.B);
     ImGui::PopStyleColor();
     ImGui::SameLine();
     if (ln.is_interpolated) {

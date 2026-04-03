@@ -502,13 +502,18 @@ bool PianoCore::setNoteParam(int midi, int vel,
     if (key == "rms_gain")   { np.rms_gain   = value; return true; }
     if (key == "phi_diff")   { np.phi_diff   = value; return true; }
     if (key == "B") {
-        np.B = value;
-        // Recompute per-partial f_hz = k * f0 * sqrt(1 + B*k^2)
-        // Uses stored pp.k (correct for longitudinal partials too)
-        const float f0 = np.f0_hz;
-        for (int ki = 0; ki < np.K; ki++) {
-            const int k = np.partials[ki].k;
-            np.partials[ki].f_hz = (float)(k * f0 * std::sqrt(1.0 + (double)value * k * k));
+        // B is a string property independent of velocity — propagate to all
+        // 8 velocity layers for this MIDI note and recompute f_hz in each.
+        for (int v = 0; v < 8; v++) {
+            PianoNoteParam& nv = note_params_[midi][v];
+            if (!nv.valid) continue;
+            nv.B = value;
+            const float f0 = nv.f0_hz;
+            for (int ki = 0; ki < nv.K; ki++) {
+                const int k = nv.partials[ki].k;
+                nv.partials[ki].f_hz =
+                    (float)(k * f0 * std::sqrt(1.0 + (double)value * k * k));
+            }
         }
         return true;
     }
@@ -686,6 +691,7 @@ CoreVizState PianoCore::getVizState() const {
         vv.midi            = last_midi;
         vv.vel             = last_vel;
         vv.f0_hz           = np.f0_hz;
+        vv.B               = np.B;
         vv.n_partials      = np.K;
         vv.is_interpolated = np.is_interpolated;
 
