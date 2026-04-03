@@ -443,8 +443,8 @@ evaluator = ICRBatchEvaluator(
     icr_exe   = "build/bin/Release/ICR.exe",
     bank_dir  = "C:/SoundBanks/IthacaPlayer/vv-rhodes",
     sr        = 48000,
-    eval_midi = [33, 41, 48, 55, 60, 65, 69, 72, 76, 81, 88, 96],  # 12 not přes rozsah
-    eval_vels = [0, 5],                                              # pp + ff
+    eval_midi = None,   # None = auto: 24 not rovnoměrně přes rozsah banky (N_EVAL_MIDI=24)
+    eval_vels = None,   # None = auto: [0, 2, 4, 6, 7]  (ppp / pp / mp / mf / ff)
     note_dur  = 3.0,                                                 # sekund na notu
     out_dir   = None,   # None = auto temp dir, smaže se po eval
 )
@@ -467,7 +467,7 @@ evaluator.close()
    (každý řádek stdout ICR.exe se přeposílá jako "[ICR] ...")
 5. Načíst m{midi:03d}_vel{vel}.wav z tmp_dir/
 6. Mono, ořez/pad na note_dur*sr vzorků
-7. mrstft(rendered_wav, reference_wav) → průměr přes 24 not
+7. mrstft(rendered_wav, reference_wav) → průměr přes všechny eval noty
 8. Print: "ICR-MRSTFT = X.XXXX  (N/N notes, Xs)"
 ```
 
@@ -483,7 +483,24 @@ Timeout ICR.exe: **120 s** (`ICR_TIMEOUT_S`). Při selhání vrátí `float('inf
 
 ### Selekce eval not
 
-12 MIDI not rovnoměrně přes rozsah dostupných not banky × 2 velocity indexy (0 = pp, 5 = mf/ff).
+**MIDI:** `N_EVAL_MIDI = 24` not rovnoměrně přes rozsah dostupných not banky.
+Průměrný rozestup ~2.7 půltónu (max 5). Dřívější hodnota 12 způsobovala
+~5.5 půltónové mezery → noty daleko od eval pozic zněly špatně.
+
+**Velocity:** `eval_vels = [0, 2, 4, 6, 7]` pokrývá celou dynamiku:
+
+| Index | Dynamika |
+|-------|----------|
+| 0 | ppp |
+| 2 | pp |
+| 4 | mp |
+| 6 | mf |
+| 7 | ff |
+
+Dřívější `[0, 5]` vynechávalo většinu dynamického rozsahu → NN neměla
+incentiv produkovat konzistentní velocity scaling.
+
+Celkový počet eval not: **24 × 5 = 120** (~80 s na eval).
 Noty pro které neexistuje referenční WAV jsou přeskočeny.
 
 ---
@@ -833,7 +850,7 @@ Training 5000 epochs  (ICR-MRSTFT early stop) ...
   epoch   40/5000  loss=X.XXXX
   epoch   50/5000  train=X.XXXX  val=X.XXXX  lr=...  ✓    ← val eval (eval_every=50)
     val breakdown:  B=X.XX  dur=X.XX  eq=X.XX  ...
-    ICR eval: rendering 24 notes via ICR.exe ...           ← před subprocess
+    ICR eval: rendering 120 notes via ICR.exe ...          ← před subprocess (24 MIDI × 5 vel)
     [ICR] Render batch: 24 notes -> /tmp/icr_eval_.../
     [ICR]   Rendered m036_vel0.wav (1/24)
     [ICR]   ...
