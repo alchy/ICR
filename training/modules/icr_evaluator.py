@@ -51,7 +51,7 @@ class ICRBatchEvaluator:
         bank_dir:     Directory with original reference WAV files.
         sr:           Sample rate (must match reference WAVs).
         eval_midi:    24 MIDI note numbers to evaluate (auto-selected if None).
-        eval_vels:    Velocity indices to evaluate, e.g. [0, 5].
+        eval_vels:    Velocity indices to evaluate, e.g. [0, 2, 4, 6, 7].
         note_dur:     Duration in seconds for each rendered note.
         out_dir:      Directory for rendered WAVs (None = auto temp, cleaned up).
         sr_tag:       WAV filename suffix, e.g. "f48" or "f44".
@@ -78,7 +78,7 @@ class ICRBatchEvaluator:
         self.sr       = sr
         self.note_dur = note_dur
         self.sr_tag   = sr_tag
-        self.eval_vels = eval_vels or [0, 5]
+        self.eval_vels = eval_vels or [0, 2, 4, 6, 7]
 
         self._auto_out = out_dir is None
         self._out_dir  = out_dir or tempfile.mkdtemp(prefix="icr_eval_")
