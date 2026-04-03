@@ -44,6 +44,93 @@ import numpy as np
 from scipy.interpolate import UnivariateSpline, interp1d
 
 
+# ── Note name helper ──────────────────────────────────────────────────────────
+
+_NOTE_NAMES = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"]
+
+def _midi_note_name(midi: int) -> str:
+    return f"{_NOTE_NAMES[midi % 12]}{midi // 12 - 1}"
+
+
+# ── Auto-anchor quality scoring ────────────────────────────────────────────────
+
+def _score_note(note: dict) -> float:
+    """
+    Quality score for a measured note.
+
+    Rewards:
+      - High K_valid (many valid partials → well-constrained fit)
+      - High tau2/tau1 ratio (clear bi-exponential decay)
+      - a1 in a meaningful range (not trivially 1.0 = mono-exponential)
+    """
+    k_valid  = float(note.get("K_valid", 0))
+    partials = note.get("partials", [])
+    if not partials:
+        return k_valid
+
+    p0   = partials[0]
+    tau1 = max(float(p0.get("tau1", 1.0)), 1e-4)
+    tau2 = max(float(p0.get("tau2", tau1)), tau1)
+    a1   = float(p0.get("a1", 1.0))
+
+    # Reward clear double-decay: tau2 >> tau1 (cap at 10 so one note can't dominate)
+    tau_ratio = min(tau2 / tau1, 10.0)
+
+    # Reward a1 away from 1.0 (mono-exp) — peak at 0.75, floor at 0.1
+    a1_score = max(1.0 - abs(a1 - 0.75) / 0.75, 0.1)
+
+    return k_valid * tau_ratio * a1_score
+
+
+def _select_auto_anchors(
+    notes:    dict,
+    n:        int,
+    ref_keys: "set[str] | None" = None,
+) -> set[int]:
+    """
+    Select N anchor MIDI positions from measured notes, spread across the keyboard.
+
+    Procedure:
+      1. Score every measured note (average across velocities per MIDI).
+      2. Divide the measured MIDI range into N equal-width buckets.
+      3. Pick the highest-scoring note from each bucket.
+         If a bucket is empty, fall back to the nearest measured MIDI.
+    """
+    midi_scores: dict[int, list[float]] = {}
+    for key, note in notes.items():
+        if note.get("_interpolated", False):
+            continue
+        if ref_keys is not None and key not in ref_keys:
+            continue
+        midi  = int(key[1:4])
+        score = _score_note(note)
+        midi_scores.setdefault(midi, []).append(score)
+
+    if not midi_scores:
+        return set()
+
+    midi_avg      = {m: sum(s) / len(s) for m, s in midi_scores.items()}
+    measured_midis = sorted(midi_avg)
+
+    if len(measured_midis) <= n:
+        return set(measured_midis)
+
+    lo, hi   = measured_midis[0], measured_midis[-1]
+    bucket_w = (hi - lo + 1) / n
+
+    selected: set[int] = set()
+    for i in range(n):
+        b_lo       = lo + i * bucket_w
+        b_hi       = lo + (i + 1) * bucket_w
+        candidates = [m for m in measured_midis if b_lo <= m < b_hi]
+        if not candidates:
+            center     = (b_lo + b_hi) / 2
+            candidates = [min(measured_midis, key=lambda m: abs(m - center))]
+        selected.add(max(candidates, key=lambda m: midi_avg[m]))
+
+    return selected
+
+
 # ── Parameters fitted in log-space ────────────────────────────────────────────
 
 _LOG_SPACE_PARAMS = {
@@ -335,6 +422,45 @@ def run(args):
     # Anchor MIDIs
     anchor_midis = set(args.anchor_midi) if args.anchor_midi else set()
 
+    # Auto-anchor selection
+    if args.auto_anchors:
+        auto = _select_auto_anchors(notes, args.auto_anchors, ref_keys)
+        anchor_midis = anchor_midis | auto
+        # Print score table
+        midi_scores: dict[int, list[float]] = {}
+        for key, note in notes.items():
+            if note.get("_interpolated", False):
+                continue
+            if ref_keys is not None and key not in ref_keys:
+                continue
+            m = int(key[1:4])
+            midi_scores.setdefault(m, []).append(_score_note(note))
+        midi_avg = {m: sum(s)/len(s) for m, s in midi_scores.items()}
+        top = sorted(midi_avg, key=lambda m: -midi_avg[m])[:max(args.auto_anchors*2, 20)]
+        print(f"\nAuto-anchors selected ({len(auto)}): "
+              f"{[_midi_note_name(m) for m in sorted(auto)]}")
+        print(f"\n{'MIDI':>4}  {'Note':>4}  {'Score':>8}  {'K_valid':>7}  "
+              f"{'tau2/tau1':>9}  {'anchor':>6}")
+        print("-" * 50)
+        for m in sorted(auto):
+            note_ex = next((n for k, n in notes.items()
+                            if int(k[1:4]) == m and not n.get("_interpolated")), None)
+            if note_ex:
+                p0   = (note_ex.get("partials") or [{}])[0]
+                tau1 = max(float(p0.get("tau1", 1.0)), 1e-4)
+                tau2 = max(float(p0.get("tau2", tau1)), tau1)
+                kv   = note_ex.get("K_valid", "?")
+                print(f"{m:>4}  {_midi_note_name(m):>4}  "
+                      f"{midi_avg[m]:>8.1f}  {kv:>7}  "
+                      f"{tau2/tau1:>9.2f}  {'<<' if m in auto else '':>6}")
+        print()
+
+    # --report-anchors: just show selection and exit
+    if args.report_anchors:
+        if not anchor_midis:
+            print("No anchors selected (use --auto-anchors N or --anchor-midi).")
+        return
+
     # Outlier threshold
     smooth_k = args.smooth_outliers  # None if not set
 
@@ -447,6 +573,11 @@ def main():
                    help="Output path (default: <stem>-spline.json)")
     p.add_argument("--anchor-midi", type=int, nargs="+", metavar="MIDI",
                    help="MIDI note(s) to use as anchor points (spline passes exactly through these)")
+    p.add_argument("--auto-anchors", type=int, metavar="N",
+                   help="Auto-select N best-measured notes as anchors "
+                        "(metric: K_valid x tau2/tau1 x a1_quality, spread across keyboard)")
+    p.add_argument("--report-anchors", action="store_true",
+                   help="Show auto-selected anchors and exit without processing")
     p.add_argument("--smooth-outliers", type=float, metavar="K",
                    help="Replace points where |value - spline| > K×std with spline value")
     p.add_argument("--fill-missing", action="store_true",
@@ -473,12 +604,13 @@ def main():
                    help="Dry run: print stats without writing output")
     args = p.parse_args()
 
-    if not any([args.anchor_midi, args.smooth_outliers is not None,
+    if not any([args.anchor_midi, args.auto_anchors, args.report_anchors,
+                args.smooth_outliers is not None,
                 args.fill_missing, args.smooth_all, args.fix_interpolated,
                 args.report]):
         p.error("Specify at least one operation: --smooth-outliers, "
                 "--smooth-all, --fill-missing, --anchor-midi, "
-                "--fix-interpolated, or --report")
+                "--auto-anchors, --fix-interpolated, --report, or --report-anchors")
 
     run(args)
 
