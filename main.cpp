@@ -15,6 +15,8 @@
  *   --config <path>        Additional SynthConfig JSON applied via setParam
  *   --core-param key=value Override a core parameter (repeatable)
  *   --port <N>             MIDI input port index (default: 0)
+ *   --midi-range-limit-from <N>  Skip notes with MIDI < N on load (default: 0)
+ *   --midi-range-limit-to <N>    Skip notes with MIDI > N on load (default: 127)
  *   --list-cores           Print available cores and exit
  *   --help                 Show this message
  *
@@ -79,6 +81,8 @@ static void printHelp(const char* argv0) {
         "  --config <path>        SynthConfig JSON applied via setParam\n"
         "  --core-param key=val   Override a core parameter (repeatable)\n"
         "  --port <N>             MIDI input port index (default: 0)\n"
+        "  --midi-range-limit-from <N>  Skip notes with MIDI < N on load (default: 0)\n"
+        "  --midi-range-limit-to <N>    Skip notes with MIDI > N on load (default: 127)\n"
         "  --list-cores           List registered cores and exit\n"
         "  --help                 Show this message\n"
         "\n"

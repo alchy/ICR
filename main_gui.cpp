@@ -54,6 +54,8 @@ static void printHelp(const char* argv0) {
         "  --params <path>        Core parameter JSON\n"
         "  --config <path>        SynthConfig JSON applied via setParam\n"
         "  --core-param key=val   Override a core parameter (repeatable)\n"
+        "  --midi-range-limit-from <N>  Skip notes with MIDI < N on load (default: 0)\n"
+        "  --midi-range-limit-to <N>    Skip notes with MIDI > N on load (default: 127)\n"
         "  --list-cores           List registered cores and exit\n"
         "  --help                 Show this message\n",
         argv0, argv0, argv0);
