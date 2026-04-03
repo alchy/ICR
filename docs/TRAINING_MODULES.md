@@ -1,6 +1,7 @@
 # ICR — Training modules reference
 
 Dokumentace modulárního training systému v `training/modules/`.
+Popis workflows a pipeline logiky → viz [TRAINING_WORKFLOWS.md](TRAINING_WORKFLOWS.md).
 
 ---
 
@@ -13,20 +14,22 @@ training/
     structural_outlier_filter.py  StructuralOutlierFilter     — detekce outlierů přes křivkový fit
     eq_fitter.py                  EQFitter                    — LTASE spektrální EQ + biquad fit
     profile_trainer.py            ProfileTrainer              — trénink surrogate NN
-    mrstft_finetune.py            MRSTFTFinetuner             — closed-loop MRSTFT fine-tuning
+    profile_trainer_exp.py        ProfileTrainerEncExp        — sdílené enkodéry, vel na všech hlavách
+    mrstft_finetune.py            MRSTFTFinetuner             — closed-loop MRSTFT fine-tuning (legacy)
+    icr_evaluator.py              ICRBatchEvaluator           — ICR.exe batch eval, early stop
+    icr_round_trip.py             ICRRoundTripProcessor       — round-trip korektury trénovacích targetů
     exporter.py                   SoundbankExporter           — export PianoCore JSON
     synthesizer.py                Synthesizer                 — fyzikální syntéza (stereo, numpy)
-                                  DifferenciableRenderer      — diferenciabilní proxy (mono, torch)
+                                  DifferentiableRenderer      — diferenciabilní proxy (mono, torch)
     generator.py                  SampleGenerator             — generování WAV sample banky
 
-  pipeline_simple.py          — extract -> structural filter -> EQ -> export  (~15 min, bez GPU)
-  pipeline_full.py            — extract -> structural filter -> EQ -> NN -> MRSTFT finetune -> hybrid  (~60 min)
-  pipeline_nn.py              — extract -> structural filter -> EQ -> NN (shared encoders) -> export  (~30 min)
-  pipeline_icr_eval.py        — jako nn, ale eval/early-stop pres ICR C++ renderer
-  pipeline_experimental.py    — legacy: jako nn + MRSTFTFinetuner (Python proxy, pomaly)
-
-  run-training.py      — CLI: `python run-training.py simple|full|nn|icr-eval ...`  (root)
-  run-generate.py      — CLI: `python run-generate.py --source ... --full-bank`  (root)
+  pipeline_simple.py              — extract -> structural filter -> EQ -> export
+  pipeline_full.py                — extract -> filter -> EQ -> NN -> MRSTFT finetune -> hybrid
+  pipeline_nn.py                  — extract -> filter -> EQ -> NN (sdílené enkodéry) -> export
+  pipeline_experimental.py        — jako nn + MRSTFTFinetuner (legacy)
+  pipeline_icr_eval.py            — extract -> filter -> EQ -> NN (ICR early-stop) -> hybrid
+  pipeline_smooth_icr_eval.py     — extract -> filter -> EQ -> spline-smooth -> NN -> hybrid
+                                     (volitelně: --extend-partials, --icr-round-trip)
 ```
 
 Každý modul lze importovat samostatně:
@@ -39,6 +42,7 @@ from training.modules.profile_trainer           import ProfileTrainer
 from training.modules.profile_trainer_exp       import ProfileTrainerEncExp
 from training.modules.mrstft_finetune           import MRSTFTFinetuner
 from training.modules.icr_evaluator             import ICRBatchEvaluator
+from training.modules.icr_round_trip            import ICRRoundTripProcessor
 from training.modules.exporter                  import SoundbankExporter
 from training.modules.synthesizer               import Synthesizer, DifferentiableRenderer
 from training.modules.generator                 import SampleGenerator
@@ -60,7 +64,7 @@ STFT envelope tracking.
 extractor = ParamExtractor()
 
 # Celá banka paralelně
-params = extractor.extract_bank(bank_dir, workers=None)
+params = extractor.extract_bank(bank_dir, workers=None, sr_tag="f48")
 
 # Jedna nota
 note = extractor.extract_note("m060-vel3-f44.wav")
@@ -397,23 +401,16 @@ Val loss se počítá každých 100 epoch ze stejných data-fit termů jako trai
 
 **Poznámka:** Val loss měří fit na zašumělá extrahovaná data — není to
 perceptuální kvalita. Hlavní role je detekce divergence a nestability tréninku.
-Perceptuální validace probíhá až ve fázi MRSTFT fine-tuning.
 
 ---
 
-## ProfileTrainerEncExp  *(experimental mode)*
+## ProfileTrainerEncExp
 
 **Soubor:** `training/modules/profile_trainer_exp.py`
 
-Rozšíření `ProfileTrainer` pro `experimental` pipeline. Oproti standardnímu
-`ProfileTrainer` jsou dvě klíčové změny:
-
-1. **Velocity na většině sítí** — standardní profil má velocity jen na 4 sítích;
-   zde ji dostávají všechny kromě `B_head` — decay, beating i EQ mohou záviset
-   na dynamice. `B` (inharmonicita) je fyzikální vlastnost struny a velocity
-   nedostává (viz sekce Poznatky z tréninku níže).
-2. **Sdílené per-axis enkodéry** — místo 10 zcela oddělených MLP sítí sdílejí
-   všechny hlavy enkodéry pro každou vstupní osu.
+Rozšíření `ProfileTrainer` — sdílené per-axis enkodéry a velocity na
+všech hlavách kromě `B_head`. Používá se ve všech aktivních pipeline:
+`icr-eval`, `smooth-icr-eval`, `smooth-ext-icr-eval`, `smooth-rt-icr-eval`.
 
 ### Architektura `InstrumentProfileEncExp`
 
@@ -438,8 +435,18 @@ Hlavy (2-vrstvé MLP z konkatenovaných enkodérů):
   phi_head       [midi, vel]           → φ_diff
 ```
 
-Sdílené enkodéry nutí reprezentaci každé osy, aby byla užitečná pro všechny
-sítě najednou — zároveň jsou vrstvy hlav lehčí (méně parametrů).
+### Proč B_head nedostává velocity
+
+Inharmonicita B je fyzikální vlastnost struny — závisí na tuhosti, napětí
+a délce, nikoli na dynamice:
+
+```
+B = (π² · E · I) / (T · L²)
+```
+
+Per-velocity variace v extrakci B je měřicí šum, nikoliv fyzikální signál.
+`BSplneFitter` průměruje log(B) přes velocity a fituje 1D spline přes MIDI 21–108.
+`B_head` dostává pouze `midi_enc`.
 
 ### Srovnání s `InstrumentProfile` (full)
 
@@ -456,7 +463,7 @@ sítě najednou — zároveň jsou vrstvy hlav lehčí (méně parametrů).
 ```python
 from training.modules.profile_trainer_exp import ProfileTrainerEncExp
 
-model = ProfileTrainerEncExp().train(params, epochs=3000)
+model = ProfileTrainerEncExp().train(params, epochs=5000)
 model = ProfileTrainerEncExp().load("profile-exp.pt")
 ```
 
@@ -464,35 +471,21 @@ API je identické s `ProfileTrainer`.
 
 ### Trénink
 
-Reusing `build_dataset_exp`, `_compute_data_loss_exp`, `_run_training_exp` —
-všechny volání forward jsou kompatibilní díky identickým signaturám metod.
-
-Navíc oproti `full` tréninku:
-- Smoothness penalty na **velocity ose** (MIDI=60, lambda=0.3) pro B a dur —
-  zabraňuje oscilacím přes velocity vrstvy.
+- Smoothness penalty na **MIDI ose**: tau, A0, noise každých 5 epoch
+- Smoothness penalty na **velocity ose** (MIDI=60, lambda=0.3) pro B a dur
 
 ### Poznatky z tréninku (vv-rhodes, 2026-04-02)
 
-Při prvním tréninku (3000 epoch) byla `B_head` velocity-aware. Výsledky ukázaly
-jasný problém:
+Při prvním tréninku byla `B_head` velocity-aware — výsledky ukázaly divergenci:
 
-| epoch | B val loss | eq val loss | best val |
-|-------|-----------|-------------|----------|
-| 100 | 3.84 | 3.16 | 1.006 ✓ |
-| 500 | 6.38 | 2.46 | — |
-| 1000 | 11.99 | 3.17 | — |
-| 1500 | 11.43 | 3.55 | — |
+| epoch | B val loss | best val |
+|-------|-----------|----------|
+| 100 | 3.84 | 1.006 ✓ |
+| 500 | 6.38 | — |
+| 1000 | 11.99 | — |
 
-- **B val loss divergoval** — model přeučoval na šum ve velocity ose. `B` (tuhost
-  struny) je fyzikální konstanta; její extrahované hodnoty se liší přes velocity
-  vrstvy jen kvůli měřicímu šumu, nikoli skutečné závislosti.
-- **Best checkpoint byl epoch 200** — po tomto bodě val loss rostl navzdory
-  klesajícímu train loss → klasický overfitting velocity osy B.
-- **sm_vel rostl** (0.017 → 0.43) s lambda=0.05 — příliš slabá regularizace.
-
-**Opravy aplikované po tomto zjištění:**
-1. `B_head` dostává pouze `midi_enc` — velocity ignorováno
-2. `sm_vel` lambda zvýšena z 0.05 na **0.3**
+**Příčina:** `B` per velocity je šum; model přeučoval na náhodné variace.
+**Oprava:** `B_head` dostává pouze `midi_enc`; `sm_vel` lambda zvýšena 0.05 → 0.3.
 
 ---
 
@@ -503,6 +496,9 @@ jasný problém:
 Closed-loop fine-tuning: renderuje noty přes `DifferentiableRenderer`,
 počítá MRSTFT loss vůči originálním WAV souborům a backpropaguje do vah
 `InstrumentProfile`.
+
+> **Status:** legacy — nové pipeline (`icr-eval` a varianty) používají
+> `ICRBatchEvaluator` pro early stop a nepotřebují fine-tuner.
 
 ### API
 
@@ -536,18 +532,21 @@ Per scale: Spectral Convergence + Log-Magnitude loss.
 
 ---
 
-## ICRBatchEvaluator  *(icr-eval mode)*
+## ICRBatchEvaluator
 
 **Soubor:** `training/modules/icr_evaluator.py`
 
-Nahrazuje `MRSTFTFinetuner` v `icr-eval` pipeline. Místo diferenciabilního
-Python rendereru spouští C++ `ICR.exe --render-batch`, čte vygenerované WAV
-soubory a počítá identickou MRSTFT loss — ale na zvuku přesně tak, jak ho
-PianoCore syntetizuje v produkci.
+Evaluátor pro ICR-based early stopping. Spouští C++ `ICR.exe --render-batch`,
+načítá vygenerované WAV soubory a počítá MRSTFT loss — na zvuku přesně tak,
+jak ho PianoCore syntetizuje v produkci.
+
+**Důležité:** ICRBatchEvaluator řídí **pouze early stop** — není trénovací
+loss a gradient přes něj nepochází. Tréninkový loss je vždy MSE na parametrech
+(NN výstup vs. targety).
 
 ### Přenos banky do ICR: soubor, ne SysEx
 
-Banka se předá ICR.exe přes **JSON soubor** (temp dir), nikoliv přes SysEx:
+Banka se předá ICR.exe přes **JSON soubor** (temp dir):
 
 ```
 ProfileTrainerEncExp
@@ -557,24 +556,6 @@ ProfileTrainerEncExp
   → MRSTFT výpočet
 ```
 
-SysEx pipeline slouží pro **interaktivní editaci** — posílání živých změn do
-běžící instance ICR přes MIDI protokol.  Pro batch rendering by bylo SysEx
-pomalé a zbytečně složité (každá nota by musela projít MIDI protokolem).
-
-`--render-batch` mode je navržen přesně pro offline evaluaci: načte banku
-z JSON, vyrenderuje požadované noty jako WAV soubory a skončí — žádné GUI,
-žádný audio výstup, jen soubory.  Každý ICRBatchEvaluator instance používá
-vlastní `tempfile.mkdtemp()` temp dir → paralelní spuštění více instancí
-(různé pipeline runy) nekoliduje.
-
-Výhody oproti `MRSTFTFinetuner`:
-- Rychlejší render (C++ vs Python/PyTorch na CPU)
-- Ground-truth metrika — stejný kód co uživatel slyší
-- Bez gradientu → žádná paměť pro gradient tape, žádný risk divergence
-
-Nevýhoda:
-- Metrika je non-differenciable → nelze použít jako tréninkový loss (jen eval/early-stop)
-
 ### API
 
 ```python
@@ -582,16 +563,13 @@ evaluator = ICRBatchEvaluator(
     icr_exe   = "build/bin/Release/ICR.exe",
     bank_dir  = "C:/SoundBanks/IthacaPlayer/vv-rhodes",
     sr        = 48000,
-    eval_midi = None,   # None = auto: 24 not rovnoměrně přes rozsah banky (N_EVAL_MIDI=24)
+    eval_midi = None,   # None = auto: 24 not rovnoměrně přes rozsah banky
     eval_vels = None,   # None = auto: [0, 2, 4, 6, 7]  (ppp / pp / mp / mf / ff)
-    note_dur  = 3.0,                                                 # sekund na notu
-    out_dir   = None,   # None = auto temp dir, smaže se po eval
+    note_dur  = 3.0,
+    out_dir   = None,   # None = auto temp dir
 )
 
-# Jednorázový eval — vrátí průměrnou ICR-MRSTFT přes všechny eval noty
 score = evaluator.eval(model, params)   # float, nižší = lepší
-
-# Uklid (smaže temp dir, pokud byl auto)
 evaluator.close()
 ```
 
@@ -600,31 +578,19 @@ evaluator.close()
 ```
 1. SoundbankExporter().hybrid(model, params, tmp.json)
 2. Zapsat eval_notes.json   [{midi, vel_idx, duration_s}, ...]
-3. Print: "ICR eval: rendering N notes via ICR.exe ..."
-4. subprocess: ICR.exe --core PianoCore --params tmp.json
+3. subprocess: ICR.exe --core PianoCore --params tmp.json
                         --render-batch eval_notes.json --out-dir tmp_dir/
-   (každý řádek stdout ICR.exe se přeposílá jako "[ICR] ...")
-5. Načíst m{midi:03d}_vel{vel}.wav z tmp_dir/
-6. Mono, ořez/pad na note_dur*sr vzorků
-7. mrstft(rendered_wav, reference_wav) → průměr přes všechny eval noty
-8. Print: "ICR-MRSTFT = X.XXXX  (N/N notes, Xs)"
+4. Načíst m{midi:03d}_vel{vel}.wav z tmp_dir/
+5. Mono, ořez/pad na note_dur*sr vzorků
+6. mrstft(rendered_wav, reference_wav) → průměr přes všechny eval noty
 ```
 
-Timeout ICR.exe: **120 s** (`ICR_TIMEOUT_S`). Při selhání vrátí `float('inf')` a pokračuje dál (nespustí early stop).
-
-### MRSTFT scales (identické s MRSTFTFinetuner)
-
-| Scale | N_FFT | Hop |
-|-------|-------|-----|
-| 1 | 256 | 64 |
-| 2 | 1024 | 256 |
-| 3 | 4096 | 1024 |
+Timeout ICR.exe: **120 s**. Při selhání vrátí `float('inf')` a pokračuje dál.
 
 ### Selekce eval not
 
-**MIDI:** `N_EVAL_MIDI = 24` not rovnoměrně přes rozsah dostupných not banky.
-Průměrný rozestup ~2.7 půltónu (max 5). Dřívější hodnota 12 způsobovala
-~5.5 půltónové mezery → noty daleko od eval pozic zněly špatně.
+**MIDI:** `N_EVAL_MIDI = 24` not rovnoměrně přes rozsah dostupných not banky
+(průměrný rozestup ~2.7 půltónu).
 
 **Velocity:** `eval_vels = [0, 2, 4, 6, 7]` pokrývá celou dynamiku:
 
@@ -636,11 +602,74 @@ Průměrný rozestup ~2.7 půltónu (max 5). Dřívější hodnota 12 způsobova
 | 6 | mf |
 | 7 | ff |
 
-Dřívější `[0, 5]` vynechávalo většinu dynamického rozsahu → NN neměla
-incentiv produkovat konzistentní velocity scaling.
-
 Celkový počet eval not: **24 × 5 = 120** (~80 s na eval).
-Noty pro které neexistuje referenční WAV jsou přeskočeny.
+
+### MRSTFT scales
+
+| Scale | N_FFT | Hop |
+|-------|-------|-----|
+| 1 | 256 | 64 |
+| 2 | 1024 | 256 |
+| 3 | 4096 | 1024 |
+
+---
+
+## ICRRoundTripProcessor
+
+**Soubor:** `training/modules/icr_round_trip.py`
+
+Opravuje trénovací targety o systematické offsety ICR syntezátoru.
+Extrakce měří reálný klavír; ICR má vlastní přenosovou funkci — stejné
+parametry renderuje jako zvuk, který extraktor změří jinak. Round-trip
+tento offset zachytí automaticky.
+
+```
+smooth_params  →  ICR render  →  WAV  →  extract  →  params_rt
+                                                          ↕ MSE
+                                                      (trénovací target)
+```
+
+NN se naučí "co ICR potřebuje na vstupu, aby produkoval zamýšlený zvuk",
+nikoliv "co jsme naměřili z reálného klavíru".
+
+### EQ v round-tripu
+
+`spectral_eq` je z round-tripu **vyloučeno** — ICR renderuje s neutrálním
+EQ (prázdné biquady). Výstup round-tripu zachovává `spectral_eq` z
+`smooth_params` beze změny. EQ bude řešeno jako separátní trénovací větev.
+
+### API
+
+```python
+from training.modules.icr_round_trip import ICRRoundTripProcessor
+
+rt = ICRRoundTripProcessor(
+    icr_exe  = "build/bin/Release/ICR.exe",
+    sr       = 48000,
+    sr_tag   = "f48",
+    note_dur = 3.0,
+)
+params_rt = rt.process(params_smooth, workers=8)
+# params_rt má stejnou strukturu jako params_smooth;
+# fyzikální params nahrazeny round-trip hodnotami, spectral_eq zachováno
+```
+
+### Průběh `process()`
+
+```
+1. Export measured not s neutrálním EQ → temp bank JSON
+2. ICR.exe --render-batch  → WAV soubory (m060_vel3.wav, ...)
+3. Přejmenování: m060_vel3.wav → m060-vel3-f48.wav  (formát ParamExtractor)
+4. ParamExtractor.extract_bank() → params_rt_raw
+5. Merge: rt fyzikální params + spectral_eq z smooth_params
+   (noty kde extrakce selhala → fallback na smooth_params)
+```
+
+### Fallback chování
+
+Noty u nichž extrakce z round-trip WAV selže (velmi tiché noty v krajích
+rozsahu) se zachovají z `smooth_params`. Round-trip počet je vypsán:
+`Round-trip complete: N_rt/N notes extracted`.
 
 ---
 
@@ -660,17 +689,18 @@ exporter.from_params(params, "soundbanks/out.json", sr=44100)
 
 # Hybrid: reálná data + NN predikce pro chybějící pozice
 exporter.hybrid(model, params, "soundbanks/out.json", sr=44100)
+
+# Pure-NN: všech 704 not z NN (pro A/B srovnání)
+exporter.pure_nn(model, params, "soundbanks/out-pure-nn.json")
 ```
 
-### Rozdíl `from_params` vs `hybrid`
+### Rozdíl `from_params` vs `hybrid` vs `pure_nn`
 
-| Metoda | Zdroj dat | NN nutná? |
-|--------|-----------|-----------|
-| `from_params` | 100 % extrahovaná fyzika | Ne |
-| `hybrid` | Extrahovaná kde existuje, NN predikce pro zbytek | Ano |
-
-`hybrid` je výstupem `pipeline_full` — NN vyplní MIDI noty mimo rozsah banky
-nebo noty odstraněné `StructuralOutlierFilter`.
+| Metoda | Zdroj dat |
+|--------|-----------|
+| `from_params` | 100 % extrahovaná fyzika |
+| `hybrid` | Extrahovaná kde existuje, NN predikce pro zbytek |
+| `pure_nn` | 100 % NN predikce (pro A/B) |
 
 ### Zpracování při exportu
 
@@ -682,8 +712,6 @@ Pro každou (midi, vel) kombinaci:
 5. Zápis do `notes["m{midi:03d}_vel{vel}"]`
 
 ### Soundbank — uložené klíče
-
-Soundbanka ukládá fyzikální parametry i editovatelné zdrojové hodnoty:
 
 ```json
 {
@@ -713,21 +741,20 @@ Soundbanka ukládá fyzikální parametry i editovatelné zdrojové hodnoty:
 
 **Soubor:** `training/modules/synthesizer.py`
 
-Fyzikální syntéza jedné noty — stereo, numpy-based. Jde o přesný
-přepis `physics_synth.synthesize_note()` zabalený do třídy.
+Fyzikální syntéza jedné noty — stereo, numpy-based.
 
 ### API
 
 ```python
 audio = Synthesizer().render(
-    params,                   # dict z extract_bank nebo soundbank JSON
+    params,
     midi        = 60,
     vel         = 3,
     sr          = 44_100,
-    duration    = 3.0,        # None = z params["duration_s"]
+    duration    = 3.0,
     beat_scale  = 1.0,
     noise_level = 1.0,
-    eq_strength = 1.0,        # 0 = bypass EQ, 1 = plný EQ
+    eq_strength = 1.0,   # 0 = bypass EQ, 1 = plný EQ
     pan_spread  = 0.55,
     target_rms  = 0.06,
 )
@@ -756,21 +783,21 @@ post-processing:
 
 ---
 
-## DifferenciableRenderer
+## DifferentiableRenderer
 
 **Soubor:** `training/modules/synthesizer.py`
 
 Mono diferenciabilní proxy pro fine-tuning. Zachovává gradient flow přes
-parametry `InstrumentProfile`. Jde o přesný přepis `torch_synth.py`.
+parametry `InstrumentProfile`.
 
 ### API
 
 ```python
-from training.modules.synthesizer    import DifferentiableRenderer
+from training.modules.synthesizer     import DifferentiableRenderer
 from training.modules.profile_trainer import ProfileTrainer
 
-model  = ProfileTrainer().load("training/profile.pt")
-audio  = DifferentiableRenderer().render(model, midi=60, vel=3)
+model = ProfileTrainer().load("training/profile.pt")
+audio = DifferentiableRenderer().render(model, midi=60, vel=3)
 # audio: torch.Tensor, shape (N,), requires_grad=True
 ```
 
@@ -785,8 +812,7 @@ audio  = DifferentiableRenderer().render(model, midi=60, vel=3)
 | Diferenciabilní | Ne | Ano |
 | Backend | numpy | PyTorch |
 
-Zjednodušení jsou záměrná — stereo dekorelace a EQ nejsou diferenciabilní;
-fine-tuning na mono signálu je dostatečný pro konvergenci.
+Zjednodušení jsou záměrná — stereo dekorelace a EQ nejsou diferenciabilní.
 
 ---
 
@@ -838,614 +864,3 @@ banka může být použita jako vstup do dalšího tréninku.
 |-------------|---------|
 | `InstrumentProfile` | NN predikce pro každou (midi, vel) |
 | `dict` (params) | Reálná extrahovaná data; pokud (midi, vel) chybí, vezme nejbližší sousední notu |
-
----
-
-## Správná logika pipeline — referenční schémata
-
-Tato sekce popisuje **zamýšlený** datový tok každé pipeline. Slouží jako reference
-při implementaci oprav a budoucích úpravách.
-
-### Klíčový princip: co je finální autorita pro neměřené MIDI pozice
-
-| Workflow | Trénink na | Finální hodnoty neměřených pozic |
-|---|---|---|
-| **icr-eval** | raw extracted (zašuměné) | spline fit z measured → spline_fix odstraní NN šum |
-| **smooth-icr-eval** | spline-vyhlazené measured | **NN výstup** — NN naučená na smooth datech je důvěryhodná |
-| **smooth-icr-eval --extend-partials** | smooth + rozšířené parciály | **NN výstup** s plným počtem parciálů |
-
-> **Zrušené workflows:** `full-spline-icr-eval` a `b-spline-icr-eval` byly sloučeny do
-> `smooth-icr-eval` jako flag `--extend-partials`. `b-spline-icr-eval` byl redundantní
-> po NoB refaktoru (všechny pipeline už vylučují B z NN).
->
-> **Opravená chyba:** původní smooth pipeline volala `spline_fix` i po tréninku →
-> double-spline, NN výstup zahozen. Spline_fix náleží pouze `icr-eval`.
-
----
-
-### icr-eval — referenční schéma
-
-```
-WAV soubory
-    │
-    ▼
-[1] ParamExtractor          ← ICR extrakce parametrů z každé nahrávky
-    │  (raw, zašuměné)
-    ▼
-[2] StructuralOutlierFilter ← odstraní strukturálně vadné noty
-    │
-    ▼
-[3] EQFitter                ← fituje biquad EQ na spektrum
-    │
-    │  params (measured, raw)
-    ├─────────────────────────────────────────┐
-    ▼                                         │ orig_samples
-[4] ProfileTrainerEncExp.train()              │
-    │  targety: raw extracted params          │
-    │  early stop: ICR-MRSTFT                 │
-    ▼                                         │
-[5] SoundbankExporter.hybrid()  ◄─────────────┘
-    │  measured pozice: orig_samples (raw)
-    │  NN pozice: NN výstup
-    ▼
-[6] spline_fix(fix_interpolated=True)
-    │  NN pozice NAHRAZENY splinem z measured
-    │  → eliminuje šum raw-trained NN
-    ▼
-[7] SoundbankExporter.pure_nn()
-    │  všech 704 not z NN (pro A/B srovnání)
-    ▼
-VÝSTUP:
-  params-{bank}-icr-eval.json          ← hybrid: measured + spline(NN pozice)
-  params-{bank}-icr-eval-pure-nn.json  ← čistá NN
-```
-
----
-
-### smooth-icr-eval — referenční schéma (OPRAVENÁ verze)
-
-```
-WAV soubory
-    │
-    ▼
-[1] ParamExtractor
-    │  (raw, zašuměné)
-    ▼
-[2] StructuralOutlierFilter
-    │
-    ▼
-[3] EQFitter
-    │
-    │  params (measured, raw)           ← uložit jako -pre-smooth.json
-    ├──────────────────────────────────────────────────────┐
-    ▼                                                      │ orig_samples
-[4] spline_fix(smooth_all, auto_anchors)                   │
-    │  → smooth_params                  ← uložit jako -pre-smooth-spline.json
-    │  POUZE pro trénovací targety, ne pro finální export  │
-    ▼                                                      │
-[5] ProfileTrainerEncExp.train(smooth_params)              │
-    │  targety: spline-vyhlazené measured params           │
-    │  early stop: ICR-MRSTFT                              │
-    │  NN se učí hladké křivky → výstup pro                │
-    │  neměřené pozice je důvěryhodný                      │
-    ▼                                                      │
-[6] SoundbankExporter.hybrid()  ◄──────────────────────────┘
-    │  measured pozice: orig_samples (RAW, ne smoothed!)
-    │  NN pozice: NN výstup (smooth, protože NN trénovala na smooth datech)
-    │  → uložit jako -hybrid-raw.json
-    │
-    │  !! BEZ spline_fix !! NN je finální autorita pro neměřené pozice
-    ▼
-[7] SoundbankExporter.pure_nn()
-    ▼
-VÝSTUP:
-  params-{bank}-smooth-icr-eval.json          ← hybrid: raw measured + NN(smooth)
-  params-{bank}-smooth-icr-eval-pure-nn.json  ← čistá NN
-  (+ intermediate: -pre-smooth, -pre-smooth-spline, -hybrid-raw)
-```
-
----
-
-### smooth-icr-eval --extend-partials — co se mění
-
-```
-Krok [4] spline_fix dostane navíc extend_partials=True:
-
-    apply_spline_fix_bank(notes, smooth_all=True,
-                          extend_partials=True,   ← přidáno
-                          auto_anchors=N)
-
-Výsledek: každá measured nota má plný počet parciálů (max přes všechny measured).
-Nové parciály jsou inicializovány a hodnoty doplněny splinem ještě PŘED tréninkem.
-NN se tak učí přirozeně predikovat plný počet parciálů pro všechny pozice.
-```
-
----
-
-### Shrnutí: kdy použít spline_fix po exportu
-
-```
-icr-eval                        → spline_fix ANO  (raw NN je zašuměná)
-smooth-icr-eval                 → spline_fix NE   (NN trénovaná na smooth datech)
-smooth-icr-eval --extend-partials → spline_fix NE  (stejný důvod; extend proběhl před tréninkem)
-```
-
----
-
-## Pipelines
-
-### pipeline_simple.py
-
-```python
-from training.pipeline_simple import run
-
-out_path = run(
-    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path      = "soundbanks/params-ks-grand.json",
-    workers       = 8,
-    skip_eq       = False,
-    skip_outliers = False,   # True = přeskočit StructuralOutlierFilter
-    sr_tag        = "f48",   # preferovat f48, fallback na f44
-)
-```
-
-Kroky: `extract_bank` → `StructuralOutlierFilter` → `fit_bank` → `from_params`
-
-### pipeline_full.py
-
-```python
-from training.pipeline_full import run
-
-model, out_path = run(
-    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path      = "soundbanks/params-ks-grand.json",
-    epochs        = 1800,
-    ft_epochs     = 200,
-    workers       = 8,
-    skip_outliers = False,
-    sr_tag        = "f48",
-)
-```
-
-Kroky: `extract_bank` → `StructuralOutlierFilter` → `fit_bank` → `train` → `finetune` → `hybrid`
-
-### pipeline_nn.py  *(doporuceno)*
-
-```python
-from training.pipeline_nn import run
-
-model, out_path = run(
-    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path      = "soundbanks/params-ks-grand.json",
-    epochs        = 10000,
-    workers       = 8,
-    skip_outliers = False,
-    sr_tag        = "f48",
-)
-```
-
-Kroky: `extract_bank` -> `StructuralOutlierFilter` -> `fit_bank` -> `train` -> `hybrid`
-
-Pouziva `ProfileTrainerEncExp` — velocity na vsech sitich, sdilene enkodery.
-Zadny MRSTFTFinetuner. Ciste parametricky MSE fitting s early-stop pres val data-loss.
-
-```bash
-python run-training.py nn --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-python run-training.py nn --bank ... --epochs 10000
-```
-
-### pipeline_experimental.py  *(legacy)*
-
-```python
-from training.pipeline_experimental import run
-
-model, out_path = run(
-    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path      = "soundbanks/params-ks-grand.json",
-    epochs        = 10000,
-    ft_epochs     = 200,
-    workers       = 8,
-    skip_outliers = False,
-    sr_tag        = "f48",
-)
-```
-
-Stejne jako `nn`, ale za NN treninkem nasleduje `MRSTFTFinetuner` (200 epoch,
-Python DifferentiableRenderer). Ponechano pro zpetnou kompatibilitu — pro nove
-runy preferuj `nn` nebo `icr-eval`.
-
-### pipeline_icr_eval.py  *(icr-eval mode)*
-
-```python
-from training.pipeline_icr_eval import run
-
-model, out_path = run(
-    bank_dir      = "C:/SoundBanks/IthacaPlayer/ks-grand",
-    out_path      = "soundbanks/params-ks-grand.json",
-    epochs        = 5000,
-    workers       = 8,
-    skip_outliers = False,
-    sr_tag        = "f48",
-    icr_exe       = "build/bin/Release/ICR.exe",
-    note_dur      = 3.0,    # délka rendrované noty [s]
-    icr_patience  = 15,     # early stop: evals bez zlepšení ICR-MRSTFT
-)
-```
-
-**Klicove rozdily oproti `nn`:**
-
-| Vlastnost | nn | icr-eval |
-|-----------|-----|----------|
-| Eval metrika | val data-loss (MSE na parametrech) | C++ ICR.exe batch render (MRSTFT) |
-| Early stopping | val data-loss plateau | ICR-MRSTFT plateau |
-| MRSTFTFinetuner | ne | ne |
-| Tréninkový loss | data loss (MSE na parametrech) | stejny |
-| Best model | nejnizsi val data-loss | nejnizsi ICR-MRSTFT |
-| Export | hybrid (NN + params) | hybrid (NN + params) |
-
-**Schéma:**
-
-```
-extract → filter → EQ
-                    │
-              ProfileTrainerEncExp.train(epochs, icr_evaluator=...)
-                    │
-              každých eval_every (50) epoch:
-                ├─ data val-loss (jako dosud, verbose breakdown)
-                └─ ICR-MRSTFT eval (ICRBatchEvaluator, 24 not)
-                        │
-                   early stop: ICR-MRSTFT nezlepšeno za 15 evalů
-                        │
-              restore best ICR-MRSTFT checkpoint
-                    │
-              SoundbankExporter().hybrid()
-```
-
-**Console výstup (icr-eval):**
-
-```
-ICRBatchEvaluator: loaded 475 reference WAVs from C:/SoundBanks/.../vv-rhodes
-ICRBatchEvaluator: 24 eval notes (12 MIDI x 2 vel)  dur=3.0s  sr=48000
-ProfileTrainerEncExp: 384 measured samples  ->  train=319  val=65 ...
-  Mode: experimental-enc -- shared encoders (midi->16  vel->8  k->8  freq->8)
-  Eval: ICR-MRSTFT (early stop patience=15 evals, no MRSTFTFinetuner)
-Building datasets ...
-  train batches: {'B_mf': 319, 'B_vf': 319, 'tau_mf': 2847, ...}
-Model parameters: 29,686  (encoders hidden=64, heads hidden=32)
-Training 5000 epochs  (ICR-MRSTFT early stop) ...
-  epoch    1/5000  loss=X.XXXX  [training started]         ← ihned po epoch 1
-  epoch   10/5000  loss=X.XXXX                             ← heartbeat každých 10 epoch
-  epoch   20/5000  loss=X.XXXX
-  epoch   30/5000  loss=X.XXXX
-  epoch   40/5000  loss=X.XXXX
-  epoch   50/5000  train=X.XXXX  val=X.XXXX  lr=...  ✓    ← val eval (eval_every=50)
-    val breakdown:  B=X.XX  dur=X.XX  eq=X.XX  ...
-    ICR eval: rendering 120 notes via ICR.exe ...          ← před subprocess (24 MIDI × 5 vel)
-    [ICR] Render batch: 24 notes -> /tmp/icr_eval_.../
-    [ICR]   Rendered m036_vel0.wav (1/24)
-    [ICR]   ...
-    [ICR] Render done: 24/24 notes in 5.2s
-    ICR-MRSTFT = X.XXXX  (24/24 notes, 5.3s)
-  epoch   60/5000  loss=X.XXXX
-  ...
-  Early stop: ICR-MRSTFT no improvement for 15 evals (best=X.XXXX)
-  Restored best ICR-MRSTFT checkpoint (X.XXXX)
-
-Done -> soundbanks/params-vv-rhodes-icr-eval.json
-```
-
-**CLI:**
-
-```bash
-python run-training.py icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-python run-training.py icr-eval --bank ... --epochs 5000 --icr-exe build/bin/Release/ICR.exe
-python run-training.py icr-eval --bank ... --icr-patience 20 --note-dur 4.0
-```
-
----
-
-### pipeline_smooth_icr_eval.py  *(smooth-icr-eval / smooth-ext-icr-eval)*
-
-Spline-smooth measured params před tréninkem → NN trénuje na čistých targetech →
-hybrid exportuje raw measured + NN výstup přímo (bez druhého spline průchodu).
-
-#### Fyzika B a proč na velocity nezávisí
-
-Inharmonicita B je definována fyzikálními vlastnostmi struny:
-
-```
-B = (π² · E · I) / (T · L²)
-
-E — Young's modulus materiálu struny
-I — moment průřezu (závisí na průměru)
-T — napětí struny
-L — délka struny
-```
-
-**Žádný z těchto parametrů na velocity nezávisí.** B je fixní vlastnost každé
-struny. Per-velocity variace v extrakci je šum měření (SNR, multi-string chorus,
-nelinearita) — ne fyzikální signál. `BSplneFitter` průměruje log(B) přes velocity
-a fituje 1D spline přes MIDI 21–108.
-
-#### Schéma — smooth-icr-eval
-
-```
-extract → filter → EQ
-                    │  params (raw measured)
-                    ├──────────────────────────────────────┐
-                    ▼                                      │ orig_samples
-              spline_fix(smooth_all, auto_anchors)         │
-                    │  smooth_params (training targets)    │
-                    ▼                                      │
-              ProfileTrainerEncExp.train(smooth_params)    │
-                  NN učí hladké křivky z čistých targetů  │
-                    │                                      │
-                    ▼                                      │
-              SoundbankExporter.hybrid(model, params) ◄────┘
-                  measured: raw orig_samples (ground truth)
-                  NN pozice: NN výstup (smooth, důvěryhodný)
-                    │
-              SoundbankExporter.pure_nn()
-```
-
-#### Schéma — smooth-ext-icr-eval (extend_partials=True)
-
-```
-              spline_fix(smooth_all, extend_partials=True, auto_anchors)
-                  ↑ measured noty rozšířeny na max partial count
-                    PŘED tréninkem → NN se učí plný harmonický obsah
-```
-
-#### Klíčové rozdíly mezi workflows
-
-| Vlastnost | icr-eval | smooth-icr-eval | smooth-ext-icr-eval |
-|---|---|---|---|
-| NN targety | raw extracted | spline-smooth | spline-smooth + plné parciály |
-| Finální auth. neměřených pozic | spline_fix | **NN** | **NN** |
-| spline_fix po exportu | ✓ | ✗ | ✗ |
-| extend_partials | ✗ | ✗ | ✓ (pre-training) |
-| Hybrid measured | raw | raw | raw |
-
-#### API
-
-```python
-from training.pipeline_smooth_icr_eval import run
-
-# smooth-icr-eval
-model, out_path = run(
-    bank_dir     = "C:/SoundBanks/IthacaPlayer/vv-rhodes",
-    out_path     = "soundbanks/params-vv-rhodes-smooth-icr-eval.json",
-    epochs       = 5000,
-    auto_anchors = 12,
-    icr_patience = 15,
-)
-
-# smooth-ext-icr-eval
-model, out_path = run(
-    bank_dir        = "C:/SoundBanks/IthacaPlayer/vv-rhodes",
-    out_path        = "soundbanks/params-vv-rhodes-smooth-ext-icr-eval.json",
-    epochs          = 5000,
-    auto_anchors    = 12,
-    icr_patience    = 15,
-    extend_partials = True,
-)
-```
-
-#### CLI
-
-```bash
-python run-training.py smooth-icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-python run-training.py smooth-ext-icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-```
-
----
-
-## Full pipeline — detailní průběh
-
-`pipeline_full` nespouští `simple` jako podkrok — extrakci dělá od začátku.
-Výsledek po extrakci + outlier filter + EQ je identický s tím, co `simple` uloží
-do JSON. Od toho momentu přicházejí dvě navíc fáze:
-
-### Co je v params dict po extrakci
-
-Pro každou změřenou (midi, vel) kombinaci máme fyzikální data:
-
-```
-f0_hz, B, K_valid, phi_diff
-partials: [{k, f_hz, A0, tau1, tau2, a1, beat_hz, phi}, ...]
-attack_tau, A_noise, rms_gain
-spectral_eq: {freqs_hz, gains_db, stereo_width_factor}
-```
-
-Typicky ~384 z 704 možných kombinací — zbytek chybí nebo byl vyhozen
-jako outlier.
-
----
-
-### Fáze 1 — ProfileTrainer.train()
-
-**Cíl:** naučit funkci `f(midi, vel, k) → fyzikální parametry` hladkou
-přes celou klaviaturu, která interpoluje i chybějící noty.
-
-#### Validation split
-
-Před tréninkem se deterministicky vyčlení ~15 % MIDI not jako val set
-(každá ~7. nota, rovnoměrně přes celý rozsah):
-
-```
-train: m033 m034 m035 m036 m037 m038 …
-val:              ↑                 ↑    každá ~7. nota
-```
-
-Val loss se počítá každých 100 epoch bez smoothness penalty.
-Na konci se obnoví checkpoint s nejnižší val loss.
-
-> Val loss měří fit na zašumělá extrahovaná čísla — není to perceptuální
-> kvalita. Hlavní role je detekce divergence. Perceptuální validace
-> probíhá až v MRSTFT finetuning.
-
-#### Architektura — 10 faktorizovaných MLP
-
-Každý fyzikální parametr má vlastní síť; gradient neprochází křížem:
-
-| Síť | Vstup | Výstup |
-|-----|-------|--------|
-| `B_net` | midi | log(B) — inharmonicita |
-| `dur_net` | midi | log(duration) |
-| `tau1_k1_net` | midi, vel | log(τ₁ pro k=1) |
-| `tau_ratio_net` | midi, k | log(τ_k / τ₁) |
-| `A0_net` | midi, k, vel | log(A_k / A₁) — spektrální obálka |
-| `df_net` | midi, k | log(Δf_k) — inharmonická odchylka |
-| `eq_net` | midi, freq | gain_db — EQ křivka |
-| `wf_net` | midi | log(stereo_width_factor) |
-| `noise_net` | midi, vel | log(τ_atk), log(centroid), log(A_noise) |
-| `biexp_net` | midi, k, vel | logit(a1), log(τ₂/τ₁) |
-
-Loss = součet MSE/Huber termů pro každou síť + smoothness penalty
-(penalizuje druhé diference sousedních MIDI, každých 5 epoch).
-
----
-
-### Fáze 2 — MRSTFTFinetuner.finetune()
-
-NN po tréninku "viděla" pouze extrahovaná čísla — nikdy neslyšela,
-jak výsledný zvuk zní. Finetuner to napraví closed-loop smyčkou:
-
-```
-pro každý epoch:
-  batch 8 náhodných not
-    ↓
-  model.forward(midi, vel) → parametry
-    ↓
-  _render_differentiable() → pred_wav  (mono proxy, torch tensor)
-    ↓
-  mrstft(pred_wav, ref_wav) → loss
-    ↓
-  loss.backward() → gradient přes render → do vah modelu
-```
-
-`_render_differentiable` je zjednodušený syntezátor v PyTorchi:
-součet `A_k · env_k(t) · cos(2π·f_k·t + φ_k)` jako tenzorové
-operace. Stereo, EQ biquady a noise jsou vynechány (nejsou
-diferenciabilní) — proto "mono proxy".
-
-#### MRSTFT loss (3 škály)
-
-```
-loss = Σ_scale [ spectral_convergence(pred, ref) + log_magnitude(pred, ref) ]
-```
-
-| Škála | N_FFT | Citlivost na |
-|-------|-------|--------------|
-| 1 | 512 | attack transient (~12 ms) |
-| 2 | 1024 | rovnováha (23 ms) |
-| 3 | 2048 | sustain, ladění (46 ms) |
-
-Best checkpoint = nejnižší průměrný MRSTFT přes všechny reference noty
-(eval každých 20 epoch).
-
-**Omezení:** gradient nedosáhne na `eq_net` ani `wf_net` — ty zůstanou
-přesně tak, jak je natrénoval ProfileTrainer na extrahovaných číslech.
-
----
-
-### Fáze 3 — SoundbankExporter.hybrid()
-
-```
-pro každou (midi, vel) z 21–108 × 0–7:
-  if (midi, vel) in změřených datech:
-      vezmi reálná extrahovaná data        ← fidelita
-      přepiš eq_biquads z NN               ← NN je hladší přes klaviaturu
-  else:
-      vygeneruj vše z NN                   ← interpolace chybějících not
-```
-
-Výsledek: 704 not — typicky ~384 reálných + ~320 NN-interpolovaných.
-
----
-
-### Celkové schéma
-
-```
-WAV banka
-   ↓ ParamExtractor (FFT + STFT)
-params dict  ←── toto je ekvivalent výstupu simple pipeline
-   ↓ StructuralOutlierFilter
-params dict (vyčištěný)
-   ↓ EQFitter (LTASE)
-params dict (+ spectral_eq pro každou notu)
-   ↓ ProfileTrainer.train()
-InstrumentProfile NN  — hladká funkce přes klaviaturu
-   ↓ MRSTFTFinetuner.finetune()
-InstrumentProfile NN  — váhy doladěny vůči originálním WAV (MRSTFT loss)
-   ↓ SoundbankExporter.hybrid()
-soundbanks/params-{bank}-full.json
-  reálná data tam kde existují, NN predikce jinde
-```
-
----
-
-## Vlastní workflow (příklady)
-
-### Přeskočit NN, jen vyexportovat s jiným target_rms
-
-```python
-from training.modules.extractor  import ParamExtractor
-from training.modules.eq_fitter  import EQFitter
-from training.modules.exporter   import SoundbankExporter
-
-params = ParamExtractor().extract_bank("C:/SoundBanks/IthacaPlayer/ks-grand")
-params = EQFitter().fit_bank(params, "C:/SoundBanks/IthacaPlayer/ks-grand")
-
-exp = SoundbankExporter()
-exp.from_params(params, "soundbanks/custom.json", sr=44100)
-```
-
-### Použít existující model, přeskočit extrakci
-
-```python
-from training.modules.profile_trainer import ProfileTrainer
-from training.modules.exporter        import SoundbankExporter
-from training.modules.extractor       import ParamExtractor
-from training.modules.eq_fitter       import EQFitter
-
-# Načti existující extrakci (přeskočí přepočet)
-import json
-with open("training/params-ks-grand.json") as f:
-    params = json.load(f)
-
-model = ProfileTrainer().load("training/profile-ks-grand.pt")
-SoundbankExporter().hybrid(model, params, "soundbanks/new.json")
-```
-
-### Generovat jednu notu v různých variantách
-
-```python
-import soundfile as sf
-from training.modules.generator import SampleGenerator
-from training.modules.profile_trainer import ProfileTrainer
-
-model = ProfileTrainer().load("training/profile-ks-grand.pt")
-gen   = SampleGenerator()
-
-for beat in [0.5, 1.0, 1.5, 2.0]:
-    wav = gen.generate_note(model, midi=60, vel=4, beat_scale=beat)
-    sf.write(f"generated/C4_beat{beat}.wav", wav, 44100)
-```
-
-### Vygenerovat sample banku z NN pro celý rozsah
-
-```python
-from training.modules.generator      import SampleGenerator
-from training.modules.profile_trainer import ProfileTrainer
-
-model = ProfileTrainer().load("training/profile-ks-grand.pt")
-SampleGenerator().generate_bank(
-    model,
-    out_dir     = "generated/ks-grand-v2/",
-    midi_range  = (21, 108),
-    vel_count   = 8,
-    beat_scale  = 1.2,
-    eq_strength = 0.8,
-)
-```

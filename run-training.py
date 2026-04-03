@@ -4,36 +4,42 @@ run-training.py  —  ICR training pipeline launcher
 Run from anywhere (repo root, IDE, double-click):
 
     python run-training.py simple --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-    python run-training.py icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
-    python run-training.py smooth-icr-eval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
+    python run-training.py raw-nn-icreval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
+    python run-training.py spl-nn-icreval --bank C:/SoundBanks/IthacaPlayer/vv-rhodes
 
-Subcommands
-───────────
-  simple              Extract -> filter -> EQ -> export soundbank (no NN)
-  icr-eval            Extract -> filter -> EQ -> train NN (raw targets, ICR early-stop)
-                      -> hybrid + spline-fix NN notes + pure-NN export
-  smooth-icr-eval     Extract -> filter -> EQ -> spline-smooth measured params
-                      -> train NN (smooth targets, ICR early-stop)
-                      -> hybrid (raw measured + NN) + pure-NN export
-  smooth-ext-icr-eval Same as smooth-icr-eval + measured notes extended to max partial
-                      count before training (NN trains on complete harmonic targets)
-  smooth-rt-icr-eval  Same as smooth-icr-eval + ICR round-trip correction:
-                      smooth params → ICR render → re-extract → training targets
-                      (NN converges to what ICR actually produces)
-  nn                  Extract -> filter -> EQ -> train NN (shared encoders) -> export
-  full                Extract -> filter -> EQ -> train NN -> MRSTFT finetune -> export hybrid
-  experimental        Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
+Naming convention: <target-prep>-nn-<icr-role>
+  target-prep:  raw | spl (spline) | spl-ext (spline+extend) | spl-icrtarget (spline+round-trip)
+  icr-role:     icreval (ICR drives early-stop only)
+                icrtarget (ICR generates training targets via round-trip)
 
-Key difference between icr-eval and smooth-icr-eval:
-  icr-eval        NN trains on raw extracted params; spline_fix cleans NN output post-export
-  smooth-icr-eval NN trains on spline-smoothed params; NN output is final (no second spline)
+Active workflows
+────────────────
+  raw-nn-icreval          Extract -> EQ -> train NN (raw targets) -> ICR early-stop
+                          -> hybrid + spline-fix NN notes + pure-NN export
+  spl-nn-icreval          Extract -> EQ -> spline-smooth -> train NN (smooth targets)
+                          -> ICR early-stop -> hybrid (raw measured + NN) + pure-NN export
+  spl-ext-nn-icreval      Same as spl-nn-icreval + extend measured notes to max partial count
+                          before training (NN trains on complete harmonic targets)
+  spl-icrtarget-nn-icreval      spl-nn-icreval + ICR round-trip: smooth params → ICR render
+                                → re-extract → training targets (NN converges to what ICR
+                                actually produces, not what extractor measured from real piano)
+  spl-ext-icrtarget-nn-icreval  spl-ext-nn-icreval + ICR round-trip: extend partials +
+                                spline-smooth → ICR render → re-extract → training targets
+
+Legacy workflows
+────────────────
+  simple                  Extract -> filter -> EQ -> export (no NN)
+  nn                      Extract -> filter -> EQ -> NN (shared encoders) -> export
+  full                    Extract -> filter -> EQ -> NN -> MRSTFT finetune -> export hybrid
+  experimental            Like nn + MRSTFTFinetuner (legacy, slow Python proxy finetuner)
 
 Output naming (--out optional)
 ───────────────────────────────
-  soundbanks/params-{bank_name}-icr-eval.json
-  soundbanks/params-{bank_name}-smooth-icr-eval.json
-  soundbanks/params-{bank_name}-smooth-ext-icr-eval.json
-  soundbanks/params-{bank_name}-smooth-rt-icr-eval.json
+  soundbanks/params-{bank_name}-raw-nn-icreval.json
+  soundbanks/params-{bank_name}-spl-nn-icreval.json
+  soundbanks/params-{bank_name}-spl-ext-nn-icreval.json
+  soundbanks/params-{bank_name}-spl-icrtarget-nn-icreval.json
+  soundbanks/params-{bank_name}-spl-ext-icrtarget-nn-icreval.json
 
 All console output is also written to:
   training-logs/run-{cmd}-{bank_name}-{timestamp}.log
@@ -185,15 +191,15 @@ def _build_parser() -> argparse.ArgumentParser:
     exp.add_argument("--sr-tag",    default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
-    # ── smooth-icr-eval ──────────────────────────────────────────────────────
+    # ── spl-nn-icreval ───────────────────────────────────────────────────────
     smi = sub.add_parser(
-        "smooth-icr-eval",
-        help="Extract -> EQ -> spline-smooth measured params -> train NN (ICR eval) "
+        "spl-nn-icreval",
+        help="spline-smooth measured params -> train NN (smooth targets, ICR early-stop) "
              "-> hybrid (raw measured + NN) + pure-NN export",
     )
     smi.add_argument("--bank",             required=True, help="WAV bank directory")
     smi.add_argument("--out",              default=None,
-                     help="Output JSON (default: soundbanks/params-{bank}-smooth-icr-eval.json)")
+                     help="Output JSON (default: soundbanks/params-{bank}-spl-nn-icreval.json)")
     smi.add_argument("--workers",          type=int, default=None,
                      help="Parallel workers (default: CPU count)")
     smi.add_argument("--epochs",           type=int, default=5000,
@@ -214,15 +220,15 @@ def _build_parser() -> argparse.ArgumentParser:
     smi.add_argument("--sr-tag",           default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
-    # ── smooth-rt-icr-eval ───────────────────────────────────────────────────
+    # ── spl-icrtarget-nn-icreval ─────────────────────────────────────────────
     srt = sub.add_parser(
-        "smooth-rt-icr-eval",
-        help="smooth-icr-eval + ICR round-trip: smooth params → ICR render → "
+        "spl-icrtarget-nn-icreval",
+        help="spl-nn-icreval + ICR round-trip: smooth params → ICR render → "
              "re-extract → training targets (NN learns ICR's actual transfer function)",
     )
     srt.add_argument("--bank",         required=True, help="WAV bank directory")
     srt.add_argument("--out",          default=None,
-                     help="Output JSON (default: soundbanks/params-{bank}-smooth-rt-icr-eval.json)")
+                     help="Output JSON (default: soundbanks/params-{bank}-spl-icrtarget-nn-icreval.json)")
     srt.add_argument("--workers",      type=int, default=None,
                      help="Parallel workers (default: CPU count)")
     srt.add_argument("--epochs",       type=int, default=5000,
@@ -240,15 +246,15 @@ def _build_parser() -> argparse.ArgumentParser:
     srt.add_argument("--sr-tag",       default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
-    # ── smooth-ext-icr-eval ──────────────────────────────────────────────────
+    # ── spl-ext-nn-icreval ───────────────────────────────────────────────────
     sme = sub.add_parser(
-        "smooth-ext-icr-eval",
-        help="Like smooth-icr-eval but measured notes are extended to max partial "
+        "spl-ext-nn-icreval",
+        help="Like spl-nn-icreval but measured notes are extended to max partial "
              "count before training (NN trains on complete harmonic targets)",
     )
     sme.add_argument("--bank",         required=True, help="WAV bank directory")
     sme.add_argument("--out",          default=None,
-                     help="Output JSON (default: soundbanks/params-{bank}-smooth-ext-icr-eval.json)")
+                     help="Output JSON (default: soundbanks/params-{bank}-spl-ext-nn-icreval.json)")
     sme.add_argument("--workers",      type=int, default=None,
                      help="Parallel workers (default: CPU count)")
     sme.add_argument("--epochs",       type=int, default=5000,
@@ -266,14 +272,41 @@ def _build_parser() -> argparse.ArgumentParser:
     sme.add_argument("--sr-tag",       default="f48",
                      help="SR suffix in filenames: f44 or f48 (default: f48)")
 
-    # ── icr-eval ─────────────────────────────────────────────────────────────
+    # ── spl-ext-icrtarget-nn-icreval ────────────────────────────────────────
+    sxrt = sub.add_parser(
+        "spl-ext-icrtarget-nn-icreval",
+        help="spl-ext-nn-icreval + ICR round-trip: extend partials + spline-smooth "
+             "→ ICR render → re-extract → training targets",
+    )
+    sxrt.add_argument("--bank",         required=True, help="WAV bank directory")
+    sxrt.add_argument("--out",          default=None,
+                      help="Output JSON (default: soundbanks/params-{bank}-spl-ext-icrtarget-nn-icreval.json)")
+    sxrt.add_argument("--workers",      type=int, default=None,
+                      help="Parallel workers (default: CPU count)")
+    sxrt.add_argument("--epochs",       type=int, default=5000,
+                      help="Max NN epochs (default: 5000, early stop may exit sooner)")
+    sxrt.add_argument("--icr-exe",      default="build/bin/Release/ICR.exe",
+                      help="Path to ICR.exe (default: build/bin/Release/ICR.exe)")
+    sxrt.add_argument("--note-dur",     type=float, default=3.0,
+                      help="ICR render duration per note in seconds (default: 3.0)")
+    sxrt.add_argument("--icr-patience", type=int, default=15,
+                      help="Early stop after N evals without improvement (default: 15)")
+    sxrt.add_argument("--auto-anchors", type=int, default=12,
+                      help="Auto-anchor count for spline smoothing (default: 12)")
+    sxrt.add_argument("--skip-outliers-detection", action="store_true",
+                      help="Skip structural outlier detection step")
+    sxrt.add_argument("--sr-tag",       default="f48",
+                      help="SR suffix in filenames: f44 or f48 (default: f48)")
+
+    # ── raw-nn-icreval ───────────────────────────────────────────────────────
     icr = sub.add_parser(
-        "icr-eval",
-        help="Like experimental, but ICR C++ renderer drives eval/early-stop (no finetuner)",
+        "raw-nn-icreval",
+        help="train NN on raw extracted params, ICR C++ renderer drives early-stop "
+             "(no finetuner); spline_fix cleans NN output post-export",
     )
     icr.add_argument("--bank",         required=True, help="WAV bank directory")
     icr.add_argument("--out",          default=None,
-                     help="Output soundbank JSON (default: soundbanks/params-{bank}-icr-eval.json)")
+                     help="Output soundbank JSON (default: soundbanks/params-{bank}-raw-nn-icreval.json)")
     icr.add_argument("--workers",      type=int, default=None,
                      help="Parallel workers (default: CPU count)")
     icr.add_argument("--epochs",       type=int, default=5000,
@@ -353,8 +386,8 @@ def main() -> int:
             )
             print(f"\nDone -> {out}")
 
-        elif args.cmd == "smooth-icr-eval":
-            out_path = args.out or _default_out(args.bank, "smooth-icr-eval")
+        elif args.cmd == "spl-nn-icreval":
+            out_path = args.out or _default_out(args.bank, "spl-nn-icreval")
             from training.pipeline_smooth_icr_eval import run
             model, out = run(
                 bank_dir        = args.bank,
@@ -371,8 +404,8 @@ def main() -> int:
             )
             print(f"\nDone -> {out}")
 
-        elif args.cmd == "smooth-rt-icr-eval":
-            out_path = args.out or _default_out(args.bank, "smooth-rt-icr-eval")
+        elif args.cmd == "spl-icrtarget-nn-icreval":
+            out_path = args.out or _default_out(args.bank, "spl-icrtarget-nn-icreval")
             from training.pipeline_smooth_icr_eval import run
             model, out = run(
                 bank_dir        = args.bank,
@@ -389,8 +422,8 @@ def main() -> int:
             )
             print(f"\nDone -> {out}")
 
-        elif args.cmd == "smooth-ext-icr-eval":
-            out_path = args.out or _default_out(args.bank, "smooth-ext-icr-eval")
+        elif args.cmd == "spl-ext-nn-icreval":
+            out_path = args.out or _default_out(args.bank, "spl-ext-nn-icreval")
             from training.pipeline_smooth_icr_eval import run
             model, out = run(
                 bank_dir        = args.bank,
@@ -407,8 +440,27 @@ def main() -> int:
             )
             print(f"\nDone -> {out}")
 
-        elif args.cmd == "icr-eval":
-            out_path = args.out or _default_out(args.bank, "icr-eval")
+        elif args.cmd == "spl-ext-icrtarget-nn-icreval":
+            out_path = args.out or _default_out(args.bank, "spl-ext-icrtarget-nn-icreval")
+            from training.pipeline_smooth_icr_eval import run
+            model, out = run(
+                bank_dir        = args.bank,
+                out_path        = out_path,
+                epochs          = args.epochs,
+                workers         = args.workers,
+                skip_outliers   = args.skip_outliers_detection,
+                sr_tag          = args.sr_tag,
+                icr_exe         = args.icr_exe,
+                note_dur        = args.note_dur,
+                icr_patience    = args.icr_patience,
+                auto_anchors    = args.auto_anchors,
+                extend_partials = True,
+                icr_round_trip  = True,
+            )
+            print(f"\nDone -> {out}")
+
+        elif args.cmd == "raw-nn-icreval":
+            out_path = args.out or _default_out(args.bank, "raw-nn-icreval")
             from training.pipeline_icr_eval import run
             model, out = run(
                 bank_dir      = args.bank,

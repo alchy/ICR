@@ -434,20 +434,23 @@ def _run_training_exp(
         loss = _compute_data_loss_exp(model, b)
 
         # Smoothness penalty over MIDI grid (every 5 epochs)
-        # Uses reference vel=4 for MIDI smoothness; also checks vel smoothness at MIDI=60
+        # MIDI smoothness averaged over all 8 velocity layers; vel smoothness at MIDI=60
         if epoch % 5 == 0:
             midi_grid = torch.arange(21, 108, dtype=torch.float32)
             mf_grid   = torch.stack([midi_feat(float(m)) for m in midi_grid])
             kf_ref    = k_feat(1).unsqueeze(0).expand(len(midi_grid), -1)
-            vf_ref    = vel_feat(4).unsqueeze(0).expand(len(midi_grid), -1)
 
-            # MIDI smoothness (vel=4 fixed)
-            tau_g = model.forward_tau1_k1(mf_grid, vf_ref).squeeze(-1)
-            a0_g  = model.forward_A0(mf_grid, kf_ref, vf_ref).squeeze(-1)
-            n_g   = model.forward_noise(mf_grid, vf_ref)
-            smooth_midi = ((tau_g[1:]-tau_g[:-1]).pow(2).mean()
+            # MIDI smoothness averaged over all 8 velocity layers
+            _sm = []
+            for _v in range(8):
+                vf = vel_feat(_v).unsqueeze(0).expand(len(midi_grid), -1)
+                tau_g = model.forward_tau1_k1(mf_grid, vf).squeeze(-1)
+                a0_g  = model.forward_A0(mf_grid, kf_ref, vf).squeeze(-1)
+                n_g   = model.forward_noise(mf_grid, vf)
+                _sm.append((tau_g[1:]-tau_g[:-1]).pow(2).mean()
                            + (a0_g[1:]-a0_g[:-1]).pow(2).mean()
                            + (n_g[1:]-n_g[:-1]).pow(2).mean())
+            smooth_midi = torch.stack(_sm).mean()
 
             # Velocity smoothness at MIDI=60 (light — allow vel variation)
             vel_grid = torch.arange(8, dtype=torch.float32)
