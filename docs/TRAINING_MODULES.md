@@ -22,6 +22,7 @@ training/
     synthesizer.py                Synthesizer                 — fyzikální syntéza (stereo, numpy)
                                   DifferentiableRenderer      — diferenciabilní proxy (mono, torch)
     generator.py                  SampleGenerator             — generování WAV sample banky
+    instrument_dna.py             InstrumentDNA               — generování soundbank z anchor not (fyzikální zákony + GP)
 
   pipeline_simple.py              — extract -> structural filter -> EQ -> export
   pipeline_full.py                — extract -> filter -> EQ -> NN -> MRSTFT finetune -> hybrid
@@ -46,6 +47,7 @@ from training.modules.icr_round_trip            import ICRRoundTripProcessor
 from training.modules.exporter                  import SoundbankExporter
 from training.modules.synthesizer               import Synthesizer, DifferentiableRenderer
 from training.modules.generator                 import SampleGenerator
+from training.modules.instrument_dna           import InstrumentDNA
 ```
 
 ---
@@ -167,6 +169,13 @@ note = extractor.extract_note("m060-vel3-f44.wav")
 - Paralelní zpracování přes `multiprocessing.Pool` — `workers=None` použije `cpu_count - 1`.
 - Adaptivní N_FFT podle MIDI noty (nižší noty potřebují delší okno).
 - Beat detection z amplitudové modulace STFT obálek.
+- **Bi-exp fit (v2):** `_fit_decay` zkouší 4 diverse inicializace `(a1, tau1, tau2)` a přijme
+  tu s nejmenším residuálem (MSE zlepšení >15%, tau2/tau1 > 1.3). `tau1_max=20s` (bylo 5s),
+  přijímací práh `tau2/tau1>1.3` (bylo 3.0). Výsledek na pl-grand: bi-exp 59% → 77%.
+- **ICR round-trip omezení:** ICR renderuje záznamy délky `duration_s=3.0s`.
+  `tau2_max = min(60, 3.0*0.9) = 2.7s`. Bi-exp `tau2/tau1>1.3` může projít, ale pro
+  Rhodes s tau2~30s je stále omezující. Řešení: `InstrumentDNA` přístup nebo prodloužení
+  render duration.
 
 ---
 
@@ -864,3 +873,143 @@ banka může být použita jako vstup do dalšího tréninku.
 |-------------|---------|
 | `InstrumentProfile` | NN predikce pro každou (midi, vel) |
 | `dict` (params) | Reálná extrahovaná data; pokud (midi, vel) chybí, vezme nejbližší sousední notu |
+
+---
+
+## InstrumentDNA
+
+**Soubor:** `training/modules/instrument_dna.py`
+
+Generuje kompletní 704-notovou soundbank z anchor not (uživatelem anotovaných nebo
+auto-detekovaných kvalitních not) pomocí fyzikálních zákonů + Gaussian Process residuals.
+Nevyžaduje, aby měly všechny noty dobrou extrakci — stačí 10–30 anchor not rovnoměrně
+rozložených po klaviatuře. Detailní popis architektury → viz `docs/INSTRUMENT_DNA.md`.
+
+### API
+
+```python
+dna = InstrumentDNA()
+
+# Fit z extrahovaných params (s volitelným souborem anchor anotací)
+dna.fit("generated/pl-grand-extracted.json")
+dna.fit("generated/pl-grand-extracted.json", anchors_path="anchors/pl-grand.json")
+
+# Generovat jednu notu
+note = dna.generate_note(midi=60, vel=4, rng=np.random.default_rng(42))
+
+# Generovat celou banku jako dict (704 not)
+bank = dna.generate_bank(sr=48000, k_max=60, rng_seed=42)
+
+# Uložit jako PianoCore JSON (s volitelnou RMS kalibrací)
+dna.save_bank(
+    "soundbanks/pl-grand-dna.json",
+    sr=48000,
+    target_rms=0.06,
+    duration_s=3.0,
+    k_max=60,
+    rng_seed=42,
+    calibrate_rms=False,   # True vyžaduje synthesizer API
+)
+```
+
+### Fyzikální zákony
+
+| Parametr | Zákon | Prostor fitu |
+|---|---|---|
+| `B` | `log(B) = a + b·midi` | WLS log-prostor |
+| `tau1` | `log(tau1) = a(vel) + b·log(f0)` | WLS log-prostor, per velocity |
+| `tau_ratio` | `log(tau_k/tau_1) = -α·k` | WLS log-prostor, per harmonic |
+| `beat_hz` | `log(beat_hz) = a + b·log(f0)` | WLS log-prostor |
+| `A0_shape` | `log(A0_k) = f(k, midi)` | GP 2D: (k, midi) |
+| `a1` | `a1(midi, vel)` | WLS, sigmoid space |
+
+Každý zákon je fitován váhovaně (WLS) s vahami odpovídajícími quality score anchor not.
+Noty s quality=0.0 mají nulovou váhu → žádná kontaminace degenerovanými notami.
+
+### Auto-quality detection
+
+```python
+dna._auto_quality(note)  # → float 0.0–1.0
+```
+
+Automaticky ohodnotí notu z extrakčních příznaků:
+- `beat_hz == 0` → -0.4 (detektor selhal)
+- `a1 == 1.0` a `|tau1-tau2| < 1e-4` → -0.4 (bi-exp zdegeneroval)
+- `B < 1e-6` nebo `B > 0.05` → -0.3 (mimo fyzikální rozsah)
+- Skóre pod 0.1 → zaokrouhleno na 0.0
+
+### CLI
+
+```bash
+python training/modules/instrument_dna.py generated/pl-grand-extracted.json soundbanks/pl-grand-dna.json
+python training/modules/instrument_dna.py extracted.json out.json --anchors anchors/pl-grand.json
+python training/modules/instrument_dna.py extracted.json out.json --no-rms
+```
+
+### Výsledky na pl-grand
+
+- Anchor not: 520/704 (q≥0.5), fit trvá ~4.5s
+- B: 1.24e-4 (midi 108) → 5.9e-4 (midi 21) — fyzikálně správný trend
+- tau1: 0.028s (midi 108, vel7) → 1.45s (midi 21, vel0)
+- beat_hz: 0.09 → 0.45 Hz
+- Výstup: `soundbanks/pl-grand-dna.json` (5.6 MB, 704 not)
+
+---
+
+## Nástroje (tools/)
+
+### analyze_extraction.py
+
+**Soubor:** `tools/analyze_extraction.py`
+
+Diagnostický CLI pro hodnocení kvality extrakce z params JSON.
+Reportuje bi-exp/beat/B statistiky celkově, po registrech, per-velocity a per-MIDI heatmap.
+
+```bash
+python tools/analyze_extraction.py generated/pl-grand-extracted.json
+python tools/analyze_extraction.py a.json --compare b.json
+```
+
+**Výstup:**
+
+```
+Overall:
+  Has partials :  704 / 704  (100%)
+  B in range   :  645 / 704  ( 92%)
+  Bi-exp fit   :  542 / 704  ( 77%)
+  Beat detect  :  704 / 704  (100%)
+
+Per register:
+  Register    notes   biexp%   beat%   B_ok%  failures
+  Bass            ...
+  ...
+
+Per-MIDI heatmap (vel=4):
+  midi  name  biexp  beat_hz  tau1   tau2          B  note
+  ...
+```
+
+### anchor_helper.py
+
+**Soubor:** `tools/anchor_helper.py`
+
+Textový REPL pro anotaci anchor not se quality score 0.0–1.0.
+Podporuje multi-bank (více zdrojových bank jednoho nástroje).
+
+```bash
+python tools/anchor_helper.py
+```
+
+**Příkazy:**
+
+| Příkaz | Popis |
+|---|---|
+| `load <path>` | Načte soundbank JSON |
+| `screen` | Auto-screening: detekuje degenerované noty |
+| `list [reg]` | Vypíše noty s quality scores (filtr: bass/mid/treble) |
+| `show m060_vel4` | Detail jedné noty |
+| `mark 60 all:0.5 4:0.9` | Nastaví quality (all velocity nebo konkrétní vel) |
+| `auto` | Přepočítá auto-quality pro načtenou banku |
+| `add-bank <path>` | Přidá další banku pro multi-bank přístup |
+| `save <path>` | Uloží anchor JSON |
+| `help` | Zobrazí všechny příkazy |

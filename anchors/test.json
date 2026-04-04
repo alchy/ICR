@@ -1,0 +1,19 @@
+{
+  "instrument_type": "unknown",
+  "description": "",
+  "banks": [
+    {
+      "bank": "soundbanks\\vv-rhodes-raw-nn-icreval-hybrid.json",
+      "notes": {
+        "m064_vel0": 0.0,
+        "m064_vel1": 0.9,
+        "m064_vel2": 0.0,
+        "m064_vel3": 0.0,
+        "m064_vel4": 0.0,
+        "m064_vel5": 0.0,
+        "m064_vel6": 0.0,
+        "m064_vel7": 0.0
+      }
+    }
+  ]
+}

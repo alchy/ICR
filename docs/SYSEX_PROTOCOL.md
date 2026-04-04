@@ -71,10 +71,12 @@ F0 7D 01  01  <midi>  <vel>  <param_id>  <v0 v1 v2 v3 v4>  F7
 
 ### Scalar Param IDs
 
+Definice a fyzikální popis klíčů → [JSON_SCHEMA.md](JSON_SCHEMA.md#2a-identifikace-a-fyzika-skalary).
+
 | id   | key          | Description              |
 |------|--------------|--------------------------|
 | 0x01 | `f0_hz`      | Fundamental frequency    |
-| 0x02 | `B`          | Inharmonicity coefficient|
+| 0x02 | `B`          | Inharmonicity coefficient — propagates to all 8 vel layers |
 | 0x03 | `attack_tau` | Noise attack time const  |
 | 0x04 | `A_noise`    | Noise amplitude          |
 | 0x05 | `rms_gain`   | RMS output gain          |
@@ -99,6 +101,8 @@ F0 7D 01  02  <midi>  <vel>  <k>  <param_id>  <v0 v1 v2 v3 v4>  F7
 | value      | 5     | float32, 7-bit encoded           |
 
 ### Per-Partial Param IDs
+
+Definice a fyzikální popis klíčů → [JSON_SCHEMA.md](JSON_SCHEMA.md#3-partial-level-klíče-v-poli-partials).
 
 | id   | key       | Description                    |
 |------|-----------|--------------------------------|

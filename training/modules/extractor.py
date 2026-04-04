@@ -430,30 +430,57 @@ def _fit_decay(times, amps, i_peak) -> dict:
     except Exception:
         result["tau1"] = float(t[-1]/3.0) if t[-1] > 0 else 3.0
 
-    # Bi-exponential (only when signal is long enough)
-    tau2_max = min(60.0, t[-1]*0.9)
-    if t[-1] > 1.0 and tau2_max > 0.15 and A0 > 1e-6:
-        try:
-            def bi_exp(t, a1, tau1, tau2):
-                a1   = np.clip(a1, 0.01, 0.99)
-                tau1 = max(tau1, 0.01)
-                tau2 = max(tau2, tau1 + 0.05)
-                return a1*np.exp(-t/tau1) + (1-a1)*np.exp(-t/tau2)
+    # Bi-exponential — multi-start search, residual-gated acceptance
+    tau2_max  = min(60.0, t[-1] * 0.9)
+    tau1_max  = min(20.0, t[-1] * 0.5)   # was hard-capped at 5.0
+    mono_tau  = result["tau1"] or 3.0
 
-            tau1_init = min(result["tau1"]*0.2, 2.0)
-            tau2_init = result["tau1"]
-            popt2, _ = curve_fit(bi_exp, t, a_norm,
-                                 p0=[0.2, tau1_init, tau2_init],
-                                 bounds=([0.01,0.02,0.1],[0.99,5.0,tau2_max]),
-                                 maxfev=8000)
-            a1, tau1, tau2 = popt2
-            if tau2/tau1 > 3.0 and 0.05 < a1 < 0.95 and tau2 < tau2_max*0.9:
-                result["tau1"] = float(tau1)
-                result["tau2"] = float(tau2)
-                result["a1"]   = float(a1)
+    if t[-1] > 0.8 and tau2_max > 0.3 and A0 > 1e-6:
+
+        def bi_exp(t, a1, tau1, tau2):
+            a1   = np.clip(a1, 0.01, 0.99)
+            tau1 = max(tau1, 0.01)
+            tau2 = max(tau2, tau1 * 1.1)
+            return a1 * np.exp(-t / tau1) + (1 - a1) * np.exp(-t / tau2)
+
+        # Four diverse initializations to escape local minima
+        inits = [
+            (0.3,  min(mono_tau * 0.15, tau1_max * 0.5),  mono_tau),
+            (0.5,  min(mono_tau * 0.30, tau1_max * 0.5),  min(mono_tau * 2.5, tau2_max * 0.8)),
+            (0.2,  0.05,                                   min(mono_tau * 0.5, tau2_max * 0.5)),
+            (0.7,  min(mono_tau * 0.50, tau1_max * 0.8),  min(mono_tau * 4.0, tau2_max * 0.8)),
+        ]
+
+        best_popt = None
+        best_residual = np.inf
+        for a1_0, tau1_0, tau2_0 in inits:
+            try:
+                popt2, _ = curve_fit(
+                    bi_exp, t, a_norm,
+                    p0=[a1_0, tau1_0, tau2_0],
+                    bounds=([0.01, 0.02, 0.1], [0.99, tau1_max, tau2_max]),
+                    maxfev=8000,
+                )
+                a1c, tau1c, tau2c = popt2
+                if tau2c > tau1c * 1.3 and 0.03 < a1c < 0.97 and tau2c < tau2_max * 0.95:
+                    pred = bi_exp(t, a1c, tau1c, tau2c)
+                    res  = float(np.mean((a_norm - pred) ** 2))
+                    if res < best_residual:
+                        best_residual = res
+                        best_popt = (float(a1c), float(tau1c), float(tau2c))
+            except Exception:
+                pass
+
+        if best_popt is not None:
+            a1, tau1, tau2 = best_popt
+            mono_pred     = np.exp(-t / mono_tau)
+            mono_residual = float(np.mean((a_norm - mono_pred) ** 2))
+            # Accept bi-exp when it fits meaningfully better AND two components are distinct
+            if best_residual < mono_residual * 0.85 and tau2 / tau1 > 1.3:
+                result["tau1"] = tau1
+                result["tau2"] = tau2
+                result["a1"]   = a1
                 result["mono"] = False
-        except Exception:
-            pass
 
     return result
 
