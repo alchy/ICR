@@ -24,6 +24,9 @@ soundbanks/*.json
 # Rendered audio exports
 exports/
 
+# Local notes
+PianoCore.txt
+
 # Editor / OS
 .vscode/
 .idea/
