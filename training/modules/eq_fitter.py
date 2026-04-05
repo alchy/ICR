@@ -221,6 +221,16 @@ def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
     mask = freqs_fft > 100.0
     H_db -= H_db[mask].mean() if mask.any() else H_db.mean()
 
+    # Sub-fundamental clamping: clip boosts below f0 to 0 dB.
+    # The original recording has room tone / sympathetic-resonance content
+    # at sub-fundamental frequencies that the additive model cannot reproduce.
+    # Allowing a positive EQ gain there causes biquad fitting to introduce
+    # a large LF boost that inflates rms_gain and reduces effective HF level.
+    f0_hz = float(sample.get("f0_hz", 0.0) or 0.0)
+    if f0_hz > 100.0:
+        sub_mask = freqs_fft < f0_hz * 0.8
+        H_db[sub_mask] = np.minimum(H_db[sub_mask], 0.0)
+
     # Resample to 64 log-spaced points
     eq_freqs = np.logspace(np.log10(EQFitter.EQ_F_MIN),
                            np.log10(EQFitter.EQ_F_MAX),

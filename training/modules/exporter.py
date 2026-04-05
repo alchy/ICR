@@ -302,7 +302,12 @@ class SoundbankExporter:
         # Noise params (flat keys; cap attack_tau at tau1 of k=1 partial)
         attack_tau_raw  = float(sample.get("attack_tau", 0.05) or 0.05)
         A_noise         = float(sample.get("A_noise", 0.04) or 0.04)
-        centroid_hz     = float(sample.get("noise_centroid_hz", 3000.0) or 3000.0)
+        # noise_centroid_hz floor: extracted values for bass/tenor notes are dominated
+        # by harmonic residual (centroid ~120-200 Hz), causing boomy "bottle" noise
+        # at the same frequency as the piano tone.  Floor at 1000 Hz ensures the
+        # attack noise is spectrally above the lower harmonics for all registers.
+        centroid_hz     = max(float(sample.get("noise_centroid_hz", 3000.0) or 3000.0),
+                              1000.0)
         tau1_k1         = (partials_out[0]["tau1"] if partials_out else 3.0)
         attack_tau      = min(attack_tau_raw, tau1_k1)
 
@@ -403,7 +408,13 @@ class SoundbankExporter:
         return ((target_rms * vel_gain) / rms) if rms > 1e-10 else 1.0
 
     def _fit_eq_biquads(self, sample: dict, sr: int) -> list:
-        """Fit EQ biquads from spectral_eq data if present."""
+        """Fit EQ biquads from spectral_eq data if present.
+
+        Sub-fundamental clamping: gains are clipped to ≤ 0 dB below f0*0.8.
+        This prevents the EQ from boosting room-tone / sympathetic-resonance
+        content at frequencies where no harmonics exist, which would inflate
+        the rms_gain calibration and make the harmonic content quieter.
+        """
         eq_data = sample.get("spectral_eq")
         if not eq_data:
             return []
@@ -412,11 +423,15 @@ class SoundbankExporter:
         if not freqs_hz or not gains_db:
             return []
         try:
-            return _eq_to_biquads(
-                np.array(freqs_hz, dtype=np.float64),
-                np.array(gains_db, dtype=np.float64),
-                sr, n_sections=PIANO_N_BIQUAD,
-            )
+            f_arr = np.array(freqs_hz, dtype=np.float64)
+            g_arr = np.array(gains_db, dtype=np.float64)
+            # Clamp boosts below the fundamental to avoid fitting sub-harmonic
+            # room-tone compensation (real cause of HF brilliance deficit).
+            f0_hz = float(sample.get("f0_hz", 0.0))
+            if f0_hz > 100.0:
+                sub_mask = f_arr < f0_hz * 0.8
+                g_arr[sub_mask] = np.minimum(g_arr[sub_mask], 0.0)
+            return _eq_to_biquads(f_arr, g_arr, sr, n_sections=PIANO_N_BIQUAD)
         except Exception:
             return []
 
