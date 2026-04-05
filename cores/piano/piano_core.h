@@ -66,13 +66,14 @@ struct PianoPartialParam {
 struct PianoNoteParam {
     bool  valid           = false;
     bool  is_interpolated = false;   // true = NN-generated, false = measured
-    int   K          = 0;
-    float phi_diff   = 0.f;
-    float attack_tau = 0.05f;
-    float A_noise    = 0.04f;
-    float rms_gain   = 1.f;
-    float f0_hz      = 440.f;
-    float B          = 0.f;   // inharmonicity; kept so setNoteParam("B") can recompute f_hz[k]
+    int   K                  = 0;
+    float phi_diff           = 0.f;
+    float attack_tau         = 0.05f;
+    float A_noise            = 0.04f;
+    float noise_centroid_hz  = 3000.f; // 1-pole IIR low-pass cutoff for noise colouring
+    float rms_gain           = 1.f;
+    float f0_hz              = 440.f;
+    float B                  = 0.f;   // inharmonicity; kept so setNoteParam("B") can recompute f_hz[k]
     // Spectral EQ: min-phase IIR fitted from soundbank spectral_eq curve
     int              n_biquad = 0;
     PianoBiquadCoeffs eq[PIANO_N_BIQUAD];
@@ -114,6 +115,9 @@ struct PianoVoice {
     float A_noise_sc     = 0.f;  // A_noise * rms_gain * noise_level
     float noise_env      = 1.f;
     float noise_decay    = 0.f;
+    float noise_alpha    = 1.f;  // 1-pole IIR coeff: 1 - exp(-2π*centroid_hz/sr)
+    float noise_y_L      = 0.f;  // IIR filter state — left channel
+    float noise_y_R      = 0.f;  // IIR filter state — right channel
 
     // Release / onset ramps
     float rel_gain       = 1.f;

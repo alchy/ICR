@@ -137,9 +137,10 @@ class DifferentiableRenderer:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _n_strings(midi: int) -> int:
+    """Number of strings per note. Matches piano_core.cpp (always 2-string model
+    for midi > 27; deep bass uses a single string)."""
     if midi <= 27: return 1
-    if midi <= 48: return 2
-    return 3
+    return 2
 
 
 def _pan_gains(angle: float) -> tuple:
@@ -285,8 +286,10 @@ def _synthesize_note(
         tau1 = p.get("tau1") or 3.0
         tau2 = p.get("tau2")
         a1   = p.get("a1") or 1.0
+        # "mono" key absent in exported soundbank JSON → default False (use bi-exp).
+        # a1=1.0 effectively gives mono even with bi-exp formula, matching C++.
         env  = (a1*np.exp(-t/tau1) + (1-a1)*np.exp(-t/tau2)
-                if tau2 is not None and not p.get("mono", True)
+                if tau2 is not None and not p.get("mono", False)
                 else np.exp(-t/tau1))
         beat = (p.get("beat_hz", 0.0) or 0.0)*beat_scale
 
@@ -321,10 +324,12 @@ def _synthesize_note(
             R += (sa*gra + sb*grb + sc*grc)/3.0
 
     # Attack noise (independent L/R)
+    # Read from both exported soundbank format (flat keys) and raw extractor format
+    # (nested "noise" sub-dict) so that synthesizer works with both input types.
     noise_p  = params.get("noise", {})
-    taun_raw = noise_p.get("attack_tau", 0.05) or 0.05
-    cent     = noise_p.get("centroid_hz", 3000.0) or 3000.0
-    A_noise  = (noise_p.get("A_noise", 0.06) or 0.06)*noise_level
+    taun_raw = params.get("attack_tau") or noise_p.get("attack_tau", 0.05) or 0.05
+    cent     = params.get("noise_centroid_hz") or noise_p.get("centroid_hz", 3000.0) or 3000.0
+    A_noise  = ((params.get("A_noise") or noise_p.get("A_noise", 0.06) or 0.06) * noise_level)
     tau1_k1  = next((p.get("tau1", 3.0) for p in partials
                      if p.get("k")==1 and p.get("A0") and p["A0"]>1e-10), 3.0) or 3.0
     taun     = min(taun_raw, tau1_k1)

@@ -85,13 +85,14 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
         if (midi < midi_from || midi > midi_to) continue;
 
         PianoNoteParam& np = note_params_[midi][vel_idx];
-        np.valid     = true;
-        np.phi_diff  = s["phi_diff"].get<float>();
-        np.attack_tau= s["attack_tau"].get<float>();
-        np.A_noise   = s["A_noise"].get<float>();
-        np.rms_gain  = s["rms_gain"].get<float>();
-        np.f0_hz     = s["f0_hz"].get<float>();
-        np.B         = s.value("B", 0.f);
+        np.valid              = true;
+        np.phi_diff           = s["phi_diff"].get<float>();
+        np.attack_tau         = s["attack_tau"].get<float>();
+        np.A_noise            = s["A_noise"].get<float>();
+        np.noise_centroid_hz  = s.value("noise_centroid_hz", 3000.f);
+        np.rms_gain           = s["rms_gain"].get<float>();
+        np.f0_hz              = s["f0_hz"].get<float>();
+        np.B                  = s.value("B", 0.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
@@ -243,6 +244,14 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     v.A_noise_sc  = np.A_noise * np.rms_gain * noise_level;
     v.noise_env   = 1.f;
     v.noise_decay = std::exp(-1.f / std::max(np.attack_tau * sample_rate_, 1.f));
+    // 1-pole IIR low-pass: colours noise to centroid_hz (matches Python synthesizer).
+    // alpha = 1 - exp(-2π * fc / sr); fc clamped to 0.45*sr to stay below Nyquist.
+    {
+        float fc      = std::min(np.noise_centroid_hz, sample_rate_ * 0.45f);
+        v.noise_alpha = 1.f - std::exp(-TAU * fc / sample_rate_);
+    }
+    v.noise_y_L = 0.f;
+    v.noise_y_R = 0.f;
     v.rng.seed((uint32_t)(rng_seed + midi * 256 + vel_idx));
     v.ndist = std::normal_distribution<float>(0.f, 1.f);
 
@@ -361,11 +370,18 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
                 samp_R += base * (s1 * v.gr1 + s2 * v.gr2);
             }
 
-            // ── Noise (independent L/R) ──────────────────────────────────────
-            float noise_sc = v.A_noise_sc * v.noise_env;
-            samp_L += noise_sc * v.ndist(v.rng);
-            samp_R += noise_sc * v.ndist(v.rng);
-            v.noise_env *= v.noise_decay;
+            // ── Noise (independent L/R, 1-pole IIR low-pass at centroid_hz) ──
+            // y[n] = alpha * x[n] + (1-alpha) * y[n-1]  (matches Python synthesizer)
+            {
+                float noise_sc = v.A_noise_sc * v.noise_env;
+                float alp      = v.noise_alpha;
+                float ialp     = 1.f - alp;
+                v.noise_y_L = alp * (noise_sc * v.ndist(v.rng)) + ialp * v.noise_y_L;
+                v.noise_y_R = alp * (noise_sc * v.ndist(v.rng)) + ialp * v.noise_y_R;
+                samp_L += v.noise_y_L;
+                samp_R += v.noise_y_R;
+                v.noise_env *= v.noise_decay;
+            }
 
             // ── Schroeder all-pass decorrelation ─────────────────────────────
             // y[n] = -g*x[n] + x[n-1] - g*y[n-1]
@@ -496,11 +512,12 @@ bool PianoCore::setNoteParam(int midi, int vel,
                               const std::string& key, float value) {
     if (midi < 0 || midi > 127 || vel < 0 || vel > 7) return false;
     PianoNoteParam& np = note_params_[midi][vel];
-    if (key == "f0_hz")      { np.f0_hz      = value; return true; }
-    if (key == "attack_tau") { np.attack_tau = value; return true; }
-    if (key == "A_noise")    { np.A_noise    = value; return true; }
-    if (key == "rms_gain")   { np.rms_gain   = value; return true; }
-    if (key == "phi_diff")   { np.phi_diff   = value; return true; }
+    if (key == "f0_hz")             { np.f0_hz             = value; return true; }
+    if (key == "attack_tau")        { np.attack_tau        = value; return true; }
+    if (key == "A_noise")           { np.A_noise           = value; return true; }
+    if (key == "noise_centroid_hz") { np.noise_centroid_hz = value; return true; }
+    if (key == "rms_gain")          { np.rms_gain          = value; return true; }
+    if (key == "phi_diff")          { np.phi_diff          = value; return true; }
     if (key == "B") {
         // B is a string property independent of velocity — propagate to all
         // 8 velocity layers for this MIDI note and recompute f_hz in each.
@@ -556,14 +573,15 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
         if (midi < 0 || midi > 127 || vel_idx < 0 || vel_idx > 7) continue;
 
         PianoNoteParam& np = tmp[midi * 8 + vel_idx];
-        np.valid           = true;
-        np.is_interpolated = s.value("_interpolated", false);
-        np.phi_diff   = s["phi_diff"].get<float>();
-        np.attack_tau = s["attack_tau"].get<float>();
-        np.A_noise    = s["A_noise"].get<float>();
-        np.rms_gain   = s["rms_gain"].get<float>();
-        np.f0_hz      = s["f0_hz"].get<float>();
-        np.B          = s.value("B", 0.f);
+        np.valid              = true;
+        np.is_interpolated    = s.value("_interpolated", false);
+        np.phi_diff           = s["phi_diff"].get<float>();
+        np.attack_tau         = s["attack_tau"].get<float>();
+        np.A_noise            = s["A_noise"].get<float>();
+        np.noise_centroid_hz  = s.value("noise_centroid_hz", 3000.f);
+        np.rms_gain           = s["rms_gain"].get<float>();
+        np.f0_hz              = s["f0_hz"].get<float>();
+        np.B                  = s.value("B", 0.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
@@ -618,14 +636,15 @@ bool PianoCore::exportBankJson(const std::string& path) {
             if (!np.valid) continue;
 
             json note;
-            note["midi"]       = m;
-            note["vel"]        = v;
-            note["phi_diff"]   = np.phi_diff;
-            note["attack_tau"] = np.attack_tau;
-            note["A_noise"]    = np.A_noise;
-            note["rms_gain"]   = np.rms_gain;
-            note["f0_hz"]      = np.f0_hz;
-            note["B"]          = np.B;
+            note["midi"]              = m;
+            note["vel"]               = v;
+            note["phi_diff"]          = np.phi_diff;
+            note["attack_tau"]        = np.attack_tau;
+            note["A_noise"]           = np.A_noise;
+            note["noise_centroid_hz"] = np.noise_centroid_hz;
+            note["rms_gain"]          = np.rms_gain;
+            note["f0_hz"]             = np.f0_hz;
+            note["B"]                 = np.B;
 
             json partials = json::array();
             for (int ki = 0; ki < np.K; ki++) {

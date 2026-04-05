@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+from scipy.signal import sosfilt
 
 from training.modules.eq_fitter import _eq_to_biquads
 
@@ -295,34 +296,36 @@ class SoundbankExporter:
         ]
 
         # Noise params (cap attack_tau at tau1 of k=1 partial)
-        noise          = sample.get("noise", {})
-        attack_tau_raw = float(noise.get("attack_tau", 0.05) or 0.05)
-        A_noise        = float(noise.get("A_noise", 0.04) or 0.04)
-        tau1_k1        = (partials_out[0]["tau1"] if partials_out else 3.0)
-        attack_tau     = min(attack_tau_raw, tau1_k1)
+        noise           = sample.get("noise", {})
+        attack_tau_raw  = float(noise.get("attack_tau", 0.05) or 0.05)
+        A_noise         = float(noise.get("A_noise", 0.04) or 0.04)
+        centroid_hz     = float(noise.get("centroid_hz", 3000.0) or 3000.0)
+        tau1_k1         = (partials_out[0]["tau1"] if partials_out else 3.0)
+        attack_tau      = min(attack_tau_raw, tau1_k1)
 
-        # RMS gain calibration
-        rms_gain = self._compute_rms_gain(
-            partials_out, phi_diff, attack_tau, A_noise,
-            vel_idx, sr, duration, target_rms,
-        )
-
-        # EQ biquads (may be absent for NN-generated samples without EQ)
+        # EQ biquads (needed for rms_gain calibration)
         eq_biquads = self._fit_eq_biquads(sample, sr)
+
+        # RMS gain calibration — renders partials + noise + EQ to get true output RMS
+        rms_gain = self._compute_rms_gain(
+            partials_out, phi_diff, attack_tau, A_noise, centroid_hz,
+            eq_biquads, vel_idx, sr, duration, target_rms,
+        )
 
         # Preserve editabe source data alongside baked values
         note: dict = {
-            "midi":       midi,
-            "vel":        vel_idx,
-            "f0_hz":      float(sample.get("f0_fitted_hz") or sample.get("f0_nominal_hz", 440.0)),
-            "B":          float(sample.get("B") or 0.0),
-            "K_valid":    K,
-            "phi_diff":   phi_diff,
-            "attack_tau": attack_tau,
-            "A_noise":    A_noise,
-            "rms_gain":   rms_gain,
-            "partials":   partials_out,
-            "eq_biquads": eq_biquads,
+            "midi":              midi,
+            "vel":               vel_idx,
+            "f0_hz":             float(sample.get("f0_fitted_hz") or sample.get("f0_nominal_hz", 440.0)),
+            "B":                 float(sample.get("B") or 0.0),
+            "K_valid":           K,
+            "phi_diff":          phi_diff,
+            "attack_tau":        attack_tau,
+            "A_noise":           A_noise,
+            "noise_centroid_hz": centroid_hz,
+            "rms_gain":          rms_gain,
+            "partials":          partials_out,
+            "eq_biquads":        eq_biquads,
         }
         # spectral_eq: raw freq/gain curve used to compute eq_biquads;
         # stored so the editor can re-fit biquads after curve edits.
@@ -366,25 +369,30 @@ class SoundbankExporter:
 
     def _compute_rms_gain(
         self,
-        partials:   list,
-        phi_diff:   float,
-        attack_tau: float,
-        A_noise:    float,
-        vel_idx:    int,
-        sr:         int,
-        duration:   float,
-        target_rms: float,
+        partials:     list,
+        phi_diff:     float,
+        attack_tau:   float,
+        A_noise:      float,
+        centroid_hz:  float,
+        eq_biquads:   list,
+        vel_idx:      int,
+        sr:           int,
+        duration:     float,
+        target_rms:   float,
     ) -> float:
-        """Calibrate rms_gain so rendered note hits target_rms * vel_gain."""
-        vel_gain   = ((vel_idx+1)/8.0)**VEL_GAMMA
-        raw_audio  = _render_note_rms_ref(partials, phi_diff, sr, duration)
-        partial_rms = float(np.sqrt(np.mean(raw_audio**2) + 1e-12))
-        tau_n       = max(attack_tau, 1e-4)
-        noise_rms   = A_noise * float(np.sqrt(
-            tau_n/2.0*(1.0-np.exp(-2.0*duration/tau_n)) + 1e-12
-        ))
-        total_rms   = float(np.sqrt(partial_rms**2 + noise_rms**2 + 1e-12))
-        return ((target_rms*vel_gain)/total_rms) if total_rms > 1e-10 else 1.0
+        """Calibrate rms_gain so rendered note hits target_rms * vel_gain.
+
+        Renders partials + noise (with centroid IIR filter) + EQ biquads,
+        matching the C++ piano_core.cpp signal path exactly, so that the
+        baked rms_gain produces the correct output level in the player.
+        """
+        vel_gain  = ((vel_idx+1)/8.0)**VEL_GAMMA
+        audio     = _render_note_rms_ref(
+            partials, phi_diff, attack_tau, A_noise, centroid_hz,
+            eq_biquads, sr, duration,
+        )
+        rms = float(np.sqrt(np.mean(audio**2) + 1e-12))
+        return ((target_rms * vel_gain) / rms) if rms > 1e-10 else 1.0
 
     def _fit_eq_biquads(self, sample: dict, sr: int) -> list:
         """Fit EQ biquads from spectral_eq data if present."""
@@ -418,19 +426,32 @@ class SoundbankExporter:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_note_rms_ref(
-    partials: list, phi_diff: float, sr: int, duration: float
+    partials:    list,
+    phi_diff:    float,
+    attack_tau:  float,
+    A_noise:     float,
+    centroid_hz: float,
+    eq_biquads:  list,
+    sr:          int,
+    duration:    float,
 ) -> np.ndarray:
     """
-    Render one note (no noise, rms_gain=1) to compute the calibrated rms_gain.
-    Matches the piano_core.cpp algorithm exactly (same as export_soundbank_params.py).
+    Render one note (rms_gain=1) matching the piano_core.cpp signal path:
+      1. Partials — 2-string model, bi-exp envelope
+      2. Attack noise — 1-pole IIR low-pass at centroid_hz (independent L+R averaged)
+      3. Spectral EQ — biquad cascade (Direct Form II, same coeffs as C++)
+
+    Result is mono (L+R average). Used exclusively to calibrate rms_gain so that
+    the C++ player output hits target_rms * vel_gain after applying all three stages.
     """
-    N      = int(duration*sr)
-    inv_sr = np.float32(1.0)/np.float32(sr)
+    N      = int(duration * sr)
+    inv_sr = np.float32(1.0) / np.float32(sr)
     t_idx  = np.arange(N, dtype=np.float32)
-    t_f    = t_idx*inv_sr
-    tpi2   = np.float32(2.0*math.pi)*t_f
+    t_f    = t_idx * inv_sr
+    tpi2   = np.float32(2.0 * math.pi) * t_f
     audio  = np.zeros(N, dtype=np.float32)
 
+    # 1. Partials (2-string model, matches C++ processBlock)
     for p in partials:
         tau1    = np.float32(p["tau1"])
         tau2    = np.float32(p["tau2"])
@@ -440,16 +461,43 @@ def _render_note_rms_ref(
         beat_hz = np.float32(p["beat_hz"])
         phi     = np.float32(p["phi"])
 
-        df       = np.exp(np.float32(-1.0)/np.maximum(tau1*np.float32(sr), np.float32(1.0)))
-        ds       = np.exp(np.float32(-1.0)/np.maximum(tau2*np.float32(sr), np.float32(1.0)))
+        df       = np.exp(np.float32(-1.0) / np.maximum(tau1 * np.float32(sr), np.float32(1.0)))
+        ds       = np.exp(np.float32(-1.0) / np.maximum(tau2 * np.float32(sr), np.float32(1.0)))
         env_fast = np.power(df, t_idx)
         env_slow = np.power(ds, t_idx)
-        env      = a1*env_fast + (np.float32(1.0)-a1)*env_slow
+        env      = a1 * env_fast + (np.float32(1.0) - a1) * env_slow
 
-        phase_c = tpi2*f_hz + phi
-        phase_b = tpi2*(beat_hz*np.float32(0.5))
+        phase_c = tpi2 * f_hz + phi
+        phase_b = tpi2 * (beat_hz * np.float32(0.5))
         s1      = np.cos(phase_c + phase_b)
         s2      = np.cos(phase_c - phase_b + np.float32(phi_diff))
-        audio  += A0*env*(s1+s2)*np.float32(0.5)
+        audio  += A0 * env * (s1 + s2) * np.float32(0.5)
+
+    # 2. Attack noise — 1-pole IIR low-pass (centroid_hz), envelope-gated
+    #    Matches C++ initVoice + processBlock noise section.
+    #    Use deterministic seed so rms_gain is reproducible.
+    rng      = np.random.default_rng(0)
+    alp      = float(1.0 - math.exp(-2.0 * math.pi * min(centroid_hz, sr * 0.45) / sr))
+    tau_n    = max(float(attack_tau), 1e-4)
+    nenv     = np.exp(-t_f / np.float32(tau_n)).astype(np.float32)
+    # Average of two independent channels (L+R) for mono estimate
+    for _ in range(2):
+        raw = rng.standard_normal(N).astype(np.float32)
+        # Apply 1-pole IIR in-place
+        y = 0.0
+        for i in range(N):
+            y = alp * float(raw[i]) + (1.0 - alp) * y
+            raw[i] = np.float32(y)
+        audio += np.float32(A_noise) * raw * nenv * np.float32(0.5)
+
+    # 3. Spectral EQ biquad cascade (Direct Form II)
+    #    Converts eq_biquads list → scipy sos array and applies to mono signal.
+    if eq_biquads:
+        sos = np.array(
+            [[bq["b"][0], bq["b"][1], bq["b"][2], 1.0, bq["a"][0], bq["a"][1]]
+             for bq in eq_biquads],
+            dtype=np.float64,
+        )
+        audio = sosfilt(sos, audio.astype(np.float64)).astype(np.float32)
 
     return audio
