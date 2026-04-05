@@ -413,7 +413,7 @@ class SoundbankExporter:
             return []
 
     def _write(self, out: dict, out_path: str) -> None:
-        print(f"\nTotal: {out['n_notes']} notes")
+        print(f"\nTotal: {len(out['notes'])} notes")
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         with open(out_path, "w") as f:
             json.dump(out, f, separators=(",", ":"))

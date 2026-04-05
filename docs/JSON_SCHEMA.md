@@ -9,14 +9,18 @@ Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core
 
 ```json
 {
-  "source":     "nn-hybrid:model",
-  "sr":         48000,
-  "target_rms": 0.06,
-  "vel_gamma":  0.7,
-  "k_max":      60,
-  "rng_seed":   0,
-  "duration_s": 3.0,
-  "n_notes":    704,
+  "metadata": {
+    "instrument_name": "pl-grand",
+    "midi_range_from": 21,
+    "midi_range_to":   108,
+    "source":          "soundbank:params",
+    "sr":              48000,
+    "target_rms":      0.06,
+    "vel_gamma":       0.7,
+    "k_max":           60,
+    "rng_seed":        0,
+    "duration_s":      3.0
+  },
   "notes": {
     "m060_vel3": { ... },
     ...
@@ -26,19 +30,29 @@ Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core
 
 ---
 
-## 1. Bank-level klíče (top-level)
+## 1. Bank-level klíče
+
+### 1a. Top-level
 
 | Klíč | Typ | Popis | Čte C++ |
 |---|---|---|---|
-| `source` | string | Označení původu: `"soundbank:params"` / `"nn-hybrid:model"` / `"nn-pure:model"` | ne |
-| `sr` | int | Sample rate (44100 nebo 48000) | ne (informativní) |
-| `target_rms` | float | Cílová RMS úroveň pro normalizaci | ne (bake do `rms_gain`) |
-| `vel_gamma` | float | Gamma křivka velocity (default 0.7) | ne (bake do `rms_gain`) |
-| `k_max` | int | Maximální počet parciálů (60) | ne |
-| `rng_seed` | int | Základní seed pro generování fází φ a φ_diff | ne (bake do `phi`, `phi_diff`) |
-| `duration_s` | float | Délka renderovaných not v sekundách | ne |
-| `n_notes` | int | Celkový počet not v bance | ne |
+| `metadata` | object | Metadata banky — viz 1b | ne (ignoruje) |
 | `notes` | object | Slovník not, klíč = `"m{midi:03d}_vel{vel}"` | ✓ |
+
+### 1b. `metadata` objekt
+
+| Klíč | Typ | Popis |
+|---|---|---|
+| `instrument_name` | string | Název nástroje; nastavuje uživatel |
+| `midi_range_from` | int | Nejnižší MIDI nota s naměřenými vzorky |
+| `midi_range_to` | int | Nejvyšší MIDI nota s naměřenými vzorky |
+| `source` | string | `"extracted"` / `"soundbank:params"` / `"nn-hybrid:model"` / `"nn-pure:model"` / `"dna"` |
+| `sr` | int | Sample rate (44100 nebo 48000) |
+| `target_rms` | float | Cílová RMS úroveň pro normalizaci (bake do `rms_gain`) |
+| `vel_gamma` | float | Gamma křivka velocity (default 0.7) |
+| `k_max` | int | Maximální počet parciálů (60) |
+| `rng_seed` | int | Seed pro generování fází φ a φ_diff |
+| `duration_s` | float | Délka renderovaných not v sekundách |
 
 ---
 
@@ -52,7 +66,6 @@ Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core
 | `vel` | int | — | extrakce | meta | meta | — | Velocity index 0–7 |
 | `f0_hz` | float | per-(midi,vel) | extraktor → NN | ✓ (noteOn) | ✓ editovatelný | ✓ | Základní frekvence v Hz |
 | `B` | float | **per-MIDI** (stejná hodnota pro všech 8 vel) | BSplneFitter (1D spline přes MIDI) | ✓ (přepočet `f_hz`) | ✓ editovatelný | ✓ (→ všechny vel) | Koeficient inharmonicity; `f_k = k·f0·√(1+B·k²)` |
-| `K_valid` | int | per-(midi,vel) | exporter (délka `partials`) | ✗ ignoruje | meta | — | Počet validních parciálů; C++ čte délku `partials` array |
 
 ### 2b. Obálka a šum
 
@@ -82,7 +95,7 @@ Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core
 
 | Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
 |---|---|---|---|---|---|---|---|
-| `_interpolated` | bool | per-(midi,vel) | exporter (z `generate_profile_exp`) | `s.value(..., false)` | ✗ | ✗ | `true` = nota generována NN; absence klíče = `false` = měřená nota. Zobrazeno v GUI jako `[NN]` / `[MEASURED]` |
+| `is_interpolated` | bool | per-(midi,vel) | exporter (z `generate_profile_exp`) | `s.value(..., false)` | ✗ | ✗ | `true` = nota generována NN; absence klíče = `false` = měřená nota. Zobrazeno v GUI jako `[NN]` / `[MEASURED]` |
 
 ---
 
@@ -170,10 +183,10 @@ vel_gain = ((vel+1)/8)^vel_gamma
 
 | Komponenta | Čte klíče |
 |---|---|
-| **C++ `loadBankJson`** | `midi`, `vel`, `phi_diff`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `f0_hz`, `B`, `_interpolated`, `partials[k, f_hz, A0, tau1, tau2, a1, beat_hz, phi]`, `eq_biquads[b, a]` |
+| **C++ `loadBankJson`** | `midi`, `vel`, `phi_diff`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `f0_hz`, `B`, `is_interpolated`, `partials[k, f_hz, A0, tau1, tau2, a1, beat_hz, phi]`, `eq_biquads[b, a]` |
 | **C++ `setNoteParam`** | `f0_hz`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `phi_diff`, `B` (→ všechny vel) |
 | **C++ `setNotePartialParam`** | `f_hz`, `A0`, `tau1`, `tau2`, `a1`, `beat_hz`, `phi` |
 | **Editor (layer registry)** | `f0_hz`, `B`, `attack_tau`, `A_noise`, `rms_gain`; partial: `f_hz`, `A0`, `tau1`, `tau2`, `a1`, `beat_hz`, `phi` |
 | **Editor (EQ editor)** | `spectral_eq`, `eq_biquads` |
 | **spline_fix** | Všechny skalární note-level + partial parametry kromě `midi`, `vel`, `phi_diff`, `phi`, `spectral_eq`, `eq_biquads` |
-| **GUI LAST NOTE** | `midi`, `vel`, `f0_hz`, `B`, `_interpolated`, partial tabulka, EQ křivka |
+| **GUI LAST NOTE** | `midi`, `vel`, `f0_hz`, `B`, `is_interpolated`, partial tabulka, EQ křivka |
