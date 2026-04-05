@@ -98,7 +98,7 @@ def _select_auto_anchors(
     """
     midi_scores: dict[int, list[float]] = {}
     for key, note in notes.items():
-        if note.get("isis_interpolated", False):
+        if note.get("is_interpolated", False):
             continue
         if ref_keys is not None and key not in ref_keys:
             continue
@@ -146,7 +146,7 @@ _LOG_EPS = 1e-12   # guard against log(0)
 
 _SKIP_TOP = {"midi", "vel", "partials", "spectral_eq",
              "eq_biquads", "duration_s", "phi_diff",
-             "isis_interpolated", "sr", "n_partials"}
+             "is_interpolated", "sr", "n_partials"}
 
 
 def _detect_layers(notes: dict) -> list[str]:
@@ -219,7 +219,7 @@ def _extract_layer_vel(notes: dict, layer_id: str, vel: int,
         if not key.endswith(suffix):
             continue
         if measured_only:
-            if note.get("isis_interpolated", False):
+            if note.get("is_interpolated", False):
                 continue
             if ref_keys is not None and key not in ref_keys:
                 continue
@@ -243,7 +243,7 @@ def is_interpolated_midis_vel(notes: dict, vel: int,
         if not key.endswith(suffix):
             continue
         midi = int(key[1:4])
-        if note.get("isis_interpolated", False):
+        if note.get("is_interpolated", False):
             result.add(midi)
         elif ref_keys is not None and key not in ref_keys:
             result.add(midi)
@@ -361,7 +361,7 @@ def _get_max_partials_per_vel(
     """Return {vel: max_partial_count} across all measured notes."""
     result: dict[int, int] = {}
     for key, note in notes.items():
-        if note.get("isis_interpolated", False):
+        if note.get("is_interpolated", False):
             continue
         if ref_keys is not None and key not in ref_keys:
             continue
@@ -456,7 +456,7 @@ def apply_spline_fix_bank(
     if extend_partials and (fixis_interpolated or smooth_all):
         max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
         for key, note in out_notes.items():
-            is_nn = note.get("isis_interpolated", False) or (
+            is_nn = note.get("is_interpolated", False) or (
                 ref_keys is not None and key not in ref_keys)
             # post-training: extend only NN notes; pre-training (smooth_all): extend all
             if fixis_interpolated and not is_nn:
@@ -552,13 +552,14 @@ def json_notes_to_samples(notes: dict, duration_s: float = 3.0) -> dict:
             "attack_tau":        float(note.get("attack_tau",        0.05)),
             "A_noise":           float(note.get("A_noise",           0.04)),
             "noise_centroid_hz": float(note.get("noise_centroid_hz", 3000.0)),
+            "stereo_width":      float(note.get("stereo_width",      1.0)),
             "partials":          partials,
         }
         for k in ("spectral_eq",):
             if note.get(k):
                 sample[k] = note[k]
-        if note.get("isis_interpolated"):
-            sample["isis_interpolated"] = True
+        if note.get("is_interpolated"):
+            sample["is_interpolated"] = True
         samples[key] = sample
     return samples
 
@@ -624,7 +625,7 @@ def run(args):
         # Print score table
         midi_scores: dict[int, list[float]] = {}
         for key, note in notes.items():
-            if note.get("isis_interpolated", False):
+            if note.get("is_interpolated", False):
                 continue
             if ref_keys is not None and key not in ref_keys:
                 continue
@@ -639,7 +640,7 @@ def run(args):
         print("-" * 50)
         for m in sorted(auto):
             note_ex = next((n for k, n in notes.items()
-                            if int(k[1:4]) == m and not n.get("isis_interpolated")), None)
+                            if int(k[1:4]) == m and not n.get("is_interpolated")), None)
             if note_ex:
                 p0   = (note_ex.get("partials") or [{}])[0]
                 tau1 = max(float(p0.get("tau1", 1.0)), 1e-4)
@@ -677,7 +678,7 @@ def run(args):
     if getattr(args, "extend_partials", False) and args.fixis_interpolated and not report_only:
         max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
         for key, note in out_notes.items():
-            is_nn = note.get("isis_interpolated", False) or (
+            is_nn = note.get("is_interpolated", False) or (
                 ref_keys is not None and key not in ref_keys)
             if not is_nn:
                 continue

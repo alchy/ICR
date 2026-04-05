@@ -58,13 +58,13 @@ def _feat_B(s: dict) -> Optional[float]:
 
 def _feat_tau1_mean(s: dict) -> Optional[float]:
     parts = s.get("partials", [])[:_N_STAT]
-    vals  = [p["tau1"] for p in parts if p.get("tau1", 0) > 0]
+    vals  = [p["tau1"] for p in parts if (p.get("tau1") or 0) > 0]
     return float(np.mean(vals)) if vals else None
 
 
 def _feat_A0_mean(s: dict) -> Optional[float]:
     parts = s.get("partials", [])[:_N_STAT]
-    vals  = [p["A0"] for p in parts if p.get("A0", 0) > 0]
+    vals  = [p["A0"] for p in parts if (p.get("A0") or 0) > 0]
     return float(np.mean(vals)) if vals else None
 
 

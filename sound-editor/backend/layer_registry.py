@@ -151,8 +151,7 @@ def build_layers_from_schema(schema: dict) -> dict[str, list]:
 
     # EQ (one layer per array key — treated as a special curve layer)
     EQ_HINTS = {
-        "gains_db":           {"label": "EQ Gains (dB)", "min": -24.0, "max": 24.0, "color": "#ff8"},
-        "stereo_width_factor": {"label": "Stereo Width",  "min": 0.0,   "max": 2.0,  "color": "#f8a"},
+        "gains_db": {"label": "EQ Gains (dB)", "min": -24.0, "max": 24.0, "color": "#ff8"},
     }
     for key in schema.get("eq", []):
         h = EQ_HINTS.get(key, {})

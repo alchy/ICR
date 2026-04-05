@@ -137,10 +137,13 @@ class DifferentiableRenderer:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _n_strings(midi: int) -> int:
-    """Number of strings per note. Matches piano_core.cpp (always 2-string model
-    for midi > 27; deep bass uses a single string)."""
+    """Acoustic string count — mirrors C++ piano_core.cpp model:
+      MIDI ≤ 27: 1 string (bass)
+      MIDI 28-48: 2 strings (tenor)
+      MIDI > 48: 3 strings symmetric (treble)"""
     if midi <= 27: return 1
-    return 2
+    if midi <= 48: return 2
+    return 3
 
 
 def _pan_gains(angle: float) -> tuple:
@@ -149,11 +152,12 @@ def _pan_gains(angle: float) -> tuple:
 
 
 def _string_angles(midi: int, n_str: int, pan_spread: float) -> list:
-    """Pan angle per string. Bass=left, treble=right (±0.20 rad)."""
+    """Pan angle per string. Bass=left, treble=right.
+    Matches C++: 1-string=center, 2-string=±half, 3-string=left/center/right."""
     center = math.pi/4 + (midi-64.5)/87.0*0.20
-    if n_str == 1:  return [center]
+    if n_str == 1: return [center]
     half = pan_spread/2
-    if n_str == 2:  return [center-half, center+half]
+    if n_str == 2: return [center-half, center+half]
     return [center-half, center, center+half]
 
 
@@ -293,30 +297,31 @@ def _synthesize_note(
                 else np.exp(-t/tau1))
         beat = (p.get("beat_hz", 0.0) or 0.0)*beat_scale
 
+        # String model matching C++ piano_core.cpp:
+        #   1-string (MIDI≤27): single oscillator at f
+        #   2-string (28–48):   s1=cos((f+beat/2)t), s2=cos((f-beat/2)t)
+        #   3-string (MIDI>48): symmetric — s1=cos((f-beat)t), s2=cos(ft), s3=cos((f+beat)t)
+        #   beat_hz is the inner-pair detuning; outer pair beats at 2*beat_hz.
         if n_str == 1:
             phi = rng.uniform(0, 2*math.pi)
-            s   = amp*env*np.cos(2*math.pi*f*t+phi)
+            s   = amp*env*np.cos(2*math.pi*f*t + phi)
             gl, gr = _pan_gains(angles[0])
             L += s*gl; R += s*gr
-        elif beat < 0.05 and n_str > 1:
-            phis = rng.uniform(0, 2*math.pi, n_str)
-            oscs = [np.cos(2*math.pi*f*t+phis[i]) for i in range(n_str)]
-            for i in range(n_str):
-                gl, gr = _pan_gains(angles[i])
-                s = amp*env*oscs[i]/n_str
-                L += s*gl; R += s*gr
         elif n_str == 2:
             pa, pb = rng.uniform(0, 2*math.pi, 2)
-            sa = amp*env*np.cos(2*math.pi*(f+beat/2)*t+pa)
-            sb = amp*env*np.cos(2*math.pi*(f-beat/2)*t+pb)
+            if beat < 0.05:
+                sa = amp*env*np.cos(2*math.pi*f*t + pa)
+                sb = amp*env*np.cos(2*math.pi*f*t + pb)
+            else:
+                sa = amp*env*np.cos(2*math.pi*(f + beat/2)*t + pa)
+                sb = amp*env*np.cos(2*math.pi*(f - beat/2)*t + pb)
             gla, gra = _pan_gains(angles[0]); glb, grb = _pan_gains(angles[1])
             L += (sa*gla + sb*glb)*0.5; R += (sa*gra + sb*grb)*0.5
-        else:
+        else:  # n_str == 3, treble
             pa, pb, pc = rng.uniform(0, 2*math.pi, 3)
-            d  = beat/2
-            sa = amp*env*np.cos(2*math.pi*(f-d)*t+pa)
-            sb = amp*env*np.cos(2*math.pi*f*t+pb)
-            sc = amp*env*np.cos(2*math.pi*(f+d)*t+pc)
+            sa = amp*env*np.cos(2*math.pi*(f - beat)*t + pa)   # outer left
+            sb = amp*env*np.cos(2*math.pi*f*t + pb)            # center
+            sc = amp*env*np.cos(2*math.pi*(f + beat)*t + pc)   # outer right
             gla, gra = _pan_gains(angles[0])
             glb, grb = _pan_gains(angles[1])
             glc, grc = _pan_gains(angles[2])
@@ -378,10 +383,8 @@ def _synthesize_note(
             scale = min(target_rms/rms_post, 0.95/np.abs(stereo).max())
             stereo = stereo*scale
 
-    # Stereo width scaling
-    width_factor = 1.0
-    if eq_data:
-        width_factor = float(eq_data.get("stereo_width_factor", 1.0) or 1.0)
+    # Stereo width scaling — read from flat key (exported by exporter.py)
+    width_factor = float(params.get("stereo_width", 1.0) or 1.0)
     if abs(width_factor*stereo_boost - 1.0) > 0.01:
         stereo = _apply_stereo_width(stereo, width_factor, stereo_boost)
         rms_w  = math.sqrt(np.mean(stereo**2))

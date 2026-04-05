@@ -34,9 +34,9 @@ Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core
 
 ### 1a. Top-level
 
-| Klíč | Typ | Popis | Čte C++ |
+| Klíč | Typ | Popis | C++ |
 |---|---|---|---|
-| `metadata` | object | Metadata banky — viz 1b | ne (ignoruje) |
+| `metadata` | object | Metadata banky — viz 1b | ignoruje |
 | `notes` | object | Slovník not, klíč = `"m{midi:03d}_vel{vel}"` | ✓ |
 
 ### 1b. `metadata` objekt
@@ -46,86 +46,101 @@ Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core
 | `instrument_name` | string | Název nástroje; nastavuje uživatel |
 | `midi_range_from` | int | Nejnižší MIDI nota s naměřenými vzorky |
 | `midi_range_to` | int | Nejvyšší MIDI nota s naměřenými vzorky |
-| `source` | string | `"extracted"` / `"soundbank:params"` / `"nn-hybrid:model"` / `"nn-pure:model"` / `"dna"` |
+| `source` | string | `"soundbank:params"` / `"nn-hybrid:model"` / `"nn-pure:model"` / `"dna"` |
 | `sr` | int | Sample rate (44100 nebo 48000) |
-| `target_rms` | float | Cílová RMS úroveň pro normalizaci (bake do `rms_gain`) |
+| `target_rms` | float | Cílová RMS úroveň (bake do `rms_gain`) |
 | `vel_gamma` | float | Gamma křivka velocity (default 0.7) |
-| `k_max` | int | Maximální počet parciálů (60) |
+| `k_max` | int | Max počet parciálů (60) |
 | `rng_seed` | int | Seed pro generování fází φ a φ_diff |
 | `duration_s` | float | Délka renderovaných not v sekundách |
 
 ---
 
-## 2. Note-level klíče (v každé notě)
+## 2. Crosscheck — note-level klíče
 
-### 2a. Identifikace a fyzika (skaláry)
+Legenda sloupců:
 
-| Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
-|---|---|---|---|---|---|---|---|
-| `midi` | int | — | extrakce | meta | meta | — | MIDI nota 21–108 |
-| `vel` | int | — | extrakce | meta | meta | — | Velocity index 0–7 |
-| `f0_hz` | float | per-(midi,vel) | extraktor → NN | ✓ (noteOn) | ✓ editovatelný | ✓ | Základní frekvence v Hz |
-| `B` | float | **per-MIDI** (stejná hodnota pro všech 8 vel) | BSplneFitter (1D spline přes MIDI) | ✓ (přepočet `f_hz`) | ✓ editovatelný | ✓ (→ všechny vel) | Koeficient inharmonicity; `f_k = k·f0·√(1+B·k²)` |
+| Sloupec | Význam |
+|---|---|
+| **Dep** | Závislost: `m` = per-MIDI, `m,v` = per-(midi,vel), `m,v,k` = per-(midi,vel,k) |
+| **Extractor** | Zdroj hodnoty před exportem |
+| **JSON** | Přítomen v soundbank JSON (`cond.` = jen pokud != false/None) |
+| **C++ load** | Načítáno funkcí `loadBankJson()` / `load()` |
+| **C++ synth** | Použito v syntézním výpočtu (`processBlock`) |
+| **C++ set** | Editovatelné přes `setNoteParam` / `setNotePartialParam` |
+| **GUI viz** | Zobrazeno v panelu Last Note (`getVizState`) |
+| **GUI edit** | Editovatelné v layer editoru |
+| **SysEx** | Přenášeno přes SysEx protokol |
 
-### 2b. Obálka a šum
+### 2a. Nota — identifikace
 
-| Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
-|---|---|---|---|---|---|---|---|
-| `attack_tau` | float | per-(midi,vel) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Časová konstanta náběhu šumu (s) |
-| `A_noise` | float | per-(midi,vel) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Amplituda šumové složky |
-| `noise_centroid_hz` | float | per-(midi,vel) | extraktor (`noise.centroid_hz`) | ✓ (1-pole IIR) | ✓ editovatelný | ✓ | Frekvence přechodu 1-pólového dolnopropustného filtru pro barvení šumu; výchozí 3000 Hz |
+| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `midi` | — | extr | ✓ | meta | meta | — | ✓ | — | — | MIDI nota 21–108 |
+| `vel` | — | extr | ✓ | meta | meta | — | ✓ | — | — | Velocity index 0–7 |
+| `is_interpolated` | m,v | exporter | cond. | ✓ | — | — | ✓ badge | — | — | `true` = NN nota; zobrazí `[NN]` / `[MEASURED]` |
 
-### 2c. Normalizace a stereo
+### 2b. Nota — fyzika
 
-| Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
-|---|---|---|---|---|---|---|---|
-| `rms_gain` | float | per-(midi,vel) | exporter (RMS kalibrace) | ✓ | ✓ editovatelný | ✓ | Zesílení pro dosažení `target_rms`; přepočítáno při exportu |
-| `phi_diff` | float | per-(midi,vel) | exporter (RNG: `uniform(0, 2π)`) | ✓ | ✗ | ✗ | Fázový offset mezi strunami 1 a 2 v 2-string modelu; generuje stereo dekorelaci |
+| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `f0_hz` | m,v | extr→NN | ✓ | ✓ | noteOn | ✓ | ✓ | ✓ | ✓ `0x01` | Základní frekvence Hz |
+| `B` | **m** | BSplineFitter | ✓ | ✓ | přepočet `f_hz` | ✓ (→ všechny vel) | ✓ | ✓ | ✓ `0x02` | Inharmonicita; `f_k = k·f0·√(1+B·k²)` |
 
-### 2d. Spektrální EQ
+### 2c. Nota — šum
 
-| Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
-|---|---|---|---|---|---|---|---|
-| `eq_biquads` | array | per-(midi,vel) | EQFitter → exporter (biquad fit) | ✓ (IIR filtr) | ✓ (EQ editor) | ✗ | Kaskáda 5 min-phase IIR biquad sekcí; formát viz níže |
-| `spectral_eq` | object | per-(midi,vel) | EQFitter (LTASE měření) | ✗ ignoruje | ✓ (EQ editor) | ✗ | Surová EQ křivka `{freqs_hz: [...], gains_db: [...], stereo_width_factor: float}` použitá pro biquad fit; uložena pro re-fit po editaci |
+| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `attack_tau` | m,v | extr→NN | ✓ | ✓ | noise env decay | ✓ | ✓ | ✓ | ✓ `0x03` | Časová konstanta náběhu šumu (s) |
+| `A_noise` | m,v | extr→NN | ✓ | ✓ | noise amplitude | ✓ | — | ✓ | ✓ `0x04` | Amplituda šumové složky |
+| `noise_centroid_hz` | m,v | extr | ✓ | ✓ | 1-pole IIR | ✓ | ✓ | ✓ | ✗ ¹ | Cutoff 1-pólového IIR filtru pro barvení šumu; default 3000 Hz |
 
-`spectral_eq` obsahuje také klíč `stereo_width_factor` (float, výchozí 1.0) — ratio levého vs. pravého kanálu pro stereo rozšíření EQ. Produkuje ho `eq_fitter.py`, čte `synthesizer.py`; C++ player ho ignoruje (stereo je řešeno 2-string modelem a pan záběrem).
+> ¹ `noise_centroid_hz` chybí v `noteParamKey()` v `core_engine.cpp` — SysEx ID není přiřazeno (existující mezera, ID `0x07` volné).
 
-### 2e. Metadata
+### 2d. Nota — normalizace a stereo
 
-| Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
-|---|---|---|---|---|---|---|---|
-| `is_interpolated` | bool | per-(midi,vel) | exporter (z `generate_profile_exp`) | `s.value(..., false)` | ✗ | ✗ | `true` = nota generována NN; absence klíče = `false` = měřená nota. Zobrazeno v GUI jako `[NN]` / `[MEASURED]` |
+| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `rms_gain` | m,v | exporter (RMS kalib.) | ✓ | ✓ | vel-scaled gain | ✓ | — | ✓ | ✓ `0x05` | Zesílení pro dosažení `target_rms`; kalibrováno nad mono M kanálem — invariantní vůči M/S |
+| `phi_diff` | m,v | exporter (RNG) | ✓ | ✓ | phase string 2 | ✓ | — | ✗ | ✗ | Fázový offset mezi strunami 1 a 2; `s2 = cos(…+phi+phi_diff)` |
+| `stereo_width` | m,v | EQFitter | ✓ | ✓ | M/S post-EQ | ✓ | ✓ | ✓ | ✗ | M/S korekce šíře: `S *= w`, kde `M=(L+R)/2`, `S=(L-R)/2`. Měřeno jako `rms(origS)/rms(origM) ÷ rms(synS)/rms(synM)`; `1.0` = bez korekce (NN noty) |
 
----
+### 2e. Nota — spektrální EQ
 
-## 3. Partial-level klíče (v poli `partials`)
-
-Každá nota má pole `partials` — jeden objekt per parciál (max 60).
-
-| Klíč | Typ | Závislost | Původ | C++ synth | Editor | SysEx | Popis |
-|---|---|---|---|---|---|---|---|
-| `k` | int | per-(midi,vel,k) | extraktor | ✓ (index pro B-recompute) | meta | — | Index parciálu, 1-based; pro longitudinální parciály může být nelineární |
-| `f_hz` | float | per-(midi,vel,k) | `k·f0·√(1+B·k²)` bake | ✓ (oscilátor) | ✓ editovatelný | ✓ | Frekvence parciálu v Hz; přepočítána při `setNoteParam("B")` |
-| `A0` | float | per-(midi,vel,k) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Amplituda parciálu |
-| `tau1` | float | per-(midi,vel,k) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Rychlá časová konstanta bi-exp obálky (s) |
-| `tau2` | float | per-(midi,vel,k) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Pomalá časová konstanta bi-exp obálky (s); `tau2 ≥ tau1` |
-| `a1` | float | per-(midi,vel,k) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Váha rychlé složky: `a1·exp(−t/τ1) + (1−a1)·exp(−t/τ2)`; `a1 = 1.0` = mono-exponenciální |
-| `beat_hz` | float | per-(midi,vel,k) | extraktor → NN | ✓ | ✓ editovatelný | ✓ | Frekvence beatingu (rozladění strun) v Hz; `0` = mono struna |
-| `phi` | float | per-(midi,vel,k) | exporter (RNG: `uniform(0, 2π)`) | ✓ | ✓ editovatelný | ✓ | Počáteční fáze struna 1 (rad) |
+| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `eq_biquads` | m,v | EQFitter→exporter | ✓ | ✓ | IIR EQ kaskáda | — | ✓ (mag.) | ✓ (EQ edit) | ✗ | 5 biquad sekcí (Direct Form II), formát viz sekce 4 |
+| `spectral_eq` | m,v | EQFitter | ✓ | ✗ | — | — | — | ✓ (re-fit) | ✗ | Surová EQ křivka `{freqs_hz, gains_db, stereo_width_factor}` pro editor re-fit; `stereo_width_factor` → flat `stereo_width` při exportu |
 
 ---
 
-## 3b. Klíče pouze v extraktoru (nejsou exportovány do soundbank JSON)
+## 3. Crosscheck — partial-level klíče
 
-Tyto klíče existují ve výstupu `extractor.py` (v souborech `definition.json`), ale exporter je do finálního soundbank JSON **nezapisuje**. Jsou zde dokumentovány, aby bylo jasné, proč tam nejsou.
+Každá nota má pole `partials` — max 60 objektů.
 
-| Klíč | Úroveň | Popis | Proč se neexportuje |
-|---|---|---|---|
-| `n_strings` | note | Počet fyzikálních strun pro MIDI notu (1 = basy, 2 = střední, 3 = výšky) | C++ player vždy používá 2-string model bez ohledu na MIDI notu. Exporter to zarovnává tím, že nikdy neexportuje `n_strings`. |
-| `beat_depth` | partial | Hloubka amplitudové modulace beatingu (0–1) | C++ neimplementuje AM beating — pouze PM (fázová modulace přes `beat_hz`). Exporter `beat_hz` exportuje a `beat_depth` tichce zahazuje. |
-| `mono` | partial | `true` = parciál pochází z jedné struny (žádný beating) | Exporter místo toho při `mono=True` nastaví `beat_hz=0.0`. C++ automaticky detekuje `beat_hz≈0` a přeskočí výpočet druhé struny. |
-| `is_longitudinal` | partial | `true` = longitudinální parciál (jiná fyzika rozladění) | C++ nemá speciální logiku pro longitudinální parciály. Exporter je zahrne s jejich `f_hz` a standardními parametry bez příznaků. |
+| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `k` | m,v,k | extr | ✓ | meta | B-recompute idx | — | ✓ | — | — | Index parciálu, 1-based |
+| `f_hz` | m,v,k | `k·f0·√(1+B·k²)` bake | ✓ | ✓ | oscilátor | ✓ | ✓ | ✓ | ✓ `0x10` | Frekvence parciálu Hz; přepočítána při `setNoteParam("B")` |
+| `A0` | m,v,k | extr→NN | ✓ | ✓ | amplituda | ✓ | ✓ | ✓ | ✓ `0x11` | Amplituda parciálu |
+| `tau1` | m,v,k | extr→NN | ✓ | ✓ | env fast τ | ✓ | ✓ | ✓ | ✓ `0x12` | Rychlá τ bi-exp obálky (s) |
+| `tau2` | m,v,k | extr→NN | ✓ | ✓ | env slow τ | ✓ | ✓ | ✓ | ✓ `0x13` | Pomalá τ (s); `τ2 ≥ τ1` |
+| `a1` | m,v,k | extr→NN | ✓ | ✓ | env mix | ✓ | ✓ | ✓ | ✓ `0x14` | Váha rychlé složky; `a1=1.0` = mono-exp |
+| `beat_hz` | m,v,k | extr→NN | ✓ | ✓ | detuning PM | ✓ | ✓ | ✓ | ✓ `0x15` | Frekvence beatingu Hz; `0` = mono struna |
+| `phi` | m,v,k | exporter (RNG) | ✓ | ✓ | phase string 1 | ✓ | — | ✓ | ✓ `0x16` | Počáteční fáze string 1 (rad) |
+
+---
+
+## 3b. Klíče extraktoru (nejsou v soundbank JSON)
+
+Existují ve výstupu `extractor.py`, exporter je do JSON **nezapisuje**.
+
+| Klíč | Úroveň | Extractor | JSON | Proč chybí |
+|---|---|---|---|---|
+| `n_strings` | note | ✓ | ✗ | Akustický počet strun: 1 (MIDI ≤27 bas), 2 (28–48 tenor), **3 (≥49 treble)**. C++ `initVoice` nastaví `n_model_strings` identicky dle MIDI a renderuje odpovídající model (viz sekce 5). `rms_gain` kalibrován pro stejný model → Python synthesizer a C++ jsou v souladu. |
+| `beat_depth` | partial | ✓ | ✗ | C++ neimplementuje AM beating; exporter nastaví `beat_hz=0.0` |
+| `mono` | partial | ✓ | ✗ | Exporter → `beat_hz=0.0`; C++ detekuje `beat_hz≈0` automaticky |
+| `is_longitudinal` | partial | ✓ | ✗ | C++ bez speciální logiky pro longitudinální parciály |
 
 ---
 
@@ -144,27 +159,44 @@ Kaskáda 5 sekcí = 10. řád min-phase IIR filtr.
 
 ---
 
-## 5. Syntézní model (přehled)
+## 5. Syntézní model
 
 ```
 partial[k]:
   env(t) = a1·exp(−t/τ1) + (1−a1)·exp(−t/τ2)   # bi-exp; a1=1 → mono-exp
-  s1(t)  = cos(2π·f_hz·t + 2π·(beat_hz/2)·t + phi)
-  s2(t)  = cos(2π·f_hz·t − 2π·(beat_hz/2)·t + phi + phi_diff)
-  out(t) = A0·env(t)·(s1 + s2)/2
+
+  # 1-string (MIDI ≤ 27 — bas)
+  out(t) = A0·env(t)·cos(2π·f_hz·t + phi)
+
+  # 2-string (MIDI 28–48 — tenor)
+  s1(t) = cos(2π·(f_hz + beat_hz/2)·t + phi)
+  s2(t) = cos(2π·(f_hz − beat_hz/2)·t + phi + phi_diff)
+  out(t) = A0·env(t)·(s1 + s2) / 2
+
+  # 3-string (MIDI > 48 — treble, symetrický)
+  s1(t) = cos(2π·(f_hz − beat_hz)·t + phi)        # vnější levá
+  s2(t) = cos(2π·f_hz·t + phi2)                   # centrální (phi2 náhodná per-noteOn)
+  s3(t) = cos(2π·(f_hz + beat_hz)·t + phi + phi_diff)  # vnější pravá
+  out(t) = A0·env(t)·(s1 + s2 + s3) / 3
+
+  # Stereo pan (konstantní výkon, per-string gain gl/gr)
+  L += out · gl_k ;  R += out · gr_k
 
 noise(t):
   white(t) = randn() · A_noise · exp(−t/attack_tau)
   α = 1 − exp(−2π·noise_centroid_hz/sr)          # 1-pole IIR koef
-  y(t) = α·white(t) + (1−α)·y(t−1)              # barevný šum (levý i pravý nezávisle)
+  y(t) = α·white(t) + (1−α)·y(t−1)              # L, R nezávisle
 
-note(t)  = rms_gain·vel_gain · [Σ partial[k](t) + y(t)]
+note(t)  = rms_gain·vel_gain · [Σ partial[k](t) + noise(t)]
          → biquad EQ cascade (eq_biquads)
+         → M/S: M=(L+R)/2  S=(L-R)/2·stereo_width  L=M+S  R=M-S
 
 vel_gain = ((vel+1)/8)^vel_gamma
 ```
 
-> **rms_gain** je kalibrován nad celou touto signálovou cestou (parciály + IIR šum + EQ) při exportu, aby výstup C++ přesně dosáhl `target_rms`.
+> **rms_gain** kalibrován nad mono M kanálem (= (L+R)/2) — invariantní vůči M/S operaci, takže platí bez přepočtu i po přidání `stereo_width`.
+>
+> **beat_hz sémantika**: u 2-strunného modelu rozteč = `beat_hz/2` na stranu (celková `beat_hz`); u 3-strunného rozteč = `beat_hz` na stranu → 2× větší frekvenční spread, 2 amplitudové nuly za periodu beating.
 
 ---
 
@@ -172,21 +204,7 @@ vel_gain = ((vel+1)/8)^vel_gamma
 
 | Parametr | Per-MIDI | Per-(midi,vel) | Per-(midi,vel,k) |
 |---|---|---|---|
-| `B` | ✓ (BSplneFitter) | | |
-| `f0_hz`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `phi_diff` | | ✓ | |
-| `spectral_eq`, `eq_biquads`, `_interpolated` | | ✓ | |
+| `B` | ✓ (BSplineFitter) | | |
+| `f0_hz`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `phi_diff`, `stereo_width` | | ✓ | |
+| `spectral_eq`, `eq_biquads`, `is_interpolated` | | ✓ | |
 | `f_hz`, `A0`, `tau1`, `tau2`, `a1`, `beat_hz`, `phi` | | | ✓ |
-
----
-
-## 7. Co čte co
-
-| Komponenta | Čte klíče |
-|---|---|
-| **C++ `loadBankJson`** | `midi`, `vel`, `phi_diff`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `f0_hz`, `B`, `is_interpolated`, `partials[k, f_hz, A0, tau1, tau2, a1, beat_hz, phi]`, `eq_biquads[b, a]` |
-| **C++ `setNoteParam`** | `f0_hz`, `attack_tau`, `A_noise`, `noise_centroid_hz`, `rms_gain`, `phi_diff`, `B` (→ všechny vel) |
-| **C++ `setNotePartialParam`** | `f_hz`, `A0`, `tau1`, `tau2`, `a1`, `beat_hz`, `phi` |
-| **Editor (layer registry)** | `f0_hz`, `B`, `attack_tau`, `A_noise`, `rms_gain`; partial: `f_hz`, `A0`, `tau1`, `tau2`, `a1`, `beat_hz`, `phi` |
-| **Editor (EQ editor)** | `spectral_eq`, `eq_biquads` |
-| **spline_fix** | Všechny skalární note-level + partial parametry kromě `midi`, `vel`, `phi_diff`, `phi`, `spectral_eq`, `eq_biquads` |
-| **GUI LAST NOTE** | `midi`, `vel`, `f0_hz`, `B`, `is_interpolated`, partial tabulka, EQ křivka |

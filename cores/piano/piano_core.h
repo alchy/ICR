@@ -2,25 +2,26 @@
 /*
  * synth-core/piano/piano_core.h
  * ──────────────────────────────
- * Faithful C++ port of analysis/torch_synth.py.
+ * PianoCore — additive piano synthesis engine.
  *
- * Synthesis algorithm (matches Python proxy):
- *  - 2-string model per partial:
- *      s1 = cos(2π*f*t + 2π*(beat/2)*t + phi)
- *      s2 = cos(2π*f*t - 2π*(beat/2)*t + phi + phi_diff)
- *      partial = A0 * env * (s1 + s2) / 2
- *  - Bi-exponential envelope: a1*exp(-t/tau1) + (1-a1)*exp(-t/tau2)
- *  - Gaussian noise: A_noise * randn() * exp(-t/attack_tau)
+ * Synthesis algorithm (per-MIDI string model):
+ *  - MIDI ≤ 27 (bass):   1-string   partial = A0·env·cos(2π·f·t + φ)
+ *  - MIDI 28–48 (tenor): 2-string   s1=cos(2π·(f+b/2)·t + φ)
+ *                                    s2=cos(2π·(f−b/2)·t + φ+φ_diff)
+ *                                    partial = A0·env·(s1+s2)/2
+ *  - MIDI > 48 (treble): 3-string symmetric
+ *                                    s1=cos(2π·(f−b)·t + φ)       outer left
+ *                                    s2=cos(2π·f·t + φ2)          centre (φ2 random)
+ *                                    s3=cos(2π·(f+b)·t + φ+φ_diff) outer right
+ *                                    partial = A0·env·(s1+s2+s3)/3
+ *  - Bi-exponential envelope: a1·exp(−t/τ1) + (1−a1)·exp(−t/τ2)
+ *  - Gaussian noise:  A_noise·randn()·exp(−t/attack_tau), 1-pole IIR colour
+ *  - Spectral EQ:     min-phase biquad cascade (Direct Form II)
+ *  - M/S correction:  S *= stereo_width post-EQ
  *  - RMS normalisation: per-note rms_gain pre-computed at export time
  *
- * Parameters are loaded from a JSON file exported by
- *   analysis/export_piano_params.py
- * which runs the trained InstrumentProfile NN model for all 88×8 notes
- * and bakes the results into a format suitable for real-time playback.
- *
- * Phases (phi) are pre-computed in the export script using the same
- * torch.Generator seed as torch_synth.py, enabling byte-comparable
- * partial synthesis.  Noise uses an independent C++ mt19937 PRNG.
+ * Parameters are loaded from a JSON soundbank exported by
+ *   training/modules/exporter.py
  *
  * Threading: same as ISynthCore — see i_synth_core.h.
  */
@@ -72,6 +73,7 @@ struct PianoNoteParam {
     float A_noise            = 0.04f;
     float noise_centroid_hz  = 3000.f; // 1-pole IIR low-pass cutoff for noise colouring
     float rms_gain           = 1.f;
+    float stereo_width       = 1.f;   // M/S correction: S *= stereo_width post-EQ; M unchanged
     float f0_hz              = 440.f;
     float B                  = 0.f;   // inharmonicity; kept so setNoteParam("B") can recompute f_hz[k]
     // Spectral EQ: min-phase IIR fitted from soundbank spectral_eq curve
@@ -94,8 +96,9 @@ struct PianoPartialState {
     float f_hz        = 0.f;
     float beat_hz_h   = 0.f;  // beat_hz * beat_scale * 0.5
     float phi         = 0.f;
-    // Independent random phase offset between string 1 and 2 (per-partial)
-    // Gives true stereo: each partial decorrelated across L/R independently
+    float phi2        = 0.f;  // center string phase (3-string model, MIDI > 48)
+    // Phase offset: string 3 (outer right) relative to string 1 (outer left).
+    // For 2-string model: offset between string 1 and string 2.
     float phi_diff    = 0.f;
 };
 
@@ -129,10 +132,16 @@ struct PianoVoice {
     std::mt19937 rng;
     std::normal_distribution<float> ndist{0.f, 1.f};
 
+    // String model: 1 (bass MIDI≤27), 2 (tenor 28–48), 3 (treble MIDI>48)
+    int n_model_strings = 2;
+
     // Stereo pan gains (constant-power; precomputed at noteOn from MIDI + pan_spread)
-    // gl1/gr1 = string 1 (s1 = carrier+beat/2), gl2/gr2 = string 2 (s2 = carrier-beat/2)
+    // 1-string: gl1/gr1 = center
+    // 2-string: gl1/gr1 = center-half,  gl2/gr2 = center+half
+    // 3-string: gl1/gr1 = center-half,  gl2/gr2 = center,  gl3/gr3 = center+half
     float gl1 = 0.707f, gr1 = 0.707f;
     float gl2 = 0.707f, gr2 = 0.707f;
+    float gl3 = 0.f,    gr3 = 0.f;
 
     // Schroeder all-pass decorrelation state (first-order IIR, independent per channel)
     float decor_str = 0.f;
@@ -142,6 +151,9 @@ struct PianoVoice {
     float ap_y_L    = 0.f;
     float ap_x_R    = 0.f;
     float ap_y_R    = 0.f;
+
+    // M/S stereo width correction (post-EQ): S *= stereo_width; M unchanged
+    float stereo_width  = 1.f;
 
     // Spectral EQ biquad cascade (Direct Form II, independent L/R state)
     int               n_biquad    = 0;

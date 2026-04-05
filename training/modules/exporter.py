@@ -312,7 +312,7 @@ class SoundbankExporter:
         # RMS gain calibration — renders partials + noise + EQ to get true output RMS
         rms_gain = self._compute_rms_gain(
             partials_out, phi_diff, attack_tau, A_noise, centroid_hz,
-            eq_biquads, vel_idx, sr, duration, target_rms,
+            eq_biquads, vel_idx, midi, sr, duration, target_rms,
         )
 
         # Preserve editabe source data alongside baked values
@@ -334,6 +334,13 @@ class SoundbankExporter:
         spectral_eq = sample.get("spectral_eq")
         if spectral_eq:
             note["spectral_eq"] = spectral_eq
+            # stereo_width: extracted from eq_fitter measurement as flat key for C++.
+            # Represents orig_S/orig_M divided by syn_S/syn_M — how much wider/narrower
+            # the original recording is vs the synthesized output.
+            # C++ applies M/S post-EQ: M unchanged, S scaled by this factor.
+            # rms_gain calibration is unaffected: (L'+R')/2 = M is invariant to M/S.
+            w = float(spectral_eq.get("stereo_width_factor", 1.0) or 1.0)
+            note["stereo_width"] = round(w, 4)
         if sample.get("is_interpolated"):
             note["is_interpolated"] = True
         return note
@@ -376,6 +383,7 @@ class SoundbankExporter:
         centroid_hz:  float,
         eq_biquads:   list,
         vel_idx:      int,
+        midi:         int,
         sr:           int,
         duration:     float,
         target_rms:   float,
@@ -383,13 +391,13 @@ class SoundbankExporter:
         """Calibrate rms_gain so rendered note hits target_rms * vel_gain.
 
         Renders partials + noise (with centroid IIR filter) + EQ biquads,
-        matching the C++ piano_core.cpp signal path exactly, so that the
-        baked rms_gain produces the correct output level in the player.
+        matching the C++ piano_core.cpp signal path exactly (1/2/3-string model
+        depending on MIDI), so that rms_gain produces correct output level.
         """
         vel_gain  = ((vel_idx+1)/8.0)**VEL_GAMMA
         audio     = _render_note_rms_ref(
             partials, phi_diff, attack_tau, A_noise, centroid_hz,
-            eq_biquads, sr, duration,
+            eq_biquads, midi, sr, duration,
         )
         rms = float(np.sqrt(np.mean(audio**2) + 1e-12))
         return ((target_rms * vel_gain) / rms) if rms > 1e-10 else 1.0
@@ -432,18 +440,27 @@ def _render_note_rms_ref(
     A_noise:     float,
     centroid_hz: float,
     eq_biquads:  list,
+    midi:        int,
     sr:          int,
     duration:    float,
 ) -> np.ndarray:
     """
     Render one note (rms_gain=1) matching the piano_core.cpp signal path:
-      1. Partials — 2-string model, bi-exp envelope
+      1. Partials — 1/2/3-string model depending on MIDI, bi-exp envelope
       2. Attack noise — 1-pole IIR low-pass at centroid_hz (independent L+R averaged)
       3. Spectral EQ — biquad cascade (Direct Form II, same coeffs as C++)
 
     Result is mono (L+R average). Used exclusively to calibrate rms_gain so that
     the C++ player output hits target_rms * vel_gain after applying all three stages.
+
+    String model (matches C++ initVoice/processBlock):
+      MIDI ≤ 27: 1-string  s = cos(f*t + phi)
+      MIDI 28-48: 2-string  s1=cos((f+b/2)*t+phi),  s2=cos((f-b/2)*t+phi+phi_diff)
+      MIDI > 48:  3-string  s1=cos((f-b)*t+phi),  s2=cos(f*t+phi2),  s3=cos((f+b)*t+phi+phi_diff)
+      where b = beat_hz (full detuning for 3-string, half-detuning for 2-string).
     """
+    n_strings = 1 if midi <= 27 else (2 if midi <= 48 else 3)
+
     N      = int(duration * sr)
     inv_sr = np.float32(1.0) / np.float32(sr)
     t_idx  = np.arange(N, dtype=np.float32)
@@ -451,7 +468,8 @@ def _render_note_rms_ref(
     tpi2   = np.float32(2.0 * math.pi) * t_f
     audio  = np.zeros(N, dtype=np.float32)
 
-    # 1. Partials (2-string model, matches C++ processBlock)
+    # 1. Partials — string model matches C++ processBlock
+    rng_p = np.random.default_rng(1)   # deterministic seed for reproducible rms_gain
     for p in partials:
         tau1    = np.float32(p["tau1"])
         tau2    = np.float32(p["tau2"])
@@ -468,10 +486,21 @@ def _render_note_rms_ref(
         env      = a1 * env_fast + (np.float32(1.0) - a1) * env_slow
 
         phase_c = tpi2 * f_hz + phi
-        phase_b = tpi2 * (beat_hz * np.float32(0.5))
-        s1      = np.cos(phase_c + phase_b)
-        s2      = np.cos(phase_c - phase_b + np.float32(phi_diff))
-        audio  += A0 * env * (s1 + s2) * np.float32(0.5)
+
+        if n_strings == 1:
+            audio += A0 * env * np.cos(phase_c)
+        elif n_strings == 2:
+            phase_b = tpi2 * (beat_hz * np.float32(0.5))
+            s1 = np.cos(phase_c + phase_b)
+            s2 = np.cos(phase_c - phase_b + np.float32(phi_diff))
+            audio += A0 * env * (s1 + s2) * np.float32(0.5)
+        else:  # 3-string: f-beat, f, f+beat
+            phi2    = np.float32(rng_p.uniform(0, 2*math.pi))
+            phase_b = tpi2 * beat_hz   # full detuning
+            s1 = np.cos(phase_c - phase_b)
+            s2 = np.cos(tpi2 * f_hz + phi2)
+            s3 = np.cos(phase_c + phase_b + np.float32(phi_diff))
+            audio += A0 * env * (s1 + s2 + s3) / np.float32(3.0)
 
     # 2. Attack noise — 1-pole IIR low-pass (centroid_hz), envelope-gated
     #    Matches C++ initVoice + processBlock noise section.

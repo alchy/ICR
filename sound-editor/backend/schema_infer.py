@@ -15,7 +15,7 @@ from __future__ import annotations
 
 # Keys to always skip at top level (not useful to edit as layers)
 _SKIP_TOP = {"midi", "vel", "K_valid", "partials", "spectral_eq",
-             "noise", "eq_biquads", "duration_s"}
+             "noise", "eq_biquads", "duration_s", "is_interpolated"}
 
 # Per-partial key to skip
 _SKIP_PARTIAL = {"k"}

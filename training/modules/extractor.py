@@ -267,13 +267,6 @@ def _midi_to_hz(midi: int) -> float:
     return 440.0 * 2.0 ** ((midi - 69) / 12.0)
 
 
-def _n_strings(midi: int) -> int:
-    """Standard piano stringing thresholds."""
-    if midi <= 27: return 1
-    if midi <= 48: return 2
-    return 3
-
-
 def _load_mono(path: str) -> tuple:
     audio, sr = sf.read(path, dtype="float32", always_2d=True)
     if audio.shape[1] > 1:
@@ -653,7 +646,7 @@ def _compute_summary(results: dict) -> dict:
         m = data["midi"]
         if data["B"] > 0:
             B_by_midi.setdefault(m, []).append(data["B"])
-        f0_by_midi.setdefault(m, []).append(data["f0_fitted_hz"])
+        f0_by_midi.setdefault(m, []).append(data["f0_hz"])
 
     B_mean  = {m: float(np.mean(vs)) for m, vs in B_by_midi.items()}
     f0_mean = {m: float(np.mean(vs)) for m, vs in f0_by_midi.items()}

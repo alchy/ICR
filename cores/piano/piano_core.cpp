@@ -86,11 +86,13 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
 
         PianoNoteParam& np = note_params_[midi][vel_idx];
         np.valid              = true;
+        np.is_interpolated    = s.value("is_interpolated", false);
         np.phi_diff           = s["phi_diff"].get<float>();
         np.attack_tau         = s["attack_tau"].get<float>();
         np.A_noise            = s["A_noise"].get<float>();
         np.noise_centroid_hz  = s.value("noise_centroid_hz", 3000.f);
         np.rms_gain           = s["rms_gain"].get<float>();
+        np.stereo_width       = s.value("stereo_width", 1.f);
         np.f0_hz              = s["f0_hz"].get<float>();
         np.B                  = s.value("B", 0.f);
 
@@ -269,8 +271,13 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     if (dur_s < 3.f) dur_s = 3.f;
     v.max_t_samp = (uint64_t)(dur_s * sample_rate_);
 
-    // Initialise per-partial state (phi_diff: independent random per-partial)
-    std::uniform_real_distribution<float> udist(0.f, TAU);
+    // String model per note: 1-string (bass MIDI≤27), 2-string (tenor 28–48),
+    // 3-string (treble MIDI>48, symmetric: f−beat, f, f+beat).
+    // phi_diff (per-note) = phase offset between outer strings 1 and 3.
+    // phi2     (per-partial, RNG) = independent phase for center string.
+    v.n_model_strings = (midi <= 27) ? 1 : (midi <= 48) ? 2 : 3;
+
+    std::uniform_real_distribution<float> phi2dist(0.f, TAU);
     v.n_partials = np.K;
     for (int ki = 0; ki < np.K; ki++) {
         const PianoPartialParam& pp = np.partials[ki];
@@ -285,20 +292,30 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
         ps.f_hz       = pp.f_hz;
         ps.beat_hz_h  = pp.beat_hz * beat_scale * 0.5f;
         ps.phi        = pp.phi;
-        ps.phi_diff   = udist(v.rng);
+        ps.phi2       = phi2dist(v.rng);   // random center-string phase
+        ps.phi_diff   = np.phi_diff;       // outer string phase offset (from JSON)
     }
 
-    // Stereo panning: constant-power pan per string, MIDI-dependent center
-    // center = pi/4 + (midi-64.5)/87 * keyboard_spread/2  (±spread/2 across keyboard)
-    // String 1 (s1 = carrier+beat/2) → angle1 = center - half
-    // String 2 (s2 = carrier-beat/2) → angle2 = center + half
+    // Stereo panning: constant-power pan per string, MIDI-dependent center.
+    // 1-string (MIDI≤27): single angle = center
+    // 2-string (28–48):   angle1 = center-half,  angle2 = center+half
+    // 3-string (MIDI>48): angle1 = center-half,  angle2 = center,  angle3 = center+half
     {
         const float center = (PI / 4.f) + ((float)midi - 64.5f) / 87.0f * keyboard_spread * 0.5f;
         const float half   = pan_spread * 0.5f;
-        const float a1     = center - half;
-        const float a2     = center + half;
-        v.gl1 = std::cos(a1);  v.gr1 = std::sin(a1);
-        v.gl2 = std::cos(a2);  v.gr2 = std::sin(a2);
+        if (midi <= 27) {
+            v.gl1 = std::cos(center); v.gr1 = std::sin(center);
+            v.gl2 = 0.f; v.gr2 = 0.f;
+            v.gl3 = 0.f; v.gr3 = 0.f;
+        } else if (midi <= 48) {
+            v.gl1 = std::cos(center - half); v.gr1 = std::sin(center - half);
+            v.gl2 = std::cos(center + half); v.gr2 = std::sin(center + half);
+            v.gl3 = 0.f; v.gr3 = 0.f;
+        } else {
+            v.gl1 = std::cos(center - half); v.gr1 = std::sin(center - half);
+            v.gl2 = std::cos(center);        v.gr2 = std::sin(center);
+            v.gl3 = std::cos(center + half); v.gr3 = std::sin(center + half);
+        }
     }
 
     // Schroeder first-order all-pass decorrelation (matches physics_synth.py)
@@ -314,6 +331,9 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
         v.ap_g_R    = -(0.35f + ds * 0.20f);
         v.ap_x_L = v.ap_y_L = v.ap_x_R = v.ap_y_R = 0.f;
     }
+
+    // M/S stereo width correction (snapshot at noteOn)
+    v.stereo_width = np.stereo_width;
 
     // Spectral EQ biquad cascade: copy coeffs, zero filter state
     v.n_biquad    = np.n_biquad;
@@ -348,7 +368,15 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
             const float t_f  = (float)v.t_samples * inv_sr_;
             const float tpi2 = TAU * t_f;
 
-            // ── Partials (stereo: s1 → pan angle1, s2 → pan angle2) ────────
+            // ── Partials ─────────────────────────────────────────────────────
+            // String model per note (set at noteOn from MIDI):
+            //   1-string (MIDI≤27):  s1 = cos(f·t + φ)
+            //   2-string (28–48):    s1 = cos((f+beat/2)·t + φ)
+            //                        s2 = cos((f-beat/2)·t + φ + φ_diff)
+            //   3-string (MIDI>48):  s1 = cos((f-beat)·t + φ)        outer left
+            //                        s2 = cos(f·t + φ₂)              center (rand)
+            //                        s3 = cos((f+beat)·t + φ + φ_diff) outer right
+            //   beat = beat_hz * beat_scale  (full detuning, not half)
             float samp_L = 0.f, samp_R = 0.f;
             for (int ki = 0; ki < v.n_partials; ki++) {
                 PianoPartialState& ps = v.partials[ki];
@@ -359,15 +387,32 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
 
                 if (ps.A0_scaled * env < PIANO_SKIP_THRESH) continue;
 
-                float phase_c = tpi2 * ps.f_hz + ps.phi;
-                float phase_b = tpi2 * ps.beat_hz_h;
+                const float phase_c = tpi2 * ps.f_hz + ps.phi;
+                const float phase_b = tpi2 * ps.beat_hz_h;   // = 2π·t·beat_hz·scale/2
 
-                float s1 = std::cos(phase_c + phase_b);
-                float s2 = std::cos(phase_c - phase_b + ps.phi_diff);
-
-                float base = ps.A0_scaled * env * 0.5f;
-                samp_L += base * (s1 * v.gl1 + s2 * v.gl2);
-                samp_R += base * (s1 * v.gr1 + s2 * v.gr2);
+                if (v.n_model_strings == 1) {
+                    // Bass: single string at f
+                    float s1   = std::cos(phase_c);
+                    float base = ps.A0_scaled * env;
+                    samp_L += base * s1 * v.gl1;
+                    samp_R += base * s1 * v.gr1;
+                } else if (v.n_model_strings == 2) {
+                    // Tenor: 2-string model (f±beat/2)
+                    float s1   = std::cos(phase_c + phase_b);
+                    float s2   = std::cos(phase_c - phase_b + ps.phi_diff);
+                    float base = ps.A0_scaled * env * 0.5f;
+                    samp_L += base * (s1 * v.gl1 + s2 * v.gl2);
+                    samp_R += base * (s1 * v.gr1 + s2 * v.gr2);
+                } else {
+                    // Treble: symmetric 3-string model (f-beat, f, f+beat)
+                    // phase_b = 2π·t·beat_hz·scale/2, so 2*phase_b = full detuning
+                    float s1   = std::cos(phase_c - 2.f * phase_b);
+                    float s2   = std::cos(tpi2 * ps.f_hz + ps.phi2);
+                    float s3   = std::cos(phase_c + 2.f * phase_b + ps.phi_diff);
+                    float base = ps.A0_scaled * env / 3.0f;
+                    samp_L += base * (s1 * v.gl1 + s2 * v.gl2 + s3 * v.gl3);
+                    samp_R += base * (s1 * v.gr1 + s2 * v.gr2 + s3 * v.gr3);
+                }
             }
 
             // ── Noise (independent L/R, 1-pole IIR low-pass at centroid_hz) ──
@@ -410,6 +455,17 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
                 float dry = 1.f - v.eq_strength;
                 samp_L = samp_L * dry + wetL * v.eq_strength;
                 samp_R = samp_R * dry + wetR * v.eq_strength;
+            }
+
+            // ── M/S stereo width correction ──────────────────────────────────
+            // M = (L+R)/2 — mono, invariant (rms_gain calibration target).
+            // S = (L-R)/2 * stereo_width — scales stereo difference to match
+            // the original recording's S/M ratio measured by eq_fitter.
+            if (std::abs(v.stereo_width - 1.f) > 0.001f) {
+                const float M = (samp_L + samp_R) * 0.5f;
+                const float S = (samp_L - samp_R) * 0.5f * v.stereo_width;
+                samp_L = M + S;
+                samp_R = M - S;
             }
 
             // ── Onset / release gates ────────────────────────────────────────
@@ -518,6 +574,7 @@ bool PianoCore::setNoteParam(int midi, int vel,
     if (key == "noise_centroid_hz") { np.noise_centroid_hz = value; return true; }
     if (key == "rms_gain")          { np.rms_gain          = value; return true; }
     if (key == "phi_diff")          { np.phi_diff          = value; return true; }
+    if (key == "stereo_width")      { np.stereo_width      = std::max(0.f, value); return true; }
     if (key == "B") {
         // B is a string property independent of velocity — propagate to all
         // 8 velocity layers for this MIDI note and recompute f_hz in each.
@@ -580,6 +637,7 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
         np.A_noise            = s["A_noise"].get<float>();
         np.noise_centroid_hz  = s.value("noise_centroid_hz", 3000.f);
         np.rms_gain           = s["rms_gain"].get<float>();
+        np.stereo_width       = s.value("stereo_width", 1.f);
         np.f0_hz              = s["f0_hz"].get<float>();
         np.B                  = s.value("B", 0.f);
 
@@ -643,8 +701,11 @@ bool PianoCore::exportBankJson(const std::string& path) {
             note["A_noise"]           = np.A_noise;
             note["noise_centroid_hz"] = np.noise_centroid_hz;
             note["rms_gain"]          = np.rms_gain;
+            note["stereo_width"]      = np.stereo_width;
             note["f0_hz"]             = np.f0_hz;
             note["B"]                 = np.B;
+            if (np.is_interpolated)
+                note["is_interpolated"] = true;
 
             json partials = json::array();
             for (int ki = 0; ki < np.K; ki++) {
@@ -709,10 +770,18 @@ CoreVizState PianoCore::getVizState() const {
         CoreVoiceViz vv;
         vv.midi            = last_midi;
         vv.vel             = last_vel;
-        vv.f0_hz           = np.f0_hz;
-        vv.B               = np.B;
-        vv.n_partials      = np.K;
-        vv.is_interpolated = np.is_interpolated;
+        vv.f0_hz             = np.f0_hz;
+        vv.B                 = np.B;
+        vv.n_partials        = np.K;
+        // Acoustic string count for this MIDI note (instrument reality, not C++ model).
+        // C++ always renders a 2-string model; this shows the original instrument
+        // stringing so the GUI can inform the user when the model simplifies (MIDI>48).
+        vv.n_strings         = (last_midi <= 27) ? 1 : (last_midi <= 48) ? 2 : 3;
+        vv.is_interpolated   = np.is_interpolated;
+        vv.width_factor      = np.stereo_width;
+        vv.noise_centroid_hz = np.noise_centroid_hz;
+        vv.noise_tau_s       = np.attack_tau;
+        vv.noise_floor_rms   = np.A_noise * np.rms_gain;  // peak noise amplitude (t=0, noise_level=1)
 
         for (int ki = 0; ki < np.K && ki < 16; ki++) {   // cap at 16 for GUI
             const PianoPartialParam& pp = np.partials[ki];
