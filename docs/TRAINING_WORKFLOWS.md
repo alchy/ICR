@@ -1,13 +1,39 @@
 # ICR — Training workflows
 
-Popis všech aktivních trénovacích workflows, jejich datového toku a kdy který použít.
+Popis všech trénovacích workflows, jejich datového toku a kdy který použít.
 Popis jednotlivých modulů → viz [TRAINING_MODULES.md](TRAINING_MODULES.md).
+Průvodce od WAV banky po spuštění → viz [TRAIN_BUILD_RUN.md](TRAIN_BUILD_RUN.md).
 
 ---
 
 ## Přehled workflows
 
-Všechny aktivní workflows sdílejí společný základ:
+Existují dvě hlavní cesty:
+
+```
+WAV banka
+  │
+  ├── Cesta A: Instrument DNA (bez NN, doporučená pro piano)
+  │     simple → analyze_extraction → [anchor_helper] → instrument_dna → soundbank
+  │
+  └── Cesta B: NN pipeline
+        ParamExtractor → StructuralOutlierFilter → EQFitter → NN → export
+```
+
+### Instrument DNA
+
+| Krok | Nástroj | Výstup |
+|---|---|---|
+| Extrakce + EQ | `run-training.py simple` | `soundbanks/{banka}-simple.json` |
+| Diagnostika | `tools/analyze_extraction.py` | konzole (bi-exp%, beat%, heatmap) |
+| Anotace (volitelné) | `tools/anchor_helper.py` | `anchors/{banka}.json` |
+| Generování soundbank | `training/modules/instrument_dna.py` | `soundbanks/{banka}-dna.json` |
+
+Detailní popis → [`docs/INSTRUMENT_DNA.md`](INSTRUMENT_DNA.md).
+
+### NN pipeline — přehled
+
+Všechny NN workflows sdílejí společný základ:
 
 ```
 WAV banka → ParamExtractor → StructuralOutlierFilter → EQFitter
@@ -348,27 +374,39 @@ model, out_path = run(
 
 ---
 
-## Legacy workflows
+## Workflow: `simple`
 
-Tyto workflows jsou zachovány pro zpětnou kompatibilitu, ale pro nové banky
-se doporučuje použít výše popsané `icr-eval` varianty.
+**CLI:** `python run-training.py simple --bank <dir>`
 
-### `simple`
-
-Bez NN — pouze extrakce a export.
+Bez NN — pouze extrakce, outlier filter, EQ fit a export. Slouží jako:
+1. **První krok Instrument DNA pipeline** — výstup jde přímo do `instrument_dna.py`
+2. **Rychlý baseline poslech** — soundbanka z reálných dat bez interpolace
 
 ```mermaid
 flowchart TD
-    WAV[("WAV soubory")] --> EXT["ParamExtractor"]
+    WAV[("WAV soubory")] --> EXT["ParamExtractor\n(bi-exp v2: 4-start init, tau1_max=20s)"]
     EXT --> SOF["StructuralOutlierFilter"]
     SOF --> EQF["EQFitter"]
     EQF --> EXP["SoundbankExporter.from_params"]
-    EXP --> OUT[("-simple.json")]
+    EXP --> OUT[("{banka}-simple.json")]
 ```
 
 ```bash
-python run-training.py simple --bank C:/SoundBanks/IthacaPlayer/ks-grand
+python run-training.py simple --bank "C:/SoundBanks/IthacaPlayer/pl-grand"
+# → soundbanks/pl-grand-simple.json
+
+# Bez EQ (rychlejší, vhodné jako vstup pro instrument_dna):
+python run-training.py simple --bank "C:/SoundBanks/IthacaPlayer/pl-grand" --skip-eq
 ```
+
+**Extractor v2 (aktuální):** 4-start bi-exp init, `tau1_max=20s`, criterion `tau2/tau1>1.3`.
+Výsledek na pl-grand: bi-exp **77 %**, beat **100 %**. Aktivní ve všech workflows automaticky.
+
+---
+
+## Legacy workflows
+
+Zachovány pro zpětnou kompatibilitu.
 
 ### `nn`
 
@@ -420,10 +458,11 @@ Python DifferentiableRenderer). Ponecháno jako legacy.
 
 | Situace | Doporučený workflow |
 |---------|---------------------|
-| Baseline — rychlé ověření, nová banka | `raw-nn-icreval` |
-| Produkční banka — nejhladší interpolace | `spl-nn-icreval` |
-| Nástroj s bohatým harmonickým obsahem (piano) | `spl-ext-nn-icreval` |
-| Maximální přesnost syntézního výstupu | `spl-icrtarget-nn-icreval` |
+| Piano s dlouhými záznamy (pl-grand, pl-upright) | **Instrument DNA** |
+| Rhodes nebo neznámý nástroj — rychlý baseline | `raw-nn-icreval` |
+| Produkční banka — nejhladší NN interpolace | `spl-nn-icreval` |
+| Piano s bohatým harmonickým obsahem | `spl-ext-nn-icreval` |
+| Maximální přesnost syntézního výstupu (s ICR) | `spl-icrtarget-nn-icreval` |
 | Maximální přesnost + plný harmonický obsah | `spl-ext-icrtarget-nn-icreval` |
 
 ---
