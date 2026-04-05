@@ -203,7 +203,7 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
     for p in peaks:
         k  = p["k"]
         fk = _inharmonic_freq(k, f0_fit, B)
-        partial = _extract_partial(stft_times, stft_freqs, stft_mag, p, fk)
+        partial = _extract_partial(audio, sr, stft_times, stft_freqs, stft_mag, p, fk)
         partials_out.append(partial)
 
     result["partials"] = partials_out
@@ -225,7 +225,55 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
     return _sanitize_for_json(result)
 
 
-def _extract_partial(stft_times, stft_freqs, stft_mag, peak: dict, fk: float) -> dict:
+def _onset_partial_envelope(audio, sr, fk, stft_times, stft_amps):
+    """
+    Prepend high-time-resolution onset data (first ~120 ms) to an existing
+    STFT partial envelope.
+
+    Uses short STFT windows (frame=256 ≈ 5.8 ms at 44100 Hz, hop=64 ≈ 1.5 ms)
+    to resolve fast initial decays that longer STFT windows cannot see.
+    Amplitude is matched to the long-STFT values at the junction so both
+    series are on the same scale.
+    """
+    ONSET_FRAME = 256
+    ONSET_HOP   = 64
+    ONSET_END_S = 0.12            # analyse first 120 ms
+
+    if len(stft_times) < 2 or len(stft_amps) < 2:
+        return stft_times, stft_amps
+
+    n_onset = min(len(audio), int((ONSET_END_S + ONSET_FRAME / sr) * sr))
+    t_on, f_on, mag_on = _compute_stft(audio[:n_onset], sr, ONSET_HOP, ONSET_FRAME)
+    if len(t_on) < 4:
+        return stft_times, stft_amps
+
+    _, a_on = _partial_envelope(t_on, f_on, mag_on, fk, search_bins=1)
+    if len(a_on) < 4 or a_on.max() < 1e-12:
+        return stft_times, stft_amps
+
+    # Amplitude-match onset series to STFT at the first STFT frame
+    t_junction = stft_times[0]
+    overlap = (t_on >= t_junction - 0.015) & (t_on <= t_junction + 0.015)
+    if not overlap.any():
+        return stft_times, stft_amps
+
+    scale = stft_amps[0] / (float(np.median(a_on[overlap])) + 1e-15)
+    if not np.isfinite(scale) or scale <= 0:
+        return stft_times, stft_amps
+    a_on_scaled = a_on * scale
+
+    # Keep only onset frames strictly before the first STFT frame
+    pre = t_on < t_junction - ONSET_HOP / sr
+    if not pre.any():
+        return stft_times, stft_amps
+
+    return (np.concatenate([t_on[pre], stft_times]),
+            np.concatenate([a_on_scaled[pre], stft_amps]))
+
+
+def _extract_partial(audio, sr,
+                     stft_times, stft_freqs, stft_mag,
+                     peak: dict, fk: float) -> dict:
     """Extract decay + beating parameters for one partial."""
     k = peak["k"]
 
@@ -233,6 +281,11 @@ def _extract_partial(stft_times, stft_freqs, stft_mag, peak: dict, fk: float) ->
         t_env, a_env = _partial_envelope(stft_times, stft_freqs, stft_mag, fk)
     else:
         t_env, a_env = np.array([]), np.array([])
+
+    # Prepend high-resolution onset data so bi-exp fitter sees the fast
+    # initial attack that the long STFT window misses.
+    if len(t_env) >= 4:
+        t_env, a_env = _onset_partial_envelope(audio, sr, fk, t_env, a_env)
 
     if len(t_env) < 12:
         return {
@@ -457,7 +510,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
                 popt2, _ = curve_fit(
                     bi_exp, t, a_norm,
                     p0=[a1_0, tau1_0, tau2_0],
-                    bounds=([0.01, 0.02, 0.1], [0.99, tau1_max, tau2_max]),
+                    bounds=([0.01, 0.003, 0.05], [0.99, tau1_max, tau2_max]),
                     maxfev=8000,
                 )
                 a1c, tau1c, tau2c = popt2
@@ -575,13 +628,16 @@ def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
             except Exception:
                 pass
 
-    # Spectral centroid from noise residual
-    noise_for_centroid = residual
-    if len(noise_for_centroid) >= frame//2:
+    # Spectral centroid from noise residual — use only the first 10 ms so
+    # the measurement reflects hammer-impact noise, not harmonic sustain.
+    early_n = max(64, int(0.010 * sr))
+    noise_for_centroid = residual[:early_n]
+    if len(noise_for_centroid) >= 64:
         try:
-            f_w, psd = welch(noise_for_centroid[:frame], fs=sr, nperseg=frame//2)
+            nperseg = min(len(noise_for_centroid) // 2, 256)
+            f_w, psd = welch(noise_for_centroid, fs=sr, nperseg=nperseg)
             if psd.sum() > 0:
-                result["centroid_hz"] = float(np.sum(f_w*psd) / psd.sum())
+                result["centroid_hz"] = float(np.sum(f_w * psd) / psd.sum())
         except Exception:
             pass
 
