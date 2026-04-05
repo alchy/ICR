@@ -64,7 +64,7 @@ class EQFitter:
         import os
         workers = workers or max(1, os.cpu_count() - 1)
 
-        keys  = list(params["samples"].keys())
+        keys  = list(params["notes"].keys())
         total = len(keys)
         print(f"EQFitter: processing {total} samples with {workers} workers …")
 
@@ -101,7 +101,7 @@ class EQFitter:
 
         n_ok = 0
         for key, eq in results.items():
-            params["samples"][key]["spectral_eq"] = eq
+            params["notes"][key]["spectral_eq"] = eq
             n_ok += 1
 
         print(f"EQFitter: completed {n_ok}/{total} samples.")
@@ -142,7 +142,7 @@ def _eq_worker_init(params_dict: dict, bank_dir: str) -> None:
 def _eq_worker(key: str) -> tuple:
     """Compute spectral_eq for one sample. Top-level for pickling."""
     try:
-        eq = _compute_eq_for_sample(key, _G_PARAMS["samples"][key], _G_BANK_DIR)
+        eq = _compute_eq_for_sample(key, _G_PARAMS["notes"][key], _G_BANK_DIR)
         return key, eq
     except Exception:
         return key, {"_log": traceback.format_exc(), "_error": True}

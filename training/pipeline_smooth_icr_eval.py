@@ -152,7 +152,7 @@ def run(
     duration_s     = float(smooth_bank.get("duration_s", 3.0))
     from tools.spline_fix import json_notes_to_samples
     smooth_samples = json_notes_to_samples(smooth_bank["notes"], duration_s)
-    smooth_params  = {**params, "samples": smooth_samples}
+    smooth_params  = {**params, "notes": smooth_samples}
     print(f"  Smooth params: {len(smooth_samples)} notes loaded as training targets")
 
     # ── Step 2b (optional): ICR round-trip correction ─────────────────────────
@@ -172,8 +172,7 @@ def run(
             note_dur = note_dur,
         ).process(smooth_params, workers=workers)
         # Save round-trip params for inspection
-        rt_bank = {**smooth_bank,
-                   "notes": {k: v for k, v in smooth_params["samples"].items()}}
+        rt_bank = {**smooth_bank, "notes": smooth_params["notes"]}
         Path(rt_path).write_text(json.dumps(rt_bank, separators=(",", ":")))
         print(f"  Round-trip targets written: {rt_path}")
 
@@ -185,7 +184,7 @@ def run(
         _spline_smooth_simple(rt_path, rt_spl_path, auto_anchors, extend_partials=False)
         rt_spl_bank    = json.loads(Path(rt_spl_path).read_text())
         smooth_samples = json_notes_to_samples(rt_spl_bank["notes"], duration_s)
-        smooth_params  = {**params, "samples": smooth_samples}
+        smooth_params  = {**params, "notes": smooth_samples}
         print(f"  Smooth round-trip params: {len(smooth_samples)} notes as training targets")
 
     # ── Step 3: Train NN with ICR eval/early-stop ─────────────────────────────

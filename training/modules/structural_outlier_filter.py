@@ -112,7 +112,7 @@ class StructuralOutlierFilter:
         Returns:
             New params dict with outlier samples removed and n_samples updated.
         """
-        matrix, key_map = self._build_matrix(params["samples"])
+        matrix, key_map = self._build_matrix(params["notes"])
         flagged          = self._detect_outliers(matrix, key_map, sigma)
 
         if not flagged:
@@ -129,8 +129,7 @@ class StructuralOutlierFilter:
 
         result = copy.deepcopy(params)
         for key in outlier_keys:
-            result["samples"].pop(key, None)
-        result["n_samples"] = len(result["samples"])
+            result["notes"].pop(key, None)
         return result
 
     # ── Matrix construction ───────────────────────────────────────────────────

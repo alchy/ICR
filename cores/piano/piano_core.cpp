@@ -574,7 +574,7 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
 
         PianoNoteParam& np = tmp[midi * 8 + vel_idx];
         np.valid              = true;
-        np.is_interpolated    = s.value("_interpolated", false);
+        np.is_interpolated    = s.value("is_interpolated", false);
         np.phi_diff           = s["phi_diff"].get<float>();
         np.attack_tau         = s["attack_tau"].get<float>();
         np.A_noise            = s["A_noise"].get<float>();

@@ -62,7 +62,7 @@ def _auto_quality(note: dict) -> tuple[float, list[str]]:
     tau1 = p0.get("tau1", 0.0)
     tau2 = p0.get("tau2", 0.0)
     A0 = p0.get("A0", 0.0)
-    interp = note.get("_interpolated", False)
+    interp = note.get("is_interpolated", False)
 
     # Degenerate bi-exponential: tau1 = tau2 (or a1 = 1.0 exactly)
     if a1 >= 0.9999 or abs(tau1 - tau2) < 1e-6:

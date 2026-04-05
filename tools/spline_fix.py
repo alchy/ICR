@@ -98,7 +98,7 @@ def _select_auto_anchors(
     """
     midi_scores: dict[int, list[float]] = {}
     for key, note in notes.items():
-        if note.get("_interpolated", False):
+        if note.get("isis_interpolated", False):
             continue
         if ref_keys is not None and key not in ref_keys:
             continue
@@ -144,32 +144,26 @@ _LOG_EPS = 1e-12   # guard against log(0)
 
 # ── Layer schema detection ─────────────────────────────────────────────────────
 
-_SKIP_TOP = {"midi", "vel", "K_valid", "partials", "spectral_eq",
-             "noise", "eq_biquads", "duration_s", "phi_diff",
-             "_interpolated", "f0_nominal_hz"}
-_SKIP_NOISE = {"attack_tau"}   # noise sub-keys promoted to top level in extract
+_SKIP_TOP = {"midi", "vel", "partials", "spectral_eq",
+             "eq_biquads", "duration_s", "phi_diff",
+             "isis_interpolated", "sr", "n_partials"}
 
 
 def _detect_layers(notes: dict) -> list[str]:
     """Return all layer IDs present in the first complete note."""
     layers = []
     for note in notes.values():
-        # Scalar
+        # Scalar note-level keys
         for key, val in note.items():
             if key in _SKIP_TOP:
                 continue
             if isinstance(val, (int, float)):
                 layers.append(key)
-        # Noise sub-keys
-        noise = note.get("noise", {})
-        for key, val in noise.items():
-            if isinstance(val, (int, float)):
-                layers.append(f"noise.{key}")
         # Per-partial
         partials = note.get("partials", [])
         if partials:
             for key in partials[0]:
-                if key not in ("k", "f_hz"):
+                if key not in ("k", "f_hz", "phi", "mono", "is_longitudinal"):
                     for ki in range(len(partials)):
                         layers.append(f"{key}_k{ki+1}")
         break
@@ -185,16 +179,6 @@ def _parse_layer_id(layer_id: str):
     access_fn(note) → float | None
     update_fn(note, value) → None
     """
-    # noise sub-key: "noise.attack_tau"
-    if layer_id.startswith("noise."):
-        subkey = layer_id[6:]
-        def _get(note):
-            return note.get("noise", {}).get(subkey)
-        def _set(note, v):
-            if "noise" in note:
-                note["noise"][subkey] = v
-        return _get, _set
-
     # per-partial: "tau1_k3"
     m = re.match(r"^(.+)_k(\d+)$", layer_id)
     if m:
@@ -225,7 +209,7 @@ def _extract_layer_vel(notes: dict, layer_id: str, vel: int,
     """Return {midi: value} for notes matching this layer+vel.
 
     measured_only=True: skip NN-generated notes.
-      - Uses _interpolated flag if present in the note.
+      - Uses is_interpolated flag if present in the note.
       - Falls back to ref_keys: notes absent from ref_keys are treated as NN.
     """
     getter, _ = _parse_layer_id(layer_id)
@@ -235,7 +219,7 @@ def _extract_layer_vel(notes: dict, layer_id: str, vel: int,
         if not key.endswith(suffix):
             continue
         if measured_only:
-            if note.get("_interpolated", False):
+            if note.get("isis_interpolated", False):
                 continue
             if ref_keys is not None and key not in ref_keys:
                 continue
@@ -246,11 +230,11 @@ def _extract_layer_vel(notes: dict, layer_id: str, vel: int,
     return result
 
 
-def _interpolated_midis_vel(notes: dict, vel: int,
+def is_interpolated_midis_vel(notes: dict, vel: int,
                             ref_keys: set[str] | None = None) -> set[int]:
     """Return set of MIDI numbers that are NN-interpolated for this velocity.
 
-    Uses _interpolated flag if present; falls back to ref_keys comparison
+    Uses is_interpolated flag if present; falls back to ref_keys comparison
     (notes absent from ref_keys are treated as NN-generated).
     """
     suffix = f"_vel{vel}"
@@ -259,7 +243,7 @@ def _interpolated_midis_vel(notes: dict, vel: int,
         if not key.endswith(suffix):
             continue
         midi = int(key[1:4])
-        if note.get("_interpolated", False):
+        if note.get("isis_interpolated", False):
             result.add(midi)
         elif ref_keys is not None and key not in ref_keys:
             result.add(midi)
@@ -377,7 +361,7 @@ def _get_max_partials_per_vel(
     """Return {vel: max_partial_count} across all measured notes."""
     result: dict[int, int] = {}
     for key, note in notes.items():
-        if note.get("_interpolated", False):
+        if note.get("isis_interpolated", False):
             continue
         if ref_keys is not None and key not in ref_keys:
             continue
@@ -429,7 +413,7 @@ def _extend_note_partials(note: dict, target_k: int) -> None:
 def apply_spline_fix_bank(
     notes:            dict,
     smooth_all:       bool             = False,
-    fix_interpolated: bool             = False,
+    fixis_interpolated: bool             = False,
     fill_missing:     bool             = False,
     extend_partials:  bool             = False,
     auto_anchors:     int              = 0,
@@ -445,17 +429,17 @@ def apply_spline_fix_bank(
     Args:
         notes:            The ``bank["notes"]`` dict from an exported soundbank.
         smooth_all:       Replace all non-anchor values with spline.
-        fix_interpolated: Fit spline on measured notes only; replace NN notes.
+        fixis_interpolated: Fit spline on measured notes only; replace NN notes.
         fill_missing:     Fill MIDI positions absent from notes dict.
         extend_partials:  Extend notes to the max partial count of measured notes,
                           then fill new partial values via spline.
-                          When fix_interpolated=True: extends only NN-generated notes
+                          When fixis_interpolated=True: extends only NN-generated notes
                           (post-training use case).
                           When smooth_all=True: extends ALL notes including measured
                           (pre-training use case — enrich training targets).
         auto_anchors:     Number of anchors to auto-select by quality metric.
         anchor_midi:      Additional hard-coded anchor MIDI numbers.
-        ref_keys:         Measured note keys (for older banks without _interpolated).
+        ref_keys:         Measured note keys (for older banks without is_interpolated).
         stiffness:        Spline stiffness (higher = more rigid).
         degree:           Spline degree (1/2/3/5).
         smooth_outliers:  Replace |value − spline| > K×std outliers.
@@ -469,20 +453,20 @@ def apply_spline_fix_bank(
 
     # ── Extend note partials to max measured count (before layer detection) ──
     total_extended = 0
-    if extend_partials and (fix_interpolated or smooth_all):
+    if extend_partials and (fixis_interpolated or smooth_all):
         max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
         for key, note in out_notes.items():
-            is_nn = note.get("_interpolated", False) or (
+            is_nn = note.get("isis_interpolated", False) or (
                 ref_keys is not None and key not in ref_keys)
             # post-training: extend only NN notes; pre-training (smooth_all): extend all
-            if fix_interpolated and not is_nn:
+            if fixis_interpolated and not is_nn:
                 continue
             vel    = int(key.split("_vel")[1])
             max_k  = max_per_vel.get(vel, 0)
             before = len(note.get("partials", []))
             _extend_note_partials(note, max_k)
             total_extended += len(note.get("partials", [])) - before
-        scope = "NN notes" if fix_interpolated else "all notes"
+        scope = "NN notes" if fixis_interpolated else "all notes"
         print(f"Partials extended: +{total_extended} across {scope}")
 
     # Detect layers after potential extension so new per-partial layers are included
@@ -502,11 +486,11 @@ def apply_spline_fix_bank(
         log_sp = any(layer_id.startswith(p) or layer_id == p
                      for p in _LOG_SPACE_PARAMS)
         for vel in range(8):
-            if fix_interpolated:
+            if fixis_interpolated:
                 measured_data = _extract_layer_vel(notes, layer_id, vel,
                                                    measured_only=True,
                                                    ref_keys=ref_keys)
-                interp_midis  = _interpolated_midis_vel(notes, vel, ref_keys)
+                interp_midis  = is_interpolated_midis_vel(notes, vel, ref_keys)
                 if measured_data and interp_midis:
                     work = {m: math.log(max(v, _LOG_EPS)) for m, v in measured_data.items()} \
                            if log_sp else dict(measured_data)
@@ -543,38 +527,38 @@ def apply_spline_fix_bank(
 
 def json_notes_to_samples(notes: dict, duration_s: float = 3.0) -> dict:
     """
-    Convert exported JSON notes dict back to ``params['samples']`` format.
+    Convert exported JSON notes dict back to the unified params["notes"] format.
 
     Used by pipelines that apply spline_fix before NN training — the smoothed
     notes need to be passed back to the trainer as target samples.
 
-    The exported JSON stores A_noise / attack_tau at the top level; this
-    function re-packs them under the expected ``noise`` sub-dict.
-    The per-partial ``phi`` field is stripped (it is a rendering artefact,
-    not a training target).
+    The per-partial ``phi`` and ``rms_gain`` fields are stripped (rendering
+    artefacts, not training targets).
     """
+    _STRIP_NOTE  = {"phi_diff", "rms_gain", "eq_biquads", "K_valid"}
+    _STRIP_PART  = {"phi"}
     samples: dict = {}
     for key, note in notes.items():
         partials = [
-            {k: v for k, v in p.items() if k != "phi"}
+            {k: v for k, v in p.items() if k not in _STRIP_PART}
             for p in note.get("partials", [])
         ]
         sample: dict = {
-            "midi":          int(note["midi"]),
-            "vel":           int(note["vel"]),
-            "f0_nominal_hz": float(note.get("f0_hz", 440.0)),
-            "B":             float(note.get("B", 0.0)),
-            "duration_s":    float(note.get("duration_s", duration_s)),
-            "partials":      partials,
-            "noise": {
-                "A_noise":    float(note.get("A_noise",    0.04)),
-                "attack_tau": float(note.get("attack_tau", 0.05)),
-            },
+            "midi":              int(note["midi"]),
+            "vel":               int(note["vel"]),
+            "f0_hz":             float(note.get("f0_hz", 440.0)),
+            "B":                 float(note.get("B", 0.0)),
+            "duration_s":        float(note.get("duration_s", duration_s)),
+            "attack_tau":        float(note.get("attack_tau",        0.05)),
+            "A_noise":           float(note.get("A_noise",           0.04)),
+            "noise_centroid_hz": float(note.get("noise_centroid_hz", 3000.0)),
+            "partials":          partials,
         }
-        if note.get("spectral_eq"):
-            sample["spectral_eq"] = note["spectral_eq"]
-        if note.get("_interpolated"):
-            sample["_interpolated"] = True
+        for k in ("spectral_eq",):
+            if note.get(k):
+                sample[k] = note[k]
+        if note.get("isis_interpolated"):
+            sample["isis_interpolated"] = True
         samples[key] = sample
     return samples
 
@@ -640,7 +624,7 @@ def run(args):
         # Print score table
         midi_scores: dict[int, list[float]] = {}
         for key, note in notes.items():
-            if note.get("_interpolated", False):
+            if note.get("isis_interpolated", False):
                 continue
             if ref_keys is not None and key not in ref_keys:
                 continue
@@ -655,7 +639,7 @@ def run(args):
         print("-" * 50)
         for m in sorted(auto):
             note_ex = next((n for k, n in notes.items()
-                            if int(k[1:4]) == m and not n.get("_interpolated")), None)
+                            if int(k[1:4]) == m and not n.get("isis_interpolated")), None)
             if note_ex:
                 p0   = (note_ex.get("partials") or [{}])[0]
                 tau1 = max(float(p0.get("tau1", 1.0)), 1e-4)
@@ -690,10 +674,10 @@ def run(args):
     out_notes = copy.deepcopy(notes) if not report_only else notes
 
     # --extend-partials: extend NN notes to max measured partial count
-    if getattr(args, "extend_partials", False) and args.fix_interpolated and not report_only:
+    if getattr(args, "extend_partials", False) and args.fixis_interpolated and not report_only:
         max_per_vel = _get_max_partials_per_vel(notes, ref_keys)
         for key, note in out_notes.items():
-            is_nn = note.get("_interpolated", False) or (
+            is_nn = note.get("isis_interpolated", False) or (
                 ref_keys is not None and key not in ref_keys)
             if not is_nn:
                 continue
@@ -716,11 +700,11 @@ def run(args):
         for vel in vels:
             # --fix-interpolated: fit spline on measured notes only,
             # then replace all NN-interpolated notes with spline values
-            if args.fix_interpolated:
+            if args.fixis_interpolated:
                 measured_data  = _extract_layer_vel(notes, layer_id, vel,
                                                     measured_only=True,
                                                     ref_keys=ref_keys)
-                interp_midis   = _interpolated_midis_vel(notes, vel, ref_keys)
+                interp_midis   = is_interpolated_midis_vel(notes, vel, ref_keys)
                 if not measured_data or not interp_midis:
                     data = _extract_layer_vel(notes, layer_id, vel)
                 else:
@@ -763,7 +747,7 @@ def run(args):
 
             if report_only:
                 vals = list(data.values())
-                interp_count = len(_interpolated_midis_vel(notes, vel, ref_keys))
+                interp_count = len(is_interpolated_midis_vel(notes, vel, ref_keys))
                 print(f"{layer_id:30s} {vel:>4}  {len(data):>5}  "
                       f"{n_rep:>8}  {n_fill:>5}  "
                       f"{min(vals):>10.4g}  {max(vals):>10.4g}  "
@@ -829,7 +813,7 @@ def main():
     p.add_argument("--ref-bank", metavar="PATH",
                    help="Original measured soundbank JSON; used by "
                         "--fix-interpolated to identify NN notes when "
-                        "_interpolated flag is absent (older banks)")
+                        "is_interpolated flag is absent (older banks)")
     p.add_argument("--fix-interpolated", action="store_true",
                    help="Fit spline on measured notes only, replace all "
                         "NN-interpolated notes with spline values "
@@ -844,7 +828,7 @@ def main():
 
     if not any([args.anchor_midi, args.auto_anchors, args.report_anchors,
                 args.smooth_outliers is not None,
-                args.fill_missing, args.smooth_all, args.fix_interpolated,
+                args.fill_missing, args.smooth_all, args.fixis_interpolated,
                 args.report]):
         p.error("Specify at least one operation: --smooth-outliers, "
                 "--smooth-all, --fill-missing, --anchor-midi, "

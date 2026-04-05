@@ -110,8 +110,8 @@ class ICRRoundTripProcessor:
             replaced by round-trip extracted values. spectral_eq is preserved
             unchanged from params_smooth (EQ not part of round-trip).
         """
-        measured = {k: v for k, v in params_smooth["samples"].items()
-                    if not v.get("_interpolated")}
+        measured = {k: v for k, v in params_smooth["notes"].items()
+                    if not v.get("is_interpolated")}
         n = len(measured)
         print(f"\n[ICR round-trip] {n} measured notes → ICR render → re-extract")
 
@@ -174,8 +174,8 @@ class ICRRoundTripProcessor:
 
             # ── 6. Merge: round-trip physical params + original spectral_eq ──
             params_rt = self._merge(params_smooth, params_rt_raw)
-            n_rt = len([k for k, v in params_rt["samples"].items()
-                        if not v.get("_interpolated")])
+            n_rt = len([k for k, v in params_rt["notes"].items()
+                        if not v.get("is_interpolated")])
             print(f"  Round-trip complete: {n_rt}/{n} notes extracted")
             return params_rt
 
@@ -197,7 +197,7 @@ class ICRRoundTripProcessor:
 
         # Strip spectral_eq before export so ICR applies no EQ
         neutral_samples = {k: _strip_eq(v) for k, v in measured.items()}
-        neutral_params  = {**params_smooth, "samples": neutral_samples}
+        neutral_params  = {**params_smooth, "notes": neutral_samples}
 
         SoundbankExporter().from_params(
             neutral_params, out_path,
@@ -229,8 +229,8 @@ class ICRRoundTripProcessor:
         """
         merged_samples = {}
 
-        for key, s_smooth in params_smooth["samples"].items():
-            s_rt = params_rt_raw["samples"].get(key)
+        for key, s_smooth in params_smooth["notes"].items():
+            s_rt = params_rt_raw["notes"].get(key)
 
             if s_rt is None:
                 # Round-trip extraction failed for this note — keep smooth
@@ -246,10 +246,10 @@ class ICRRoundTripProcessor:
             else:
                 merged.pop("spectral_eq", None)
 
-            # Preserve _interpolated flag
-            if "_interpolated" in s_smooth:
-                merged["_interpolated"] = s_smooth["_interpolated"]
+            # Preserve is_interpolated flag
+            if "is_interpolated" in s_smooth:
+                merged["is_interpolated"] = s_smooth["is_interpolated"]
 
             merged_samples[key] = merged
 
-        return {**params_smooth, "samples": merged_samples}
+        return {**params_smooth, "notes": merged_samples}

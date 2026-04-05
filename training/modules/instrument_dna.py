@@ -217,7 +217,7 @@ class InstrumentDNA:
         """
         with open(params_path) as f:
             data = json.load(f)
-        self._raw = data.get("samples", {})
+        self._raw = data.get("notes", {})
 
         # ── Load or auto-detect qualities ──────────────────────────────────
         qualities: dict[str, float] = {}
@@ -514,11 +514,12 @@ class InstrumentDNA:
         rows_tau, rows_anoise = [], []
         for key, note in self._raw.items():
             q = self._qualities.get(key, 0.0)
-            if q < 0.1 or not note.get("noise"):
+            if q < 0.1:
                 continue
-            ns  = note["noise"]
-            tau = ns.get("attack_tau", 0.0)
-            an  = ns.get("A_noise", 0.0)
+            tau = note.get("attack_tau", 0.0)
+            an  = note.get("A_noise", 0.0)
+            if not tau and not an:
+                continue
             midi = float(note["midi"])
             vel  = float(note["vel"])
             if tau > 0:
@@ -753,7 +754,8 @@ class InstrumentDNA:
             vel = note["vel"]
             vel_gain = ((vel + 1) / 8.0) ** vel_gamma
             try:
-                audio = synth.synthesize_note(note, duration_s=duration_s)
+                audio = synth.render(note, midi=note["midi"], vel=note["vel"],
+                                    duration=duration_s)
                 rms   = float(np.sqrt(np.mean(audio ** 2)))
                 if rms > 1e-10:
                     note["rms_gain"] = float((target_rms * vel_gain) / rms)

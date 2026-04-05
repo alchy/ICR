@@ -144,9 +144,8 @@ class SampleGenerator:
         If source is a params dict, look up the key directly.
         If source is an InstrumentProfile, run NN inference.
         """
-        # Duck-type: internal params dict uses "samples"; exported soundbank uses "notes"
         if isinstance(source, dict):
-            notes = source.get("samples") or source.get("notes")
+            notes = source.get("notes")
             if notes is not None:
                 key = f"m{midi:03d}_vel{vel}"
                 if key not in notes:

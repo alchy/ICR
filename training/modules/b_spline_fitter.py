@@ -57,7 +57,7 @@ terms) without improving output quality.
 
 Public API:
     fitter = BSplneFitter()
-    fitter.fit(samples)          # fit from measured notes in params["samples"]
+    fitter.fit(notes)            # fit from measured notes in params["notes"]
     B = fitter.predict(midi)     # scalar B for given MIDI number
 """
 
@@ -108,7 +108,7 @@ class BSplneFitter:
         """
         midi_vals: dict[int, list[float]] = {}
         for note in samples.values():
-            if note.get("_interpolated"):
+            if note.get("is_interpolated"):
                 continue
             b = note.get("B")
             if not b or b <= 1e-12:

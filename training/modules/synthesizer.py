@@ -323,13 +323,10 @@ def _synthesize_note(
             L += (sa*gla + sb*glb + sc*glc)/3.0
             R += (sa*gra + sb*grb + sc*grc)/3.0
 
-    # Attack noise (independent L/R)
-    # Read from both exported soundbank format (flat keys) and raw extractor format
-    # (nested "noise" sub-dict) so that synthesizer works with both input types.
-    noise_p  = params.get("noise", {})
-    taun_raw = params.get("attack_tau") or noise_p.get("attack_tau", 0.05) or 0.05
-    cent     = params.get("noise_centroid_hz") or noise_p.get("centroid_hz", 3000.0) or 3000.0
-    A_noise  = ((params.get("A_noise") or noise_p.get("A_noise", 0.06) or 0.06) * noise_level)
+    # Attack noise (independent L/R) — flat soundbank keys only
+    taun_raw = params.get("attack_tau", 0.05) or 0.05
+    cent     = params.get("noise_centroid_hz", 3000.0) or 3000.0
+    A_noise  = (params.get("A_noise", 0.06) or 0.06) * noise_level
     tau1_k1  = next((p.get("tau1", 3.0) for p in partials
                      if p.get("k")==1 and p.get("A0") and p["A0"]>1e-10), 3.0) or 3.0
     taun     = min(taun_raw, tau1_k1)

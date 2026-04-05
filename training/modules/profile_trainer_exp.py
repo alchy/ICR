@@ -127,7 +127,7 @@ def build_dataset_exp(samples: dict) -> dict:
             break
 
     for s in samples.values():
-        if s.get("_interpolated"):
+        if s.get("is_interpolated"):
             continue
         midi = s.get("midi"); vel = s.get("vel")
         if midi is None or vel is None:
@@ -155,10 +155,9 @@ def build_dataset_exp(samples: dict) -> dict:
                 for fhz, g in zip(eq_freqs, gd):
                     eq_data.append((mf, freq_feat(float(fhz)), vf, float(g)))
 
-        noise    = s.get("noise") or {}
-        atk_tau  = noise.get("attack_tau") or 0
-        centroid = noise.get("centroid_hz") or 0
-        A_noise  = noise.get("A_noise") or noise.get("floor_rms") or 0
+        atk_tau  = s.get("attack_tau") or 0
+        centroid = s.get("noise_centroid_hz") or 0
+        A_noise  = s.get("A_noise") or 0
         if atk_tau > 0.001 and centroid > 50 and A_noise > 0.001:
             noise_data.append((mf, vf,
                                 math.log(max(atk_tau, 1e-4)),
@@ -633,10 +632,10 @@ def generate_profile_exp(
                     }
 
                 noise_pred = model.forward_noise(mf, vf).squeeze(0)
-                noise_out  = {
-                    "attack_tau":  round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
-                    "centroid_hz": round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
-                    "A_noise":     round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
+                noise_out = {
+                    "attack_tau":        round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
+                    "noise_centroid_hz": round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
+                    "A_noise":           round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
                 }
 
                 partials = []
@@ -674,17 +673,17 @@ def generate_profile_exp(
 
                 sample = {
                     "midi": midi, "vel": vel,
-                    "f0_nominal_hz": round(f0, 6),
+                    "f0_hz": round(f0, 6),
                     "B": round(float(B), 8), "duration_s": round(float(dur), 3),
-                    "partials": partials, "noise": noise_out,
-                    "_interpolated": True,
+                    "partials": partials, **noise_out,
+                    "is_interpolated": True,
                 }
                 if spectral_eq:
                     sample["spectral_eq"] = spectral_eq
 
-                if orig_samples and key in orig_samples and not orig_samples[key].get("_interpolated"):
+                if orig_samples and key in orig_samples and not orig_samples[key].get("is_interpolated"):
                     sample = copy.deepcopy(orig_samples[key])
-                    sample["_interpolated"] = False
+                    sample["is_interpolated"] = False
 
                 samples_out[key] = sample
 
@@ -713,8 +712,8 @@ class ProfileTrainerExp(ProfileTrainer):
         val_frac: float = 0.15,
         verbose:  bool  = True,
     ) -> InstrumentProfileExp:
-        samples  = params["samples"]
-        measured = {k: v for k, v in samples.items() if not v.get("_interpolated")}
+        samples  = params["notes"]
+        measured = {k: v for k, v in samples.items() if not v.get("is_interpolated")}
 
         train_s, val_s = _split_val_midis(measured, val_frac)
         val_midis = sorted({s["midi"] for s in val_s.values()})
@@ -764,7 +763,7 @@ class ProfileTrainerExp(ProfileTrainer):
             midi_from=midi_from, midi_to=midi_to,
             sr=sr, orig_samples=None,
         )
-        return {"samples": samples, "n_samples": len(samples)}
+        return {"notes": samples}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -906,8 +905,8 @@ class ProfileTrainerEncExpWithB(ProfileTrainerExp):
         icr_evaluator         = None,
         icr_patience:  int   = 15,
     ) -> InstrumentProfileEncExpWithB:
-        samples  = params["samples"]
-        measured = {k: v for k, v in samples.items() if not v.get("_interpolated")}
+        samples  = params["notes"]
+        measured = {k: v for k, v in samples.items() if not v.get("is_interpolated")}
 
         train_s, val_s = _split_val_midis(measured, val_frac)
         val_midis = sorted({s["midi"] for s in val_s.values()})
@@ -972,7 +971,7 @@ class ProfileTrainerEncExpWithB(ProfileTrainerExp):
             midi_from=midi_from, midi_to=midi_to,
             sr=sr, orig_samples=None,
         )
-        return {"samples": samples, "n_samples": len(samples)}
+        return {"notes": samples}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1045,10 +1044,10 @@ def generate_profile_exp_no_b(
                     }
 
                 noise_pred = model.forward_noise(mf, vf).squeeze(0)
-                noise_out  = {
-                    "attack_tau":  round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
-                    "centroid_hz": round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
-                    "A_noise":     round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
+                noise_out = {
+                    "attack_tau":        round(float(np.clip(float(torch.exp(noise_pred[0]).item()), 0.002, 1.0)), 5),
+                    "noise_centroid_hz": round(float(np.clip(float(torch.exp(noise_pred[1]).item()), 100.0, 20000.0)), 1),
+                    "A_noise":           round(float(np.clip(float(torch.exp(noise_pred[2]).item()), 0.001, 0.5)), 5),
                 }
 
                 partials = []
@@ -1087,17 +1086,17 @@ def generate_profile_exp_no_b(
 
                 sample = {
                     "midi": midi, "vel": vel,
-                    "f0_nominal_hz": round(f0, 6),
+                    "f0_hz": round(f0, 6),
                     "B": round(float(B), 8), "duration_s": round(float(dur), 3),
-                    "partials": partials, "noise": noise_out,
-                    "_interpolated": True,
+                    "partials": partials, **noise_out,
+                    "is_interpolated": True,
                 }
                 if spectral_eq:
                     sample["spectral_eq"] = spectral_eq
 
-                if orig_samples and key in orig_samples and not orig_samples[key].get("_interpolated"):
+                if orig_samples and key in orig_samples and not orig_samples[key].get("is_interpolated"):
                     sample = copy.deepcopy(orig_samples[key])
-                    sample["_interpolated"] = False
+                    sample["is_interpolated"] = False
 
                 samples_out[key] = sample
 
@@ -1157,7 +1156,7 @@ class ProfileTrainerEncExp(ProfileTrainerEncExpWithB):
         model = ProfileTrainerEncExp().train(params, epochs=5000)
 
     Pass an explicit ``b_fitter`` to reuse a spline fitted elsewhere:
-        b_fitter = BSplneFitter().fit(params["samples"])
+        b_fitter = BSplneFitter().fit(params["notes"])
         model    = ProfileTrainerEncExp().train(params, b_fitter=b_fitter)
     """
 
@@ -1175,8 +1174,8 @@ class ProfileTrainerEncExp(ProfileTrainerEncExpWithB):
     ) -> InstrumentProfileEncExp:
         from training.modules.profile_trainer import _split_val_midis
 
-        samples  = params["samples"]
-        measured = {k: v for k, v in samples.items() if not v.get("_interpolated")}
+        samples  = params["notes"]
+        measured = {k: v for k, v in samples.items() if not v.get("is_interpolated")}
 
         if b_fitter is None:
             print("  Fitting B spline from measured notes (auto) ...")

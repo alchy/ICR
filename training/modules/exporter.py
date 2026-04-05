@@ -69,8 +69,9 @@ class SoundbankExporter:
             target_rms: Target RMS level.
             rng_seed:   Base seed for random phase generation.
         """
-        samples = params["samples"]
-        out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed)
+        samples = params["notes"]
+        out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed,
+                                    params.get("metadata"))
 
         n_total = len(samples)
         print(f"Exporting params bank: {n_total} notes "
@@ -91,7 +92,6 @@ class SoundbankExporter:
                     ela = time.monotonic() - t0
                     print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
-        out["n_notes"] = n_done
         self._write(out, out_path)
 
     def hybrid(
@@ -117,9 +117,9 @@ class SoundbankExporter:
         """
         from training.modules.profile_trainer import build_dataset, generate_profile
 
-        samples = params["samples"]
+        samples = params["notes"]
         measured = {k: v for k, v in samples.items()
-                    if not v.get("_interpolated")}
+                    if not v.get("is_interpolated")}
 
         # Build dataset only to get eq_freqs
         ds = build_dataset(measured)
@@ -148,7 +148,8 @@ class SoundbankExporter:
                 orig_samples=measured,
             )
 
-        out = self._make_header("nn-hybrid:model", sr, target_rms, duration, rng_seed)
+        out = self._make_header("nn-hybrid:model", sr, target_rms, duration, rng_seed,
+                                params.get("metadata"))
 
         n_measured = len(measured)
         n_total    = len(all_samples)
@@ -172,7 +173,6 @@ class SoundbankExporter:
                     ela = time.monotonic() - t0
                     print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
-        out["n_notes"] = n_done
         self._write(out, out_path)
 
     def pure_nn(
@@ -200,9 +200,9 @@ class SoundbankExporter:
         """
         from training.modules.profile_trainer import build_dataset, generate_profile
 
-        samples  = params["samples"]
+        samples  = params["notes"]
         measured = {k: v for k, v in samples.items()
-                    if not v.get("_interpolated")}
+                    if not v.get("is_interpolated")}
 
         ds = build_dataset(measured)
 
@@ -228,7 +228,8 @@ class SoundbankExporter:
                 orig_samples=None,
             )
 
-        out    = self._make_header("nn-pure:model", sr, target_rms, duration, rng_seed)
+        out    = self._make_header("nn-pure:model", sr, target_rms, duration, rng_seed,
+                                   params.get("metadata"))
         n_total = len(all_samples)
         print(f"Exporting pure-NN bank: {n_total} notes "
               f"(all from NN, no measured notes preserved, "
@@ -249,7 +250,6 @@ class SoundbankExporter:
                     ela = time.monotonic() - t0
                     print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
-        out["n_notes"] = n_done
         self._write(out, out_path)
 
     # ── Internal builders ─────────────────────────────────────────────────────
@@ -257,8 +257,10 @@ class SoundbankExporter:
     def _make_header(
         self, source: str, sr: int, target_rms: float,
         duration: float, rng_seed: int,
+        input_meta: dict = None,
     ) -> dict:
-        return {
+        meta = dict(input_meta or {})
+        meta.update({
             "source":     source,
             "sr":         sr,
             "target_rms": target_rms,
@@ -266,8 +268,10 @@ class SoundbankExporter:
             "k_max":      PIANO_MAX_PARTIALS,
             "rng_seed":   rng_seed,
             "duration_s": duration,
-            "n_notes":    0,
-            "notes":      {},
+        })
+        return {
+            "metadata": meta,
+            "notes":    {},
         }
 
     def _build_note(
@@ -295,11 +299,10 @@ class SoundbankExporter:
             for ki in range(K)
         ]
 
-        # Noise params (cap attack_tau at tau1 of k=1 partial)
-        noise           = sample.get("noise", {})
-        attack_tau_raw  = float(noise.get("attack_tau", 0.05) or 0.05)
-        A_noise         = float(noise.get("A_noise", 0.04) or 0.04)
-        centroid_hz     = float(noise.get("centroid_hz", 3000.0) or 3000.0)
+        # Noise params (flat keys; cap attack_tau at tau1 of k=1 partial)
+        attack_tau_raw  = float(sample.get("attack_tau", 0.05) or 0.05)
+        A_noise         = float(sample.get("A_noise", 0.04) or 0.04)
+        centroid_hz     = float(sample.get("noise_centroid_hz", 3000.0) or 3000.0)
         tau1_k1         = (partials_out[0]["tau1"] if partials_out else 3.0)
         attack_tau      = min(attack_tau_raw, tau1_k1)
 
@@ -316,9 +319,8 @@ class SoundbankExporter:
         note: dict = {
             "midi":              midi,
             "vel":               vel_idx,
-            "f0_hz":             float(sample.get("f0_fitted_hz") or sample.get("f0_nominal_hz", 440.0)),
+            "f0_hz":             float(sample.get("f0_hz", 440.0) or 440.0),
             "B":                 float(sample.get("B") or 0.0),
-            "K_valid":           K,
             "phi_diff":          phi_diff,
             "attack_tau":        attack_tau,
             "A_noise":           A_noise,
@@ -332,10 +334,8 @@ class SoundbankExporter:
         spectral_eq = sample.get("spectral_eq")
         if spectral_eq:
             note["spectral_eq"] = spectral_eq
-        # Preserve _interpolated flag so post-processing tools can distinguish
-        # NN-generated notes from measured ones.
-        if sample.get("_interpolated"):
-            note["_interpolated"] = True
+        if sample.get("is_interpolated"):
+            note["is_interpolated"] = True
         return note
 
     def _build_partial(self, p: dict, phi: float, k_idx: int = 0) -> dict:

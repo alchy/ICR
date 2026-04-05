@@ -75,11 +75,15 @@ class ParamExtractor:
         results = self._run_parallel(work, workers)
         summary = _compute_summary(results)
 
+        midis = sorted({v["midi"] for v in results.values()})
         return {
-            "bank_dir":  str(bank_path),
-            "n_samples": len(results),
-            "summary":   summary,
-            "samples":   results,
+            "metadata": {
+                "instrument_name": "",
+                "midi_range_from": midis[0] if midis else 21,
+                "midi_range_to":   midis[-1] if midis else 108,
+                "source":          "extracted",
+            },
+            "notes": results,
         }
 
     def extract_note(self, wav_path: str) -> dict:
@@ -160,17 +164,17 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
     f0_nominal = _midi_to_hz(midi)
 
     result = {
-        "midi":         midi,
-        "vel":          vel,
-        "f0_nominal_hz": float(f0_nominal),
-        "sr":           sr,
-        "duration_s":   float(duration),
-        "B":            0.0,
-        "f0_fitted_hz": float(f0_nominal),
-        "n_strings":    _n_strings(midi),
-        "n_partials":   0,
-        "partials":     [],
-        "noise":        {},
+        "midi":           midi,
+        "vel":            vel,
+        "f0_hz":          float(f0_nominal),
+        "sr":             sr,
+        "duration_s":     float(duration),
+        "B":              0.0,
+        "n_partials":     0,
+        "attack_tau":     0.05,
+        "A_noise":        0.001,
+        "noise_centroid_hz": 3000.0,
+        "partials":       [],
     }
 
     if duration < 0.1:
@@ -181,9 +185,9 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
     freqs, spec  = _compute_spectrum(audio, sr, t_spec_start, t_spec_end)
 
     peaks, B, f0_fit = _detect_harmonic_peaks(freqs, spec, f0_nominal, sr)
-    result["B"]             = float(B)
-    result["f0_fitted_hz"]  = float(f0_fit)
-    result["n_partials"]    = len(peaks)
+    result["B"]    = float(B)
+    result["f0_hz"] = float(f0_fit)
+    result["n_partials"] = len(peaks)
 
     if not peaks:
         return result
@@ -203,7 +207,10 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
         partials_out.append(partial)
 
     result["partials"] = partials_out
-    result["noise"]    = _analyze_noise(audio, sr, peaks, f0_fit, B)
+    noise_info = _analyze_noise(audio, sr, peaks, f0_fit, B)
+    result["attack_tau"]        = noise_info["attack_tau"]
+    result["A_noise"]           = noise_info["A_noise"]
+    result["noise_centroid_hz"] = noise_info["centroid_hz"]
 
     # Longitudinal (phantom) partials for low bass notes only
     if midi < 50 and stft_mag.shape[0] >= 8:
@@ -213,7 +220,6 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
         )
         if long_parts:
             result["partials"].extend(long_parts)
-            result["n_longitudinal"] = len(long_parts)
 
     result["n_partials"] = len(result["partials"])
     return _sanitize_for_json(result)
@@ -522,8 +528,7 @@ def _detect_beating(times, amps, i_peak) -> dict:
 
 
 def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
-    result = {"attack_tau": 0.05, "A_noise": 0.001,
-              "centroid_hz": 2000.0, "spectral_slope_db_oct": -3.0}
+    result = {"attack_tau": 0.05, "A_noise": 0.001, "centroid_hz": 3000.0}
 
     if len(audio) < sr*0.1:
         return result
@@ -584,10 +589,6 @@ def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
             f_w, psd = welch(noise_for_centroid[:frame], fs=sr, nperseg=frame//2)
             if psd.sum() > 0:
                 result["centroid_hz"] = float(np.sum(f_w*psd) / psd.sum())
-                mask = (f_w >= 200) & (f_w <= 8000)
-                if mask.sum() >= 4:
-                    coeffs = np.polyfit(np.log2(f_w[mask]+1), np.log10(psd[mask]+1e-30), 1)
-                    result["spectral_slope_db_oct"] = float(coeffs[0]*10)
         except Exception:
             pass
 
