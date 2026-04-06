@@ -243,21 +243,26 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     v.vel_idx    = vel_idx;
     v.t_samples  = 0;
 
-    // Noise
+    // Noise — biquad bandpass at centroid_hz, Q=1.5 for natural hammer shape
     v.A_noise_sc  = np.A_noise * np.rms_gain * noise_level;
     v.noise_env   = 1.f;
     v.noise_decay = dsp::decay_coeff(np.attack_tau, sample_rate_);
-    v.noise_alpha = dsp::onepole_alpha(np.noise_centroid_hz, sample_rate_);
-    v.noise_y_L = 0.f;
-    v.noise_y_R = 0.f;
+    v.noise_bpf   = dsp::rbj_bandpass(np.noise_centroid_hz, 1.5f, sample_rate_);
+    v.noise_bpf_L = {};
+    v.noise_bpf_R = {};
     v.rng.seed((uint32_t)(rng_seed + midi * 256 + vel_idx));
     v.ndist = std::normal_distribution<float>(0.f, 1.f);
 
-    // Onset ramp
+    // Onset ramp (minimal click-prevention gate, 0.5 ms)
     v.onset_gain = 0.f;
     v.onset_step = piano::ramp_step(PIANO_ONSET_MS, sample_rate_);
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
+
+    // Attack rise envelope — models physical string excitation rise time
+    float rise_tau = piano::rise_tau_from_midi(midi);
+    v.rise_coeff  = dsp::decay_coeff(rise_tau, sample_rate_);
+    v.rise_env    = 0.f;
 
     // Compute max voice duration: 10× longest tau2 or 60 s, whichever is less
     float max_tau = 0.f;
@@ -356,16 +361,8 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
             const float t_f  = (float)v.t_samples * inv_sr_;
             const float tpi2 = TAU * t_f;
 
-            // ── Partials ─────────────────────────────────────────────────────
-            // String model per note (set at noteOn from MIDI):
-            //   1-string (MIDI≤27):  s1 = cos(f·t + φ)
-            //   2-string (28–48):    s1 = cos((f+beat/2)·t + φ)
-            //                        s2 = cos((f-beat/2)·t + φ + φ_diff)
-            //   3-string (MIDI>48):  s1 = cos((f-beat)·t + φ)        outer left
-            //                        s2 = cos(f·t + φ₂)              center (rand)
-            //                        s3 = cos((f+beat)·t + φ + φ_diff) outer right
-            //   beat = beat_hz * beat_scale  (full detuning, not half)
-            float samp_L = 0.f, samp_R = 0.f;
+            // ── Partials (string model + bi-exp envelope) ────────────────────
+            float part_L = 0.f, part_R = 0.f;
             for (int ki = 0; ki < v.n_partials; ki++) {
                 PianoPartialState& ps = v.partials[ki];
 
@@ -376,7 +373,7 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
                 if (ps.A0_scaled * env < PIANO_SKIP_THRESH) continue;
 
                 const float phase_c = tpi2 * ps.f_hz + ps.phi;
-                const float phase_b = tpi2 * ps.beat_hz_h;   // = 2π·t·beat_hz·scale/2
+                const float phase_b = tpi2 * ps.beat_hz_h;
 
                 float A0_env = ps.A0_scaled * env;
                 piano::StereoSample ss;
@@ -394,19 +391,32 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
                                                v.gl1, v.gr1, v.gl2, v.gr2,
                                                v.gl3, v.gr3);
                 }
-                samp_L += ss.L;
-                samp_R += ss.R;
+                part_L += ss.L;
+                part_R += ss.R;
             }
 
-            // ── Noise (independent L/R, 1-pole IIR low-pass at centroid_hz) ──
+            // ── Attack rise envelope (partials only) ────────────────────────
+            // Models physical string excitation rise time.  Noise bypasses
+            // this so the hammer-knock transient is not suppressed.
+            float rise = piano::rise_envelope_tick(v.rise_env, v.rise_coeff);
+            part_L *= rise;
+            part_R *= rise;
+
+            // ── Noise (biquad bandpass at centroid_hz, Q=1.5) ────────────
+            // Noise bypasses rise envelope — it IS the attack transient.
+            float noise_L = 0.f, noise_R = 0.f;
             {
                 float noise_sc = v.A_noise_sc * v.noise_env;
-                samp_L += piano::noise_1pole_tick(noise_sc * v.ndist(v.rng),
-                                                  v.noise_alpha, v.noise_y_L);
-                samp_R += piano::noise_1pole_tick(noise_sc * v.ndist(v.rng),
-                                                  v.noise_alpha, v.noise_y_R);
+                noise_L = dsp::biquad_tick(noise_sc * v.ndist(v.rng),
+                                           v.noise_bpf, v.noise_bpf_L);
+                noise_R = dsp::biquad_tick(noise_sc * v.ndist(v.rng),
+                                           v.noise_bpf, v.noise_bpf_R);
                 v.noise_env *= v.noise_decay;
             }
+
+            // ── Combine partials + noise ────────────────────────────────────
+            float samp_L = part_L + noise_L;
+            float samp_R = part_R + noise_R;
 
             // ── Schroeder all-pass decorrelation ─────────────────────────────
             piano::allpass_decorrelate(samp_L, samp_R,

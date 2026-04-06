@@ -44,7 +44,7 @@ static constexpr int   PIANO_MAX_PARTIALS = 60;
 static constexpr int   PIANO_MAX_VOICES   = 128;   // one slot per MIDI note
 static constexpr int   PIANO_N_BIQUAD     = 5;     // spectral EQ cascade sections
 static constexpr float PIANO_RELEASE_MS   = 100.f; // key-release fade-out
-static constexpr float PIANO_ONSET_MS     = 3.f;   // click-prevention onset
+static constexpr float PIANO_ONSET_MS     = 0.5f;  // click-prevention onset (minimal)
 static constexpr float PIANO_SKIP_THRESH  = 2e-7f; // skip silent partials
 
 // ── Biquad coefficients — alias for dsp::BiquadCoeffs ────────────────────────
@@ -112,19 +112,25 @@ struct PianoVoice {
     // phi_diff (constant per note, loaded from params)
     float phi_diff       = 0.f;
 
-    // Noise state
+    // Noise state — biquad bandpass filter (hammer noise shaping)
     float A_noise_sc     = 0.f;  // A_noise * rms_gain * noise_level
     float noise_env      = 1.f;
     float noise_decay    = 0.f;
-    float noise_alpha    = 1.f;  // 1-pole IIR coeff: 1 - exp(-2π*centroid_hz/sr)
-    float noise_y_L      = 0.f;  // IIR filter state — left channel
-    float noise_y_R      = 0.f;  // IIR filter state — right channel
+    dsp::BiquadCoeffs noise_bpf;        // bandpass coefficients
+    dsp::BiquadState  noise_bpf_L;      // filter state — left channel
+    dsp::BiquadState  noise_bpf_R;      // filter state — right channel
 
     // Release / onset ramps
     float rel_gain       = 1.f;
     float rel_step       = 0.f;
     float onset_gain     = 0.f;
     float onset_step     = 0.f;
+
+    // Attack rise envelope: 1 - exp(-t / rise_tau)
+    // Models the physical string excitation rise time (~1-5 ms for bass,
+    // <1 ms for treble).  Multiplies partials only — noise bypasses this.
+    float rise_coeff     = 1.f;  // per-sample: exp(-1 / (rise_tau * sr))
+    float rise_env       = 0.f;  // current rise level, approaches 1.0
 
     // Noise PRNG (independent of Python RNG — noise not required to match exactly)
     std::mt19937 rng;

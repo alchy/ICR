@@ -154,4 +154,28 @@ inline float gain_envelope_smooth(float current, float target,
         return release_coeff * current + (1.f - release_coeff) * target;
 }
 
+// ── RBJ bandpass filter coefficient computation ──────────────────────────────
+
+/// Compute RBJ constant-skirt-gain bandpass biquad coefficients.
+///   fc = center frequency [Hz]
+///   Q  = quality factor (bandwidth = fc/Q)
+///   sr = sample rate [Hz]
+inline BiquadCoeffs rbj_bandpass(float fc, float Q, float sr) {
+    float w0   = TAU * fc / sr;
+    float sinw = std::sin(w0);
+    float cosw = std::cos(w0);
+    float al   = sinw / (2.f * Q);
+
+    float a0 = 1.f + al;
+    float ia = 1.f / a0;
+
+    BiquadCoeffs c;
+    c.b0 = ( al)           * ia;
+    c.b1 =  0.f;
+    c.b2 = (-al)           * ia;
+    c.a1 = (-2.f * cosw)   * ia;
+    c.a2 = ( 1.f - al)     * ia;
+    return c;
+}
+
 } // namespace dsp

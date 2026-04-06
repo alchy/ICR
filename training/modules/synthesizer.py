@@ -51,7 +51,7 @@ class Synthesizer:
         fade_out:            float = 0.5,
         stereo_decorr:       float = 1.0,
         stereo_boost:        float = 1.0,
-        eq_freq_min:         float = 400.0,
+        eq_freq_min:         float = 80.0,
         onset_ms:            float = 3.0,
         rng_seed:            int   = None,
     ) -> np.ndarray:

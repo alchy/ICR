@@ -306,10 +306,20 @@ class SoundbankExporter:
         # by harmonic residual (centroid ~120-200 Hz), causing boomy "bottle" noise
         # at the same frequency as the piano tone.  Floor at 1000 Hz ensures the
         # attack noise is spectrally above the lower harmonics for all registers.
-        centroid_hz     = max(float(sample.get("noise_centroid_hz", 3000.0) or 3000.0),
-                              1000.0)
+        centroid_hz_raw = float(sample.get("noise_centroid_hz", 3000.0) or 3000.0)
+        CENTROID_MIN_HZ = 1000.0
+        centroid_hz     = max(centroid_hz_raw, CENTROID_MIN_HZ)
+        # When the floor raises centroid, IIR noise RMS increases (α grows).
+        # Scale A_noise down so the absolute noise energy at onset is preserved.
+        if centroid_hz_raw < CENTROID_MIN_HZ:
+            def _iir_rms(fc: float) -> float:
+                import math as _math
+                a = 1.0 - _math.exp(-2.0 * _math.pi * fc / sr)
+                return _math.sqrt(a / (2.0 - a))
+            A_noise *= _iir_rms(centroid_hz_raw) / _iir_rms(CENTROID_MIN_HZ)
         tau1_k1         = (partials_out[0]["tau1"] if partials_out else 3.0)
-        attack_tau      = min(attack_tau_raw, tau1_k1)
+        # Hard cap at 0.10 s — real hammer noise never exceeds ~50 ms.
+        attack_tau      = min(attack_tau_raw, tau1_k1, 0.10)
 
         # EQ biquads (needed for rms_gain calibration)
         eq_biquads = self._fit_eq_biquads(sample, sr)

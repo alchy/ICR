@@ -235,8 +235,13 @@ def _onset_partial_envelope(audio, sr, fk, stft_times, stft_amps):
     Amplitude is matched to the long-STFT values at the junction so both
     series are on the same scale.
     """
-    ONSET_FRAME = 256
-    ONSET_HOP   = 64
+    # Frame must contain at least 4 full cycles of the partial frequency
+    # so that even bass fundamentals (27-55 Hz) are resolved.  Power-of-two
+    # for FFT efficiency; minimum 256 for treble, scales up for bass.
+    min_frame   = max(256, int(4 * sr / max(fk, 20.0)))
+    frame_exp   = max(8, min(14, round(math.log2(min_frame))))
+    ONSET_FRAME = 1 << frame_exp
+    ONSET_HOP   = max(32, ONSET_FRAME // 4)
     ONSET_END_S = 0.12            # analyse first 120 ms
 
     if len(stft_times) < 2 or len(stft_amps) < 2:
@@ -247,7 +252,7 @@ def _onset_partial_envelope(audio, sr, fk, stft_times, stft_amps):
     if len(t_on) < 4:
         return stft_times, stft_amps
 
-    _, a_on = _partial_envelope(t_on, f_on, mag_on, fk, search_bins=1)
+    _, a_on = _partial_envelope(t_on, f_on, mag_on, fk, search_bins=2)
     if len(a_on) < 4 or a_on.max() < 1e-12:
         return stft_times, stft_amps
 
@@ -447,8 +452,16 @@ def _partial_envelope(times, freqs, mag, f_center, search_bins=3) -> tuple:
 
 
 def _find_peak_frame(amps: np.ndarray) -> int:
+    """Find the frame with maximum amplitude.
+
+    For short sequences (≤6 frames, typical when onset prepend contributes
+    only a few frames for bass notes) use raw argmax to avoid the 3-sample
+    boxcar shifting the peak away from the true attack maximum.
+    """
     if len(amps) == 0:
         return 0
+    if len(amps) <= 6:
+        return int(np.argmax(amps))
     smoothed = np.convolve(amps, np.ones(3)/3, mode="same")
     return int(smoothed.argmax())
 
@@ -621,9 +634,11 @@ def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
         a_dec = rms_env[i_peak:]
         if len(t_dec) >= 4 and a_dec[0] > 1e-10:
             try:
+                # Upper bound 0.10 s: real piano hammer noise decays
+                # in 20-50 ms; longer values indicate harmonic leakage.
                 popt, _ = curve_fit(
                     lambda t, tau: a_dec[0]*np.exp(-t/tau),
-                    t_dec, a_dec, p0=[0.05], bounds=([0.003],[1.0]), maxfev=2000)
+                    t_dec, a_dec, p0=[0.03], bounds=([0.003],[0.10]), maxfev=2000)
                 result["attack_tau"] = float(popt[0])
             except Exception:
                 pass

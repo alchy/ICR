@@ -263,4 +263,30 @@ inline bool release_ramp_tick(float& gain, float step) {
     return false;
 }
 
+// ── Attack rise envelope ─────────────────────────────────────────────────────
+
+/// Compute the rise time constant (tau) from MIDI note number.
+///
+/// Models the physical string excitation rise time:
+///   Bass (MIDI 21-33):  ~3-5 ms  (heavy wound strings, slow hammer)
+///   Middle (MIDI 48-72): ~1-2 ms (plain steel strings)
+///   Treble (MIDI 84+):   ~0.3 ms (short stiff strings, hard hammer)
+///
+/// Interpolated linearly across the keyboard.
+inline float rise_tau_from_midi(int midi) {
+    // Bass anchor: MIDI 21 → 4.0 ms, Treble anchor: MIDI 108 → 0.2 ms
+    float t = (float)(midi - 21) / (108.f - 21.f);  // 0..1
+    t = (std::max)(0.f, (std::min)(1.f, t));
+    float rise_ms = 4.0f - t * 3.8f;                // 4.0 → 0.2 ms
+    return rise_ms * 0.001f;                         // seconds
+}
+
+/// Advance the attack rise envelope by one sample.
+///   rise_env approaches 1.0 exponentially: rise_env += (1 - rise_env) * (1 - coeff)
+/// Returns the current rise factor [0, 1].
+inline float rise_envelope_tick(float& rise_env, float rise_coeff) {
+    rise_env = 1.f - (1.f - rise_env) * rise_coeff;
+    return rise_env;
+}
+
 } // namespace piano
