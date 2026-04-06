@@ -7,10 +7,10 @@
  *   Bass Boost : low  shelf boost at 180 Hz  (0..10 dB, MIDI-controlled)
  *
  * Applied to stereo L/R independently.
+ * Filter math provided by dsp::rbj_high_shelf / dsp::rbj_low_shelf.
  */
 
-struct BiquadShelveState { float x1=0,x2=0,y1=0,y2=0; };
-struct BiquadShelveCoeff { float b0,b1,b2,a1,a2; };
+#include "dsp/dsp_math.h"
 
 class BBE {
 public:
@@ -24,17 +24,13 @@ public:
     void reset();
 
 private:
-    static BiquadShelveCoeff highShelf(float fc, float gain_db, float sr);
-    static BiquadShelveCoeff lowShelf (float fc, float gain_db, float sr);
-    static float processBiquad(float x, BiquadShelveCoeff& c, BiquadShelveState& s);
-
     float sample_rate_ = 48000.f;
 
-    BiquadShelveCoeff def_coeff_{};
-    BiquadShelveState def_state_l_{}, def_state_r_{};
+    dsp::BiquadCoeffs def_coeff_{};
+    dsp::BiquadState  def_state_l_{}, def_state_r_{};
 
-    BiquadShelveCoeff bass_coeff_{};
-    BiquadShelveState bass_state_l_{}, bass_state_r_{};
+    dsp::BiquadCoeffs bass_coeff_{};
+    dsp::BiquadState  bass_state_l_{}, bass_state_r_{};
 
     float def_gain_db_  = 0.f;
     float bass_gain_db_ = 0.f;

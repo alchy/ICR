@@ -27,6 +27,7 @@
  */
 
 #include "engine/i_synth_core.h"
+#include "dsp/dsp_math.h"
 #include <array>
 #include <atomic>
 #include <cstdint>
@@ -46,12 +47,9 @@ static constexpr float PIANO_RELEASE_MS   = 100.f; // key-release fade-out
 static constexpr float PIANO_ONSET_MS     = 3.f;   // click-prevention onset
 static constexpr float PIANO_SKIP_THRESH  = 2e-7f; // skip silent partials
 
-// ── Loaded-param structs (constant per note) ─────────────────────────────────
+// ── Biquad coefficients — alias for dsp::BiquadCoeffs ────────────────────────
 
-struct PianoBiquadCoeffs {
-    float b0 = 1.f, b1 = 0.f, b2 = 0.f;   // numerator   (a0 = 1 always)
-    float a1 = 0.f, a2 = 0.f;              // denominator
-};
+using PianoBiquadCoeffs = dsp::BiquadCoeffs;
 
 struct PianoPartialParam {
     int   k        = 0;     // partial index, 1-based; used for B recomputation
@@ -226,8 +224,9 @@ private:
     std::atomic<float> eq_strength_    {1.0f};   // EQ blend 0=bypass 1=full
 
     // Last note info for GUI viz
-    std::atomic<int>   last_midi_   {-1};
-    std::atomic<int>   last_vel_    {0};
+    std::atomic<int>   last_midi_     {-1};
+    std::atomic<int>   last_vel_      {0};
+    std::atomic<int>   last_vel_idx_  {0};   // actual vel_idx used (after fallback)
 
     // Protects note_params_ during full bank reload (loadBankJson).
     // MIDI callbacks are sequential so only needed vs the RT thread's handleNoteOn.

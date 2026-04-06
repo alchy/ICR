@@ -3,11 +3,15 @@
  * limiter.h — Simple stereo peak limiter.
  *
  * Algorithm:
- *   - Per-block peak detection
- *   - If peak > threshold: gain = threshold / peak  (instantaneous, no lookahead)
- *   - Gain envelope: attack fixed 1 ms, release variable (midi-controlled)
+ *   - Per-sample peak detection: max(|L|, |R|)
+ *   - If peak > threshold: target gain = threshold / peak
+ *   - Gain envelope: exponential smoothing (attack/release)
  *   - Output gain reduction available for metering
+ *
+ * Math primitives from dsp/dsp_math.h.
  */
+
+#include "dsp/dsp_math.h"
 
 class Limiter {
 public:

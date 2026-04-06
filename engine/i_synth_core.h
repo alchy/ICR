@@ -63,6 +63,9 @@ struct CorePartialViz {
 struct CoreVoiceViz {
     int   midi              = -1;
     int   vel               = 0;
+    int   vel_idx           = 0;        // actual velocity layer index used
+    int   vel_idx_requested = 0;        // velocity layer index originally requested
+    bool  vel_fallback      = false;    // true = vel_idx differs from requested (nearest-match)
     float f0_hz             = 0.f;
     float B                 = 0.f;      // inharmonicity
     bool  is_interpolated   = false;    // true = NN-generated, false = measured

@@ -14,6 +14,7 @@
  *   decay = exp(-1 / (tau * sr))  →  env[n] = env[n-1] * decay
  */
 #include "piano_core.h"
+#include "piano_math.h"
 #include "engine/synth_core_registry.h"
 #include "third_party/json.hpp"
 
@@ -26,8 +27,7 @@ using json = nlohmann::json;
 // Self-register
 REGISTER_SYNTH_CORE("PianoCore", PianoCore)
 
-static constexpr float PI  = 3.14159265358979f;
-static constexpr float TAU = 2.f * PI;
+static constexpr float TAU = dsp::TAU;
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
@@ -216,8 +216,9 @@ void PianoCore::handleNoteOn(uint8_t midi, uint8_t vel) noexcept {
               stereo_decorr_.load(std::memory_order_relaxed),
               keyboard_spread_.load(std::memory_order_relaxed));
 
-    last_midi_.store(midi, std::memory_order_relaxed);
-    last_vel_ .store(vel,  std::memory_order_relaxed);
+    last_midi_   .store(midi,    std::memory_order_relaxed);
+    last_vel_    .store(vel,     std::memory_order_relaxed);
+    last_vel_idx_.store(vel_idx, std::memory_order_relaxed);
 }
 
 void PianoCore::handleNoteOff(uint8_t midi) noexcept {
@@ -225,7 +226,7 @@ void PianoCore::handleNoteOff(uint8_t midi) noexcept {
     if (!v.active) return;
     v.releasing = true;
     v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
-    v.rel_step  = -v.rel_gain / (PIANO_RELEASE_MS * 0.001f * sample_rate_);
+    v.rel_step  = -v.rel_gain * piano::ramp_step(PIANO_RELEASE_MS, sample_rate_);
 }
 
 void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
@@ -245,13 +246,8 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     // Noise
     v.A_noise_sc  = np.A_noise * np.rms_gain * noise_level;
     v.noise_env   = 1.f;
-    v.noise_decay = std::exp(-1.f / std::max(np.attack_tau * sample_rate_, 1.f));
-    // 1-pole IIR low-pass: colours noise to centroid_hz (matches Python synthesizer).
-    // alpha = 1 - exp(-2π * fc / sr); fc clamped to 0.45*sr to stay below Nyquist.
-    {
-        float fc      = std::min(np.noise_centroid_hz, sample_rate_ * 0.45f);
-        v.noise_alpha = 1.f - std::exp(-TAU * fc / sample_rate_);
-    }
+    v.noise_decay = dsp::decay_coeff(np.attack_tau, sample_rate_);
+    v.noise_alpha = dsp::onepole_alpha(np.noise_centroid_hz, sample_rate_);
     v.noise_y_L = 0.f;
     v.noise_y_R = 0.f;
     v.rng.seed((uint32_t)(rng_seed + midi * 256 + vel_idx));
@@ -259,7 +255,7 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
 
     // Onset ramp
     v.onset_gain = 0.f;
-    v.onset_step = 1.f / (PIANO_ONSET_MS * 0.001f * sample_rate_);
+    v.onset_step = piano::ramp_step(PIANO_ONSET_MS, sample_rate_);
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
@@ -285,8 +281,8 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
 
         ps.env_fast   = 1.f;
         ps.env_slow   = 1.f;
-        ps.decay_fast = std::exp(-1.f / std::max(pp.tau1 * sample_rate_, 1.f));
-        ps.decay_slow = std::exp(-1.f / std::max(pp.tau2 * sample_rate_, 1.f));
+        ps.decay_fast = dsp::decay_coeff(pp.tau1, sample_rate_);
+        ps.decay_slow = dsp::decay_coeff(pp.tau2, sample_rate_);
         ps.A0_scaled  = pp.A0 * np.rms_gain;
         ps.a1         = pp.a1;
         ps.f_hz       = pp.f_hz;
@@ -297,38 +293,30 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     }
 
     // Stereo panning: constant-power pan per string, MIDI-dependent center.
-    // 1-string (MIDI≤27): single angle = center
-    // 2-string (28–48):   angle1 = center-half,  angle2 = center+half
-    // 3-string (MIDI>48): angle1 = center-half,  angle2 = center,  angle3 = center+half
     {
-        const float center = (PI / 4.f) + ((float)midi - 64.5f) / 87.0f * keyboard_spread * 0.5f;
+        const float center = piano::keyboard_pan_angle(midi, keyboard_spread);
         const float half   = pan_spread * 0.5f;
         if (midi <= 27) {
-            v.gl1 = std::cos(center); v.gr1 = std::sin(center);
+            piano::constant_power_pan(center, v.gl1, v.gr1);
             v.gl2 = 0.f; v.gr2 = 0.f;
             v.gl3 = 0.f; v.gr3 = 0.f;
         } else if (midi <= 48) {
-            v.gl1 = std::cos(center - half); v.gr1 = std::sin(center - half);
-            v.gl2 = std::cos(center + half); v.gr2 = std::sin(center + half);
+            piano::constant_power_pan(center - half, v.gl1, v.gr1);
+            piano::constant_power_pan(center + half, v.gl2, v.gr2);
             v.gl3 = 0.f; v.gr3 = 0.f;
         } else {
-            v.gl1 = std::cos(center - half); v.gr1 = std::sin(center - half);
-            v.gl2 = std::cos(center);        v.gr2 = std::sin(center);
-            v.gl3 = std::cos(center + half); v.gr3 = std::sin(center + half);
+            piano::constant_power_pan(center - half, v.gl1, v.gr1);
+            piano::constant_power_pan(center,        v.gl2, v.gr2);
+            piano::constant_power_pan(center + half, v.gl3, v.gr3);
         }
     }
 
-    // Schroeder first-order all-pass decorrelation (matches physics_synth.py)
-    // decor_strength = clamp((midi-40)/60, 0,1) * 0.45 * stereo_decorr
-    // L all-pass: g_L = 0.35 + ds*0.25   (positive)
-    // R all-pass: g_R = -(0.35 + ds*0.20) (negative → phase flip at Nyquist)
-    // Difference equation: y[n] = -g*x[n] + x[n-1] - g*y[n-1]
+    // Schroeder first-order all-pass decorrelation
     {
-        float ds = std::min(1.0f, std::max(0.0f, ((float)midi - 40.0f) / 60.0f))
-                   * 0.45f * stereo_decorr;
-        v.decor_str = ds;
-        v.ap_g_L    =   0.35f + ds * 0.25f;
-        v.ap_g_R    = -(0.35f + ds * 0.20f);
+        auto dc     = piano::compute_decor_coeffs(midi, stereo_decorr);
+        v.decor_str = dc.decor_str;
+        v.ap_g_L    = dc.g_L;
+        v.ap_g_R    = dc.g_R;
         v.ap_x_L = v.ap_y_L = v.ap_x_R = v.ap_y_R = 0.f;
     }
 
@@ -358,9 +346,9 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
             // ── Onset ramp ──────────────────────────────────────────────────
             float env_gate = 1.f;
             if (v.in_onset) {
-                v.onset_gain += v.onset_step;
-                if (v.onset_gain >= 1.f) { v.onset_gain = 1.f; v.in_onset = false; }
-                env_gate = v.onset_gain;
+                bool onset_done = false;
+                env_gate = piano::onset_ramp_tick(v.onset_gain, v.onset_step, onset_done);
+                if (onset_done) v.in_onset = false;
             }
 
             // ── Phase base ──────────────────────────────────────────────────
@@ -381,92 +369,58 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
             for (int ki = 0; ki < v.n_partials; ki++) {
                 PianoPartialState& ps = v.partials[ki];
 
-                float env = ps.a1 * ps.env_fast + (1.f - ps.a1) * ps.env_slow;
-                ps.env_fast *= ps.decay_fast;
-                ps.env_slow *= ps.decay_slow;
+                float env = piano::biexp_envelope_tick(
+                    ps.a1, ps.env_fast, ps.env_slow,
+                    ps.decay_fast, ps.decay_slow);
 
                 if (ps.A0_scaled * env < PIANO_SKIP_THRESH) continue;
 
                 const float phase_c = tpi2 * ps.f_hz + ps.phi;
                 const float phase_b = tpi2 * ps.beat_hz_h;   // = 2π·t·beat_hz·scale/2
 
+                float A0_env = ps.A0_scaled * env;
+                piano::StereoSample ss;
                 if (v.n_model_strings == 1) {
-                    // Bass: single string at f
-                    float s1   = std::cos(phase_c);
-                    float base = ps.A0_scaled * env;
-                    samp_L += base * s1 * v.gl1;
-                    samp_R += base * s1 * v.gr1;
+                    ss = piano::string_model_1(phase_c, A0_env,
+                                               v.gl1, v.gr1);
                 } else if (v.n_model_strings == 2) {
-                    // Tenor: 2-string model (f±beat/2)
-                    float s1   = std::cos(phase_c + phase_b);
-                    float s2   = std::cos(phase_c - phase_b + ps.phi_diff);
-                    float base = ps.A0_scaled * env * 0.5f;
-                    samp_L += base * (s1 * v.gl1 + s2 * v.gl2);
-                    samp_R += base * (s1 * v.gr1 + s2 * v.gr2);
+                    ss = piano::string_model_2(phase_c, phase_b, ps.phi_diff,
+                                               A0_env,
+                                               v.gl1, v.gr1, v.gl2, v.gr2);
                 } else {
-                    // Treble: symmetric 3-string model (f-beat, f, f+beat)
-                    // phase_b = 2π·t·beat_hz·scale/2, so 2*phase_b = full detuning
-                    float s1   = std::cos(phase_c - 2.f * phase_b);
-                    float s2   = std::cos(tpi2 * ps.f_hz + ps.phi2);
-                    float s3   = std::cos(phase_c + 2.f * phase_b + ps.phi_diff);
-                    float base = ps.A0_scaled * env / 3.0f;
-                    samp_L += base * (s1 * v.gl1 + s2 * v.gl2 + s3 * v.gl3);
-                    samp_R += base * (s1 * v.gr1 + s2 * v.gr2 + s3 * v.gr3);
+                    ss = piano::string_model_3(phase_c, phase_b,
+                                               tpi2 * ps.f_hz, ps.phi2,
+                                               ps.phi_diff, A0_env,
+                                               v.gl1, v.gr1, v.gl2, v.gr2,
+                                               v.gl3, v.gr3);
                 }
+                samp_L += ss.L;
+                samp_R += ss.R;
             }
 
             // ── Noise (independent L/R, 1-pole IIR low-pass at centroid_hz) ──
-            // y[n] = alpha * x[n] + (1-alpha) * y[n-1]  (matches Python synthesizer)
             {
                 float noise_sc = v.A_noise_sc * v.noise_env;
-                float alp      = v.noise_alpha;
-                float ialp     = 1.f - alp;
-                v.noise_y_L = alp * (noise_sc * v.ndist(v.rng)) + ialp * v.noise_y_L;
-                v.noise_y_R = alp * (noise_sc * v.ndist(v.rng)) + ialp * v.noise_y_R;
-                samp_L += v.noise_y_L;
-                samp_R += v.noise_y_R;
+                samp_L += piano::noise_1pole_tick(noise_sc * v.ndist(v.rng),
+                                                  v.noise_alpha, v.noise_y_L);
+                samp_R += piano::noise_1pole_tick(noise_sc * v.ndist(v.rng),
+                                                  v.noise_alpha, v.noise_y_R);
                 v.noise_env *= v.noise_decay;
             }
 
             // ── Schroeder all-pass decorrelation ─────────────────────────────
-            // y[n] = -g*x[n] + x[n-1] - g*y[n-1]
-            if (v.decor_str > 0.01f) {
-                float Lap = -v.ap_g_L * samp_L + v.ap_x_L - v.ap_g_L * v.ap_y_L;
-                float Rap = -v.ap_g_R * samp_R + v.ap_x_R - v.ap_g_R * v.ap_y_R;
-                v.ap_x_L = samp_L;  v.ap_y_L = Lap;
-                v.ap_x_R = samp_R;  v.ap_y_R = Rap;
-                float inv = 1.f - v.decor_str;
-                samp_L = samp_L * inv + Lap * v.decor_str;
-                samp_R = samp_R * inv + Rap * v.decor_str;
-            }
+            piano::allpass_decorrelate(samp_L, samp_R,
+                                       v.ap_g_L, v.ap_g_R, v.decor_str,
+                                       v.ap_x_L, v.ap_y_L,
+                                       v.ap_x_R, v.ap_y_R);
 
             // ── Spectral EQ biquad cascade (Direct Form II, L/R independent) ──
-            if (v.n_biquad > 0 && v.eq_strength > 0.001f) {
-                float wetL = samp_L, wetR = samp_R;
-                for (int bi = 0; bi < v.n_biquad; bi++) {
-                    const PianoBiquadCoeffs& c = v.eq_coeffs[bi];
-                    float w0L = wetL - c.a1*v.eq_wL[bi][0] - c.a2*v.eq_wL[bi][1];
-                    wetL = c.b0*w0L + c.b1*v.eq_wL[bi][0] + c.b2*v.eq_wL[bi][1];
-                    v.eq_wL[bi][1] = v.eq_wL[bi][0];  v.eq_wL[bi][0] = w0L;
-                    float w0R = wetR - c.a1*v.eq_wR[bi][0] - c.a2*v.eq_wR[bi][1];
-                    wetR = c.b0*w0R + c.b1*v.eq_wR[bi][0] + c.b2*v.eq_wR[bi][1];
-                    v.eq_wR[bi][1] = v.eq_wR[bi][0];  v.eq_wR[bi][0] = w0R;
-                }
-                float dry = 1.f - v.eq_strength;
-                samp_L = samp_L * dry + wetL * v.eq_strength;
-                samp_R = samp_R * dry + wetR * v.eq_strength;
-            }
+            piano::eq_cascade_stereo(samp_L, samp_R,
+                                     v.n_biquad, v.eq_coeffs,
+                                     v.eq_wL, v.eq_wR, v.eq_strength);
 
             // ── M/S stereo width correction ──────────────────────────────────
-            // M = (L+R)/2 — mono, invariant (rms_gain calibration target).
-            // S = (L-R)/2 * stereo_width — scales stereo difference to match
-            // the original recording's S/M ratio measured by eq_fitter.
-            if (std::abs(v.stereo_width - 1.f) > 0.001f) {
-                const float M = (samp_L + samp_R) * 0.5f;
-                const float S = (samp_L - samp_R) * 0.5f * v.stereo_width;
-                samp_L = M + S;
-                samp_R = M - S;
-            }
+            piano::ms_stereo_width(samp_L, samp_R, v.stereo_width);
 
             // ── Onset / release gates ────────────────────────────────────────
             samp_L *= env_gate;
@@ -474,11 +428,8 @@ bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept
             if (v.releasing) {
                 samp_L *= v.rel_gain;
                 samp_R *= v.rel_gain;
-                v.rel_gain += v.rel_step;
-                if (v.rel_gain <= 0.f) {
-                    v.active   = false;
-                    v.rel_gain = 0.f;
-                }
+                if (piano::release_ramp_tick(v.rel_gain, v.rel_step))
+                    v.active = false;
             }
 
             out_l[i] += samp_L;
@@ -585,8 +536,7 @@ bool PianoCore::setNoteParam(int midi, int vel,
             const float f0 = nv.f0_hz;
             for (int ki = 0; ki < nv.K; ki++) {
                 const int k = nv.partials[ki].k;
-                nv.partials[ki].f_hz =
-                    (float)(k * f0 * std::sqrt(1.0 + (double)value * k * k));
+                nv.partials[ki].f_hz = piano::partial_frequency(k, f0, value);
             }
         }
         return true;
@@ -761,15 +711,21 @@ CoreVizState PianoCore::getVizState() const {
         }
     }
 
-    int last_midi = last_midi_.load(std::memory_order_relaxed);
-    int last_vel  = last_vel_ .load(std::memory_order_relaxed);
-    if (last_midi >= 0 && last_midi < 128) {
-        int vi = midiVelToIdx((uint8_t)std::max(1, std::min(127, last_vel)));
-        const PianoNoteParam& np = note_params_[last_midi][vi];
+    int last_midi    = last_midi_   .load(std::memory_order_relaxed);
+    int last_vel     = last_vel_    .load(std::memory_order_relaxed);
+    int last_vel_idx = last_vel_idx_.load(std::memory_order_relaxed);
+    if (last_midi >= 0 && last_midi < 128
+        && last_vel_idx >= 0 && last_vel_idx < 8) {
+        const PianoNoteParam& np = note_params_[last_midi][last_vel_idx];
+
+        int requested_idx = midiVelToIdx((uint8_t)(std::max)(1, (std::min)(127, last_vel)));
 
         CoreVoiceViz vv;
-        vv.midi            = last_midi;
-        vv.vel             = last_vel;
+        vv.midi              = last_midi;
+        vv.vel               = last_vel;
+        vv.vel_idx           = last_vel_idx;
+        vv.vel_idx_requested = requested_idx;
+        vv.vel_fallback      = (last_vel_idx != requested_idx);
         vv.f0_hz             = np.f0_hz;
         vv.B                 = np.B;
         vv.n_partials        = np.K;
