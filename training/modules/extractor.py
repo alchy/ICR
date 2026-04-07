@@ -307,9 +307,11 @@ def _extract_partial(audio, sr,
     i_peak = _find_peak_frame(a_env)
 
     # Skip past hammer-contact transient before fitting decay.
-    # The first ~5 ms after peak is hammer impulse, not string decay.
-    # Fitting from the contact peak makes tau1 artificially short.
-    HAMMER_SKIP_S = 0.005   # 5 ms post-peak skip
+    # The first ~10 ms after peak contains hammer impulse + initial string
+    # excitation overshoot, not the settled string decay.  Chabassier:
+    # hammer contact bass ~4ms, middle ~2ms, but post-contact ringing
+    # extends ~10ms.  Fitting from contact peak yields tau1 = lower bound.
+    HAMMER_SKIP_S = 0.010   # 10 ms post-peak skip
     if len(t_env) > i_peak + 2:
         dt = float(t_env[i_peak + 1] - t_env[i_peak]) if i_peak + 1 < len(t_env) else 0.01
         skip_frames = max(0, int(HAMMER_SKIP_S / dt))
@@ -323,17 +325,19 @@ def _extract_partial(audio, sr,
     decay["A0"] = float(a_env[i_peak])
     beat   = _detect_beating(t_env, a_env, i_peak)
 
-    return {
-        "k":          k,
-        "f_hz":       float(fk),
-        "A0":         float(decay["A0"]),
-        "tau1":       decay["tau1"],
-        "tau2":       decay["tau2"],
-        "a1":         float(decay["a1"]),
-        "mono":       decay["mono"],
-        "beat_hz":    beat["beat_hz"],
-        "beat_depth": beat["beat_depth"],
+    result = {
+        "k":           k,
+        "f_hz":        float(fk),
+        "A0":          float(decay["A0"]),
+        "tau1":        decay["tau1"],
+        "tau2":        decay["tau2"],
+        "a1":          float(decay["a1"]),
+        "mono":        decay["mono"],
+        "beat_hz":     beat["beat_hz"],
+        "beat_depth":  beat["beat_depth"],
+        "fit_quality": decay.get("fit_quality", 0.0),
     }
+    return result
 
 
 # ─────────────────────────────────────────────────────────────────────────────
