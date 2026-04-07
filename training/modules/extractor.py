@@ -305,7 +305,22 @@ def _extract_partial(audio, sr,
         }
 
     i_peak = _find_peak_frame(a_env)
-    decay  = _fit_decay(t_env, a_env, i_peak)
+
+    # Skip past hammer-contact transient before fitting decay.
+    # The first ~5 ms after peak is hammer impulse, not string decay.
+    # Fitting from the contact peak makes tau1 artificially short.
+    HAMMER_SKIP_S = 0.005   # 5 ms post-peak skip
+    if len(t_env) > i_peak + 2:
+        dt = float(t_env[i_peak + 1] - t_env[i_peak]) if i_peak + 1 < len(t_env) else 0.01
+        skip_frames = max(0, int(HAMMER_SKIP_S / dt))
+        i_fit_start = min(i_peak + skip_frames, len(t_env) - 12)
+        i_fit_start = max(i_fit_start, i_peak)  # never go before peak
+    else:
+        i_fit_start = i_peak
+
+    decay  = _fit_decay(t_env, a_env, i_fit_start)
+    # A0 = peak amplitude (from hammer contact), not from post-skip start
+    decay["A0"] = float(a_env[i_peak])
     beat   = _detect_beating(t_env, a_env, i_peak)
 
     return {
@@ -509,7 +524,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
 
         def bi_exp(t, a1, tau1, tau2):
             a1   = np.clip(a1, 0.01, 0.99)
-            tau1 = max(tau1, 0.01)
+            tau1 = max(tau1, 0.02)   # floor: 20 ms minimum string decay
             tau2 = max(tau2, tau1 * 1.1)
             return a1 * np.exp(-t / tau1) + (1 - a1) * np.exp(-t / tau2)
 
@@ -523,7 +538,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
             (0.7,  min(mono_tau * 0.50, tau1_max * 0.8),  min(mono_tau * 4.0, tau2_max * 0.8)),
             # Random restarts: log-uniform sampling for tau, uniform for a1
             *[(float(rng_fit.uniform(0.1, 0.9)),
-               float(np.exp(rng_fit.uniform(np.log(0.01), np.log(max(0.02, tau1_max))))),
+               float(np.exp(rng_fit.uniform(np.log(0.03), np.log(max(0.06, tau1_max))))),
                float(np.exp(rng_fit.uniform(np.log(0.5), np.log(max(0.6, tau2_max))))))
               for _ in range(4)],
         ]
@@ -535,7 +550,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
                 popt2, _ = curve_fit(
                     bi_exp, t, a_norm,
                     p0=[a1_0, tau1_0, tau2_0],
-                    bounds=([0.01, 0.003, 0.05], [0.99, tau1_max, tau2_max]),
+                    bounds=([0.01, 0.03, 0.05], [0.99, tau1_max, tau2_max]),
                     maxfev=8000,
                 )
                 a1c, tau1c, tau2c = popt2
@@ -849,10 +864,11 @@ def _apply_damping_law(partials: list, f0: float, B: float) -> list:
             predicted_rate = 0.01  # floor: tau_max = 100s
         predicted_tau1 = 1.0 / predicted_rate
 
-        # Correct if: tau1 > 10s (clearly noise-floor fit) or
-        # tau1 deviates from prediction by more than 5x
+        # Correct if: tau1 is suspect — too short (hit lower bound),
+        # too long (noise-floor), or deviates from prediction by >3x
         ratio = tau1 / predicted_tau1 if predicted_tau1 > 0 else 999
-        if tau1 > 10.0 or ratio > 5.0:
+        inv_ratio = 1.0 / ratio if ratio > 0 else 999
+        if tau1 > 10.0 or tau1 < 0.02 or ratio > 3.0 or inv_ratio > 3.0:
             p["tau1"] = float(predicted_tau1)
             # Ensure tau2 >= tau1 * 1.5
             tau2 = p.get("tau2")

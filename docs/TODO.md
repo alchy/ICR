@@ -387,6 +387,14 @@ Current 4 initializations risk local optima.  Increase to 8 with
 random restarts.  Add per-note fit quality metric (residual energy
 / total energy) and flag notes below threshold.
 
+**5f. Hammer-contact skip in decay fitting (IMPLEMENTED):**
+Root cause of tau1=0.01 in middle register: onset prepend captures the
+hammer contact peak (~first 5 ms), which is a transient impulse, not
+string decay.  The bi-exp fitter interprets this as a fast component.
+Fix: skip 5 ms post-peak before fitting, but preserve peak A0 value.
+This makes the fitter see the actual string decay starting after the
+hammer releases.
+
 **5d. Longitudinal peak detection (Phase 3a):**
 After standard harmonic peak extraction, scan for non-harmonic peaks
 in the first 10 ms of the spectrogram.  Classify by comparing
@@ -494,3 +502,8 @@ velocity resolution = smoother dynamic transitions.
 - [x] Spectral shape borrowing in exporter (vel 5-7 average -> vel 0-4)
 - [x] Velocity interpolation: float 0.0-7.0, lerpNoteParams in C++
 - [x] Revised TODO with Chabassier physics + extraction impact analysis
+- [x] Bank inspector tool (`tools/inspect_bank.py`)
+- [x] Hammer-contact skip: 5 ms post-peak skip before bi-exp fitting —
+      fixes tau1=0.01 root cause (was fitting hammer impulse, not string decay)
+- [x] Damping law correction: now also catches tau1 < 0.02 s (too short)
+- [x] Bi-exp fitter tau1 lower bound raised to 0.03 s
