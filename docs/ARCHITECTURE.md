@@ -1,6 +1,66 @@
 # ICR — C++ Engine Architecture
 
-## High-Level Overview
+## Overview
+
+ICR is an additive piano synthesizer engine written in C++17, designed for
+real-time playback of parametric soundbanks with polyphonic voice management,
+spectral EQ, and soundboard convolution.  The architecture follows the
+Ithaca Core 3-layer pattern (Voice, VoiceManager, PatchManager).
+
+## Key Architecture Components
+
+- **CoreEngine**: Audio callback, lock-free MIDI queue (SPSC ring, 256 events),
+  master gain/pan/LFO, peak metering.  Owns ISynthCore and DspChain.
+- **ISynthCore**: Pluggable synthesis interface.  Selected at startup via `--core`.
+  Implementations: PianoCore (additive piano), SineCore (reference sine).
+- **PatchManager**: MIDI → native float translation.  Velocity interpolation
+  (float 0.0–7.0), sustain pedal with delayed note-offs.  Entry point for all
+  MIDI events — voice and voice manager never see raw MIDI.
+- **VoiceManager**: Voice pool lifecycle.  128 slots, one per MIDI note.
+  Init/release/processBlock delegation.  No MIDI awareness.
+- **Voice**: Independent computation unit.  Owns all per-voice state (oscillators,
+  envelopes, noise, EQ, decorrelation).  `process()` produces stereo audio.
+  Can be distributed to a separate HW module.
+- **DspChain**: Master bus post-processing: Convolver (soundboard IR) → BBE → Limiter.
+- **GUI**: ImGui real-time interface.  Core-agnostic — right panel generated from
+  `describeParams()` and `getVizState()`.
+
+## Critical Initialization Order
+
+1. Create `CoreEngine`
+2. Call `engine->initialize(coreName, paramsJson, ...)` — loads ISynthCore + JSON
+3. Start audio: `engine->start()` — begins RT audio callback
+4. Optionally load soundboard IR: `dsp->loadConvolverIR(path, sr)`
+5. Connect MIDI: `midi_in.open(engine, port)`
+
+## Audio Processing (RT Thread)
+
+```cpp
+// CoreEngine audio callback — called by miniaudio per block (256 samples)
+engine.processBlock():
+    1. Drain MIDI queue → core->noteOn/Off/sustainPedal
+    2. core->processBlock(L, R, n)        // ISynthCore → VoiceManager → Voice
+    3. applyMasterAndLfo(L, R, n)         // gain, pan, LFO modulation
+    4. dsp_.process(L, R, n)              // Convolver → BBE → Limiter
+    5. Update peak meter
+    6. Interleave L+R → audio device
+```
+
+## Two Core Implementations
+
+**PianoCore** (full additive piano synthesis):
+- 60 partials per voice, bi-exponential envelopes, 1/2/3-string beating models
+- Biquad bandpass hammer noise, Schroeder allpass decorrelation
+- 10-section spectral EQ cascade, M/S stereo width correction
+- Attack rise envelope, onset/release gates
+- Velocity interpolation with `lerpNoteParams()` between 8 layers
+
+**SineCore** (minimal reference implementation):
+- Single sine oscillator per voice, velocity-scaled amplitude
+- Onset/release ramps (click prevention)
+- No EQ, no noise, no partials — validates the 3-layer architecture
+
+## High-Level Diagram
 
 ```mermaid
 graph TD
