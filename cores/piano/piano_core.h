@@ -184,7 +184,85 @@ public:
     PianoPartialState partials[PIANO_MAX_PARTIALS];
 };
 
-// ── PianoCore ─────────────────────────────────────────────────────────────────
+// ── VoiceManager — lifecycle and processing of voice pool ────────────────────
+
+class PianoVoiceManager {
+public:
+    /// Process all active voices, adding to output buffers.
+    bool processBlock(float* out_l, float* out_r, int n_samples, float inv_sr) noexcept;
+
+    /// Initialize a voice with interpolated parameters.
+    void initVoice(int midi, int vel_idx, const PianoNoteParam& np,
+                   float beat_scale, float noise_level, int rng_seed,
+                   float pan_spread, float stereo_decorr,
+                   float keyboard_spread, float sample_rate,
+                   float eq_strength) noexcept;
+
+    /// Begin release phase for a voice.
+    void releaseVoice(int midi, float sample_rate) noexcept;
+
+    /// Release all active voices.
+    void releaseAll(float sample_rate) noexcept;
+
+    PianoVoice&       voice(int midi)       { return voices_[midi]; }
+    const PianoVoice& voice(int midi) const { return voices_[midi]; }
+
+private:
+    PianoVoice voices_[PIANO_MAX_VOICES];
+};
+
+// ── PatchManager — MIDI to native parameter translation ─────────────────────
+
+class PianoPatchManager {
+public:
+    /// Translate MIDI noteOn to native voice parameters and trigger.
+    void noteOn(uint8_t midi, uint8_t velocity,
+                PianoNoteParam note_params[][8],
+                PianoVoiceManager& vm,
+                float sample_rate, float beat_scale, float noise_level,
+                int rng_seed, float pan_spread, float stereo_decorr,
+                float keyboard_spread, float eq_strength,
+                std::mutex& bank_mutex) noexcept;
+
+    /// Translate MIDI noteOff.
+    void noteOff(uint8_t midi, PianoVoiceManager& vm, float sample_rate) noexcept;
+
+    /// Handle sustain pedal.
+    void sustainPedal(bool down, PianoVoiceManager& vm, float sample_rate) noexcept;
+
+    /// Release all voices.
+    void allNotesOff(PianoVoiceManager& vm, float sample_rate) noexcept;
+
+    /// Last triggered note info (for GUI).
+    int  lastMidi()   const { return last_midi_.load(std::memory_order_relaxed); }
+    int  lastVel()    const { return last_vel_.load(std::memory_order_relaxed); }
+    int  lastVelIdx() const { return last_vel_idx_.load(std::memory_order_relaxed); }
+
+    /// Map MIDI velocity 1-127 to vel index 0-7
+    static int midiVelToIdx(uint8_t velocity) {
+        return std::min(7, (int)(velocity - 1) / 16);
+    }
+
+    /// Map MIDI velocity 1-127 to continuous float position 0.0-7.0
+    static float midiVelToFloat(uint8_t velocity) {
+        return std::min(7.f, (float)(velocity - 1) / 16.f);
+    }
+
+    /// Interpolate two PianoNoteParam structs by factor t (0=a, 1=b).
+    static PianoNoteParam lerpNoteParams(const PianoNoteParam& a,
+                                         const PianoNoteParam& b,
+                                         float t) noexcept;
+
+private:
+    std::atomic<bool> sustain_          {false};
+    std::atomic<bool> delayed_offs_[PIANO_MAX_VOICES] = {};
+
+    std::atomic<int>  last_midi_     {-1};
+    std::atomic<int>  last_vel_      {0};
+    std::atomic<int>  last_vel_idx_  {0};
+};
+
+// ── PianoCore — top-level ISynthCore implementation ──────────────────────────
 
 class PianoCore final : public ISynthCore {
 public:
@@ -219,59 +297,26 @@ public:
     bool        isLoaded()    const override { return loaded_; }
 
 private:
-    // Loaded note params [midi 0..127][vel_idx 0..7]
+    // Note parameters [midi 0..127][vel_idx 0..7]
     PianoNoteParam note_params_[128][8];
 
-    // Active voices (one slot per MIDI note)
-    PianoVoice voices_[PIANO_MAX_VOICES];
-
-    // Sustain pedal state
-    std::atomic<bool> sustain_          {false};
-    std::atomic<bool> delayed_offs_[PIANO_MAX_VOICES];
+    // Three-layer architecture
+    PianoVoiceManager voice_mgr_;
+    PianoPatchManager patch_mgr_;
 
     float sample_rate_ = 44100.f;
     float inv_sr_      = 1.f / 44100.f;
     bool  loaded_      = false;
 
     // GUI-settable parameters (read from RT thread via atomic)
-    std::atomic<float> beat_scale_   {1.0f};   // scales beat_hz for all notes
-    std::atomic<float> noise_level_  {1.0f};   // scales noise amplitude
-    std::atomic<int>   rng_seed_     {0};       // base seed (applied at noteOn)
-    std::atomic<float> pan_spread_      {0.55f};  // within-note string spread [rad]
-    std::atomic<float> stereo_decorr_  {1.0f};   // Schroeder all-pass strength
-    std::atomic<float> keyboard_spread_{0.60f};  // L-R spread across keyboard [rad]
-    std::atomic<float> eq_strength_    {1.0f};   // EQ blend 0=bypass 1=full
+    std::atomic<float> beat_scale_   {1.0f};
+    std::atomic<float> noise_level_  {1.0f};
+    std::atomic<int>   rng_seed_     {0};
+    std::atomic<float> pan_spread_      {0.55f};
+    std::atomic<float> stereo_decorr_  {1.0f};
+    std::atomic<float> keyboard_spread_{0.60f};
+    std::atomic<float> eq_strength_    {1.0f};
 
-    // Last note info for GUI viz
-    std::atomic<int>   last_midi_     {-1};
-    std::atomic<int>   last_vel_      {0};
-    std::atomic<int>   last_vel_idx_  {0};   // actual vel_idx used (after fallback)
-
-    // Protects note_params_ during full bank reload (loadBankJson).
-    // MIDI callbacks are sequential so only needed vs the RT thread's handleNoteOn.
+    // Protects note_params_ during full bank reload.
     mutable std::mutex bank_mutex_;
-
-    // Helpers
-    void handleNoteOn (uint8_t midi, uint8_t vel) noexcept;
-    void handleNoteOff(uint8_t midi)              noexcept;
-    void initVoice    (PianoVoice& v, int midi, int vel_idx,
-                       const PianoNoteParam& np,
-                       float beat_scale, float noise_level, int rng_seed,
-                       float pan_spread, float stereo_decorr,
-                       float keyboard_spread) noexcept;
-
-    // Interpolate two PianoNoteParam structs by factor t (0=a, 1=b).
-    static PianoNoteParam lerpNoteParams(const PianoNoteParam& a,
-                                         const PianoNoteParam& b,
-                                         float t) noexcept;
-
-    // Map MIDI velocity 1-127 to vel index 0-7
-    static int midiVelToIdx(uint8_t velocity) {
-        return std::min(7, (int)(velocity - 1) / 16);
-    }
-
-    // Map MIDI velocity 1-127 to continuous float position 0.0-7.0
-    static float midiVelToFloat(uint8_t velocity) {
-        return std::min(7.f, (float)(velocity - 1) / 16.f);
-    }
 };

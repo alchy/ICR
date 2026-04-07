@@ -31,9 +31,7 @@ static constexpr float TAU = dsp::TAU;
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
-PianoCore::PianoCore() {
-    for (auto& d : delayed_offs_) d.store(false, std::memory_order_relaxed);
-}
+PianoCore::PianoCore() {}
 
 // ── JSON loading ──────────────────────────────────────────────────────────────
 
@@ -159,97 +157,119 @@ void PianoCore::setSampleRate(float sr) {
     // Active voices will drift after SR change; not worth re-computing mid-note.
 }
 
-// ── MIDI (RT thread) ──────────────────────────────────────────────────────────
+// ── MIDI (RT thread) — delegates to PatchManager ────────────────────────────
 
 void PianoCore::noteOn(uint8_t midi, uint8_t velocity) {
     if (midi >= PIANO_MAX_VOICES) return;
     if (velocity == 0) { noteOff(midi); return; }
-    handleNoteOn(midi, velocity);
+    patch_mgr_.noteOn(midi, velocity, note_params_, voice_mgr_,
+                      sample_rate_,
+                      beat_scale_.load(std::memory_order_relaxed),
+                      noise_level_.load(std::memory_order_relaxed),
+                      rng_seed_.load(std::memory_order_relaxed),
+                      pan_spread_.load(std::memory_order_relaxed),
+                      stereo_decorr_.load(std::memory_order_relaxed),
+                      keyboard_spread_.load(std::memory_order_relaxed),
+                      eq_strength_.load(std::memory_order_relaxed),
+                      bank_mutex_);
 }
 
 void PianoCore::noteOff(uint8_t midi) {
     if (midi >= PIANO_MAX_VOICES) return;
-    if (sustain_.load(std::memory_order_relaxed))
-        delayed_offs_[midi].store(true, std::memory_order_relaxed);
-    else
-        handleNoteOff(midi);
+    patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_);
 }
 
 void PianoCore::sustainPedal(bool down) {
-    sustain_.store(down, std::memory_order_relaxed);
-    if (!down) {
-        for (int m = 0; m < PIANO_MAX_VOICES; m++) {
-            if (delayed_offs_[m].load(std::memory_order_relaxed)) {
-                handleNoteOff((uint8_t)m);
-                delayed_offs_[m].store(false, std::memory_order_relaxed);
-            }
-        }
-    }
+    patch_mgr_.sustainPedal(down, voice_mgr_, sample_rate_);
 }
 
 void PianoCore::allNotesOff() {
-    for (int m = 0; m < PIANO_MAX_VOICES; m++) {
-        if (voices_[m].active) handleNoteOff((uint8_t)m);
-        delayed_offs_[m].store(false, std::memory_order_relaxed);
-    }
-    sustain_.store(false, std::memory_order_relaxed);
+    patch_mgr_.allNotesOff(voice_mgr_, sample_rate_);
 }
 
-void PianoCore::handleNoteOn(uint8_t midi, uint8_t vel) noexcept {
-    // bank_mutex_ guards against concurrent loadBankJson memcpy.
-    // try_to_lock: if a bank load is in progress, skip this noteOn rather than
-    // blocking the RT audio thread.
-    std::unique_lock<std::mutex> lk(bank_mutex_, std::try_to_lock);
+// ── PatchManager ─────────────────────────────────────────────────────────────
+
+void PianoPatchManager::noteOn(
+        uint8_t midi, uint8_t velocity,
+        PianoNoteParam note_params[][8],
+        PianoVoiceManager& vm,
+        float sample_rate, float beat_scale, float noise_level,
+        int rng_seed, float pan_spread, float stereo_decorr,
+        float keyboard_spread, float eq_strength,
+        std::mutex& bank_mutex) noexcept {
+    std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
     if (!lk.owns_lock()) return;
 
-    // Map velocity to continuous float position and find two bounding layers
-    float vel_f = midiVelToFloat(vel);
-    int   lo    = (int)vel_f;                    // floor
-    int   hi    = std::min(lo + 1, 7);           // ceil
-    float frac  = vel_f - (float)lo;             // interpolation factor
+    float vel_f = midiVelToFloat(velocity);
+    int   lo    = (int)vel_f;
+    int   hi    = std::min(lo + 1, 7);
+    float frac  = vel_f - (float)lo;
 
-    // Find nearest valid layers around lo and hi
     auto findValid = [&](int start) -> int {
-        if (start >= 0 && start <= 7 && note_params_[midi][start].valid) return start;
+        if (start >= 0 && start <= 7 && note_params[midi][start].valid) return start;
         for (int dv = 1; dv < 8; dv++) {
             int a = start - dv, b = start + dv;
-            if (a >= 0 && note_params_[midi][a].valid) return a;
-            if (b <= 7 && note_params_[midi][b].valid) return b;
+            if (a >= 0 && note_params[midi][a].valid) return a;
+            if (b <= 7 && note_params[midi][b].valid) return b;
         }
         return -1;
     };
 
     int lo_valid = findValid(lo);
     int hi_valid = findValid(hi);
-    if (lo_valid < 0) return;  // no valid params at all
+    if (lo_valid < 0) return;
     if (hi_valid < 0) hi_valid = lo_valid;
 
-    // Interpolate parameters between the two layers
     int vel_idx;
     PianoNoteParam np;
     if (lo_valid == hi_valid || frac < 0.001f) {
         vel_idx = lo_valid;
-        np      = note_params_[midi][lo_valid];
+        np      = note_params[midi][lo_valid];
     } else {
-        vel_idx = lo_valid;  // for GUI display
-        np      = lerpNoteParams(note_params_[midi][lo_valid],
-                                  note_params_[midi][hi_valid], frac);
+        vel_idx = lo_valid;
+        np      = lerpNoteParams(note_params[midi][lo_valid],
+                                  note_params[midi][hi_valid], frac);
     }
 
-    initVoice(voices_[midi], midi, vel_idx, np,
-              beat_scale_.load(std::memory_order_relaxed),
-              noise_level_.load(std::memory_order_relaxed),
-              rng_seed_.load(std::memory_order_relaxed),
-              pan_spread_.load(std::memory_order_relaxed),
-              stereo_decorr_.load(std::memory_order_relaxed),
-              keyboard_spread_.load(std::memory_order_relaxed));
+    vm.initVoice(midi, vel_idx, np, beat_scale, noise_level, rng_seed,
+                 pan_spread, stereo_decorr, keyboard_spread,
+                 sample_rate, eq_strength);
 
-    last_midi_   .store(midi,    std::memory_order_relaxed);
-    last_vel_    .store(vel,     std::memory_order_relaxed);
-    last_vel_idx_.store(vel_idx, std::memory_order_relaxed);
+    last_midi_   .store(midi,     std::memory_order_relaxed);
+    last_vel_    .store(velocity, std::memory_order_relaxed);
+    last_vel_idx_.store(vel_idx,  std::memory_order_relaxed);
 }
 
-PianoNoteParam PianoCore::lerpNoteParams(const PianoNoteParam& a,
+void PianoPatchManager::noteOff(uint8_t midi, PianoVoiceManager& vm,
+                                 float sample_rate) noexcept {
+    if (sustain_.load(std::memory_order_relaxed))
+        delayed_offs_[midi].store(true, std::memory_order_relaxed);
+    else
+        vm.releaseVoice(midi, sample_rate);
+}
+
+void PianoPatchManager::sustainPedal(bool down, PianoVoiceManager& vm,
+                                      float sample_rate) noexcept {
+    sustain_.store(down, std::memory_order_relaxed);
+    if (!down) {
+        for (int m = 0; m < PIANO_MAX_VOICES; m++) {
+            if (delayed_offs_[m].load(std::memory_order_relaxed)) {
+                vm.releaseVoice((uint8_t)m, sample_rate);
+                delayed_offs_[m].store(false, std::memory_order_relaxed);
+            }
+        }
+    }
+}
+
+void PianoPatchManager::allNotesOff(PianoVoiceManager& vm,
+                                     float sample_rate) noexcept {
+    vm.releaseAll(sample_rate);
+    for (int m = 0; m < PIANO_MAX_VOICES; m++)
+        delayed_offs_[m].store(false, std::memory_order_relaxed);
+    sustain_.store(false, std::memory_order_relaxed);
+}
+
+PianoNoteParam PianoPatchManager::lerpNoteParams(const PianoNoteParam& a,
                                           const PianoNoteParam& b,
                                           float t) noexcept {
     PianoNoteParam out = a;  // copy structure from a
@@ -303,20 +323,41 @@ PianoNoteParam PianoCore::lerpNoteParams(const PianoNoteParam& a,
     return out;
 }
 
-void PianoCore::handleNoteOff(uint8_t midi) noexcept {
+// ── VoiceManager ─────────────────────────────────────────────────────────────
+
+bool PianoVoiceManager::processBlock(float* out_l, float* out_r,
+                                      int n_samples, float inv_sr) noexcept {
+    bool any = false;
+    for (int m = 0; m < PIANO_MAX_VOICES; m++) {
+        if (!voices_[m].active) continue;
+        voices_[m].process(out_l, out_r, n_samples, inv_sr);
+        any = true;
+    }
+    return any;
+}
+
+void PianoVoiceManager::releaseVoice(int midi, float sample_rate) noexcept {
     PianoVoice& v = voices_[midi];
     if (!v.active) return;
     v.releasing = true;
     v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
-    v.rel_step  = -v.rel_gain * piano::ramp_step(PIANO_RELEASE_MS, sample_rate_);
+    v.rel_step  = -v.rel_gain * piano::ramp_step(PIANO_RELEASE_MS, sample_rate);
 }
 
-void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
-                           const PianoNoteParam& np,
-                           float beat_scale, float noise_level,
-                           int rng_seed, float pan_spread,
-                           float stereo_decorr,
-                           float keyboard_spread) noexcept {
+void PianoVoiceManager::releaseAll(float sample_rate) noexcept {
+    for (int m = 0; m < PIANO_MAX_VOICES; m++)
+        if (voices_[m].active) releaseVoice(m, sample_rate);
+}
+
+void PianoVoiceManager::initVoice(int midi, int vel_idx,
+                                   const PianoNoteParam& np,
+                                   float beat_scale, float noise_level,
+                                   int rng_seed, float pan_spread,
+                                   float stereo_decorr,
+                                   float keyboard_spread,
+                                   float sample_rate,
+                                   float eq_strength) noexcept {
+    PianoVoice& v = voices_[midi];
 
     v.active     = true;
     v.releasing  = false;
@@ -328,8 +369,8 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     // Noise — biquad bandpass at centroid_hz, Q=1.5 for natural hammer shape
     v.A_noise_sc  = np.A_noise * np.rms_gain * noise_level;
     v.noise_env   = 1.f;
-    v.noise_decay = dsp::decay_coeff(np.attack_tau, sample_rate_);
-    v.noise_bpf   = dsp::rbj_bandpass(np.noise_centroid_hz, 1.5f, sample_rate_);
+    v.noise_decay = dsp::decay_coeff(np.attack_tau, sample_rate);
+    v.noise_bpf   = dsp::rbj_bandpass(np.noise_centroid_hz, 1.5f, sample_rate);
     v.noise_bpf_L = {};
     v.noise_bpf_R = {};
     v.rng.seed((uint32_t)(rng_seed + midi * 256 + vel_idx));
@@ -337,14 +378,14 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
 
     // Onset ramp (minimal click-prevention gate, 0.5 ms)
     v.onset_gain = 0.f;
-    v.onset_step = piano::ramp_step(PIANO_ONSET_MS, sample_rate_);
+    v.onset_step = piano::ramp_step(PIANO_ONSET_MS, sample_rate);
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
     // Attack rise envelope — from JSON if available, else midi-based heuristic
     float rise_tau = (np.rise_tau > 0.f) ? np.rise_tau
                                           : piano::rise_tau_from_midi(midi);
-    v.rise_coeff  = dsp::decay_coeff(rise_tau, sample_rate_);
+    v.rise_coeff  = dsp::decay_coeff(rise_tau, sample_rate);
     v.rise_env    = 0.f;
 
     // Compute max voice duration: 10× longest tau2 or 60 s, whichever is less
@@ -353,7 +394,7 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
         if (np.partials[ki].tau2 > max_tau) max_tau = np.partials[ki].tau2;
     float dur_s = std::min(10.f * max_tau, 60.f);
     if (dur_s < 3.f) dur_s = 3.f;
-    v.max_t_samp = (uint64_t)(dur_s * sample_rate_);
+    v.max_t_samp = (uint64_t)(dur_s * sample_rate);
 
     // String model: from JSON if available, else midi-based default
     v.n_model_strings = (np.n_strings > 0) ? np.n_strings
@@ -367,8 +408,8 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
 
         ps.env_fast   = 1.f;
         ps.env_slow   = 1.f;
-        ps.decay_fast = dsp::decay_coeff(pp.tau1, sample_rate_);
-        ps.decay_slow = dsp::decay_coeff(pp.tau2, sample_rate_);
+        ps.decay_fast = dsp::decay_coeff(pp.tau1, sample_rate);
+        ps.decay_slow = dsp::decay_coeff(pp.tau2, sample_rate);
         ps.A0_scaled  = pp.A0 * np.rms_gain;
         ps.a1         = pp.a1;
         ps.f_hz       = pp.f_hz;
@@ -418,7 +459,7 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
 
     // Spectral EQ biquad cascade: copy coeffs, zero filter state
     v.n_biquad    = np.n_biquad;
-    v.eq_strength = eq_strength_.load(std::memory_order_relaxed);
+    v.eq_strength = eq_strength;
     for (int bi = 0; bi < np.n_biquad; bi++)
         v.eq_coeffs[bi] = np.eq[bi];
     std::memset(v.eq_wL, 0, sizeof(v.eq_wL));
@@ -531,13 +572,7 @@ bool PianoVoice::process(float* out_l, float* out_r, int n_samples,
 // ── Audio (RT thread) — delegates to per-voice process ──────────────────────
 
 bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept {
-    bool any = false;
-    for (int m = 0; m < PIANO_MAX_VOICES; m++) {
-        if (!voices_[m].active) continue;
-        voices_[m].process(out_l, out_r, n_samples, inv_sr_);
-        any = true;
-    }
-    return any;
+    return voice_mgr_.processBlock(out_l, out_r, n_samples, inv_sr_);
 }
 
 // ── Parameters (GUI thread) ───────────────────────────────────────────────────
@@ -797,23 +832,24 @@ bool PianoCore::exportBankJson(const std::string& path) {
 
 CoreVizState PianoCore::getVizState() const {
     CoreVizState vs;
-    vs.sustain_active = sustain_.load(std::memory_order_relaxed);
+    vs.sustain_active = false;  // TODO: expose from patch_mgr_
 
     for (int m = 0; m < PIANO_MAX_VOICES; m++) {
-        if (voices_[m].active) {
+        if (voice_mgr_.voice(m).active) {
             vs.active_midi_notes.push_back(m);
             vs.active_voice_count++;
         }
     }
 
-    int last_midi    = last_midi_   .load(std::memory_order_relaxed);
-    int last_vel     = last_vel_    .load(std::memory_order_relaxed);
-    int last_vel_idx = last_vel_idx_.load(std::memory_order_relaxed);
+    int last_midi    = patch_mgr_.lastMidi();
+    int last_vel     = patch_mgr_.lastVel();
+    int last_vel_idx = patch_mgr_.lastVelIdx();
     if (last_midi >= 0 && last_midi < 128
         && last_vel_idx >= 0 && last_vel_idx < 8) {
         const PianoNoteParam& np = note_params_[last_midi][last_vel_idx];
 
-        int requested_idx = midiVelToIdx((uint8_t)(std::max)(1, (std::min)(127, last_vel)));
+        int requested_idx = PianoPatchManager::midiVelToIdx(
+            (uint8_t)(std::max)(1, (std::min)(127, last_vel)));
 
         CoreVoiceViz vv;
         vv.midi              = last_midi;
