@@ -204,17 +204,36 @@ Master bus (DspChain):
 # Inspect soundbank parameters per register
 python tools/inspect_bank.py soundbanks/pl-grand.json
 
-# Inspect specific note
+# Inspect specific note with partials detail
 python tools/inspect_bank.py soundbanks/pl-grand.json --midi 57 --vel 4
 
-# Quality report (compare synthesis vs original WAV)
+# Quality report (compare synthesis vs original WAV, per-band analysis)
 python tools/quality_report.py soundbanks/pl-grand.json \
-    --bank C:/SoundBanks/IthacaPlayer/pl-grand
+    --bank C:/SoundBanks/IthacaPlayer/pl-grand \
+    --scores "62:0.98,57:0.30,88:0.98"
+
+# Blind listening test via MIDI loopback
+# (requires: ICR running with MIDI, loopMIDI driver, pip install mido python-rtmidi)
+python tools/blind_scoring.py --port "loopMIDI Port" \
+    --params soundbanks/pl-grand.json
+
+# Profile optimizer — learn from good notes, fix bad ones
+python tools/profile_optimizer.py soundbanks/pl-grand.json \
+    --scores "62:0.98,88:0.98,57:0.30,50:0.34" \
+    --out soundbanks/pl-grand-optimized.json
 
 # Extract soundboard IR separately
 python tools/extract_soundboard_ir.py soundbanks/pl-grand.json \
     --bank C:/SoundBanks/IthacaPlayer/pl-grand
 ```
+
+| Tool | Purpose |
+|------|---------|
+| `inspect_bank.py` | Per-register stats, per-note detail, velocity comparison |
+| `quality_report.py` | Per-band spectral distance vs original WAV, correlation with listening scores |
+| `blind_scoring.py` | Randomized MIDI listening test, score 0-9, results JSON |
+| `profile_optimizer.py` | Learn parameter profiles from good notes, correct bad notes |
+| `extract_soundboard_ir.py` | Deconvolve soundboard IR from recordings |
 
 ---
 
@@ -226,9 +245,10 @@ python tools/extract_soundboard_ir.py soundbanks/pl-grand.json \
 | No MIDI ports | Check device manager, install MIDI driver |
 | Build fails | Ensure VS 2019+ with C++ workload |
 | `LINK: fatal error` | Close running icrgui.exe before rebuild |
-| Silent output | Check `--params` path, verify JSON has `notes` |
+| Silent output | Check `--params` path, verify JSON has `notes` array |
 | Convolver clipping | Reduce mix slider (default 50% = 2% real mix) |
 | "Brinkava" notes | Check stereo_width in inspector (should be < 2.0) |
+| Blind scoring no sound | Verify loopMIDI port matches ICR MIDI input |
 
 ---
 
@@ -236,10 +256,9 @@ python tools/extract_soundboard_ir.py soundbanks/pl-grand.json \
 
 | Document | Content |
 |----------|---------|
-| [TRAINING_MODULES.md](TRAINING_MODULES.md) | Module-by-module reference |
-| [JSON_SCHEMA.md](JSON_SCHEMA.md) | Soundbank JSON format |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | C++ engine architecture |
-| [SYSEX_PROTOCOL.md](SYSEX_PROTOCOL.md) | MIDI SysEx protocol |
-| [PIANO_MODEL_FIXES.md](PIANO_MODEL_FIXES.md) | Synthesis model fixes + physics |
-| [SESSION_SUMMARY.md](SESSION_SUMMARY.md) | Development session log |
-| [TODO.md](TODO.md) | Priorities and implementation plan |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | C++ engine architecture (3-layer Ithaca Core pattern, mermaid diagrams) |
+| [TRAINING_MODULES.md](TRAINING_MODULES.md) | Extraction pipeline module-by-module reference |
+| [JSON_SCHEMA.md](JSON_SCHEMA.md) | Soundbank JSON format (note-level + partial-level keys, fallbacks) |
+| [DEVELOPMENT_LOG.md](DEVELOPMENT_LOG.md) | Physics references, key findings, listening test results |
+| [TODO.md](TODO.md) | Current priorities and implementation plan |
+| [SYSEX_PROTOCOL.md](SYSEX_PROTOCOL.md) | MIDI SysEx protocol for live parameter updates |
