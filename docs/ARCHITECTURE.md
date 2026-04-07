@@ -161,6 +161,39 @@ Komunikace RT ← GUI: pres `std::atomic<float>` (relaxed ordering).
 Komunikace MIDI → RT: pres lock-free SPSC ring buffer (256 events).
 Jedina mutex: `bank_mutex_` pri loadBankJson (try_lock z RT, block z MIDI).
 
+## Core ↔ GUI Interface (deklarativni, core-agnostic)
+
+GUI je nezavisle na konkretnim core. Pravy sloupec se generuje dynamicky:
+
+```mermaid
+graph LR
+    subgraph "ISynthCore (core definuje)"
+        DP[describeParams] --> |vector CoreParamDesc| GUI_S[GUI Slidery]
+        GV[getVizState] --> |CoreVizState| GUI_V[GUI Vizualizace]
+        SP[setParam] --> |key, value| CORE[Core stav]
+    end
+
+    subgraph "GUI (renderuje co dostane)"
+        GUI_S --> |per-group separatory| SLIDERS[Slider grid]
+        GUI_V --> |last_note_valid?| VIZ{Vizualizacni sekce}
+        VIZ --> |partials neprazdne| PTBL[Partials tabulka]
+        VIZ --> |eq_gains neprazdne| EQVIZ[EQ krivka]
+        VIZ --> |n_partials > 0| SUMMARY[Summary box]
+    end
+```
+
+| Rozhrani | Smer | Popis |
+|----------|------|-------|
+| `describeParams()` | Core → GUI | Deklaruje slidery: key, label, group, min/max, unit, is_int |
+| `getVizState()` | Core → GUI | Snapshot: aktivni hlasy, posledni nota, partialy, EQ |
+| `setParam(key, val)` | GUI → Core | Zmena parametru (atomic, RT-safe) |
+| `coreName()` | Core → GUI | Jmeno pro header |
+
+Nove core implementuje `describeParams()` a `getVizState()` — GUI
+automaticky zobrazi odpovidajici ovladaci prvky bez zmeny kodu GUI.
+Vizualizacni sekce (partials, EQ, summary) se zobrazi jen pokud
+core naplni prislusna data v `CoreVizState`.
+
 ## File Structure
 
 ```
