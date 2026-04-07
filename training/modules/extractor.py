@@ -286,17 +286,13 @@ def _extract_partial(audio, sr,
     """Extract decay + beating parameters for one partial."""
     k = peak["k"]
 
+    # Main STFT envelope (long window — good for sustain/decay)
     if stft_mag.shape[0] >= 8:
-        t_env, a_env = _partial_envelope(stft_times, stft_freqs, stft_mag, fk)
+        t_main, a_main = _partial_envelope(stft_times, stft_freqs, stft_mag, fk)
     else:
-        t_env, a_env = np.array([]), np.array([])
+        t_main, a_main = np.array([]), np.array([])
 
-    # Prepend high-resolution onset data so bi-exp fitter sees the fast
-    # initial attack that the long STFT window misses.
-    if len(t_env) >= 4:
-        t_env, a_env = _onset_partial_envelope(audio, sr, fk, t_env, a_env)
-
-    if len(t_env) < 12:
+    if len(t_main) < 12:
         return {
             "k": k, "f_hz": float(fk),
             "A0": float(peak["amp"]),
@@ -304,26 +300,24 @@ def _extract_partial(audio, sr,
             "beat_hz": 0.0, "beat_depth": 0.0,
         }
 
-    i_peak = _find_peak_frame(a_env)
+    # Onset prepend: high-resolution onset for A0 peak detection only.
+    # The onset data captures the hammer contact maximum, but its rapid
+    # initial transient confuses the bi-exp fitter (tau1 hits lower bound
+    # because the fitter tries to model the hammer impulse, not string decay).
+    # Solution: use onset for A0, fit decay from main STFT data only.
+    t_onset, a_onset = t_main, a_main  # fallback
+    if len(t_main) >= 4:
+        t_onset, a_onset = _onset_partial_envelope(audio, sr, fk, t_main, a_main)
 
-    # Skip past hammer-contact transient before fitting decay.
-    # The first ~10 ms after peak contains hammer impulse + initial string
-    # excitation overshoot, not the settled string decay.  Chabassier:
-    # hammer contact bass ~4ms, middle ~2ms, but post-contact ringing
-    # extends ~10ms.  Fitting from contact peak yields tau1 = lower bound.
-    HAMMER_SKIP_S = 0.010   # 10 ms post-peak skip
-    if len(t_env) > i_peak + 2:
-        dt = float(t_env[i_peak + 1] - t_env[i_peak]) if i_peak + 1 < len(t_env) else 0.01
-        skip_frames = max(0, int(HAMMER_SKIP_S / dt))
-        i_fit_start = min(i_peak + skip_frames, len(t_env) - 12)
-        i_fit_start = max(i_fit_start, i_peak)  # never go before peak
-    else:
-        i_fit_start = i_peak
+    # A0 from onset peak (true maximum including hammer contact)
+    i_onset_peak = _find_peak_frame(a_onset)
+    A0_peak = float(a_onset[i_onset_peak])
 
-    decay  = _fit_decay(t_env, a_env, i_fit_start)
-    # A0 = peak amplitude (from hammer contact), not from post-skip start
-    decay["A0"] = float(a_env[i_peak])
-    beat   = _detect_beating(t_env, a_env, i_peak)
+    # Bi-exp fit from main STFT only (no onset transient contamination)
+    i_main_peak = _find_peak_frame(a_main)
+    decay  = _fit_decay(t_main, a_main, i_main_peak)
+    decay["A0"] = A0_peak  # preserve onset-measured peak amplitude
+    beat   = _detect_beating(t_main, a_main, i_main_peak)
 
     result = {
         "k":           k,
@@ -528,7 +522,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
 
         def bi_exp(t, a1, tau1, tau2):
             a1   = np.clip(a1, 0.01, 0.99)
-            tau1 = max(tau1, 0.02)   # floor: 20 ms minimum string decay
+            tau1 = max(tau1, 0.05)   # floor: 50 ms — no string decays faster even with strong soundboard coupling
             tau2 = max(tau2, tau1 * 1.1)
             return a1 * np.exp(-t / tau1) + (1 - a1) * np.exp(-t / tau2)
 
@@ -554,7 +548,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
                 popt2, _ = curve_fit(
                     bi_exp, t, a_norm,
                     p0=[a1_0, tau1_0, tau2_0],
-                    bounds=([0.01, 0.03, 0.05], [0.99, tau1_max, tau2_max]),
+                    bounds=([0.01, 0.05, 0.05], [0.99, tau1_max, tau2_max]),
                     maxfev=8000,
                 )
                 a1c, tau1c, tau2c = popt2

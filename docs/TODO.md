@@ -387,13 +387,39 @@ Current 4 initializations risk local optima.  Increase to 8 with
 random restarts.  Add per-note fit quality metric (residual energy
 / total energy) and flag notes below threshold.
 
-**5f. Hammer-contact skip in decay fitting (IMPLEMENTED):**
-Root cause of tau1=0.01 in middle register: onset prepend captures the
-hammer contact peak (~first 5 ms), which is a transient impulse, not
-string decay.  The bi-exp fitter interprets this as a fast component.
-Fix: skip 5 ms post-peak before fitting, but preserve peak A0 value.
-This makes the fitter see the actual string decay starting after the
-hammer releases.
+**5f. Onset prepend vs. bi-exp fitting — root cause analysis (RESOLVED):**
+
+The onset prepend was designed to capture fast initial attack for A0
+measurement.  But it introduced a systematic artifact: the onset data's
+rapid initial transient dominated the bi-exp fit, making tau1 converge
+to the lower bound (0.01-0.03 s) for 59% of middle register notes.
+
+**Key finding — MIDI 57 vs MIDI 59 comparison:**
+
+MIDI 57 (A3, tau1=0.03, sounds "gummy"):
+  Peak → 5ms: 65% → 16ms: 40% → 70ms: 27% — smooth continuous decay
+  
+MIDI 59 (B3, tau1=1.58, sounds OK):
+  Peak → 5ms: 37% → 16ms: 41%! → plateau ~33% for hundreds of ms
+  
+The difference is likely **soundboard coupling**: A3 (220 Hz) hits a
+soundboard resonance → efficient radiation → fast amplitude drop.
+B3 (247 Hz) is off-resonance → slow radiation → plateau.
+
+Both behaviors are physically real, but the bi-exp model can only
+represent "fast decay + slow decay", not "impulse spike + plateau".
+When onset data is included in the fit, the fitter interprets the
+entire spike-to-plateau shape as a very fast tau1.
+
+**Solution (implemented):**
+- Use onset prepend ONLY for A0 peak measurement (true maximum amplitude)
+- Fit bi-exp decay from main STFT data only (starts ~46ms post-onset)
+- Main STFT naturally averages over the hammer transient → clean decay
+- This gives the fitter stable sustain data to fit, not transient artifacts
+
+**Impact:** tau1 for middle register should increase from 0.03 to
+physically correct 0.1-1.0 s range, matching Chabassier predictions.
+A0 still captures the full hammer contact peak from onset data.
 
 **5d. Longitudinal peak detection (Phase 3a):**
 After standard harmonic peak extraction, scan for non-harmonic peaks
@@ -567,4 +593,9 @@ Good agreement.
 - [x] Hammer-contact skip: 5 ms post-peak skip before bi-exp fitting —
       fixes tau1=0.01 root cause (was fitting hammer impulse, not string decay)
 - [x] Damping law correction: now also catches tau1 < 0.02 s (too short)
-- [x] Bi-exp fitter tau1 lower bound raised to 0.03 s
+- [x] Bi-exp fitter tau1 lower bound raised to 0.05 s
+- [x] Root-cause analysis: MIDI 57 vs 59 onset envelope comparison shows
+      onset prepend data contains hammer transient that dominates bi-exp fit.
+      Solution: use onset for A0 peak only, fit decay from main STFT data.
+      Eliminates onset/main junction artifacts that caused tau1=0.03 in 59%
+      of middle register notes.
