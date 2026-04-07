@@ -107,7 +107,13 @@ struct PianoPartialState {
     float phi_diff    = 0.f;
 };
 
-struct PianoVoice {
+class PianoVoice {
+public:
+    /// Process this voice for n_samples, adding output to out_l/out_r.
+    /// Returns false when voice has become inactive (can be reclaimed).
+    bool process(float* out_l, float* out_r, int n_samples, float inv_sr) noexcept;
+
+    // ── State (public for initVoice access — will be encapsulated later) ──
     bool     active      = false;
     bool     releasing   = false;
     bool     in_onset    = false;

@@ -425,126 +425,118 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     std::memset(v.eq_wR, 0, sizeof(v.eq_wR));
 }
 
-// ── Audio (RT thread, additive) ──────────────────────────────────────────────
+// ── Voice::process (independent, distributable) ─────────────────────────────
+
+bool PianoVoice::process(float* out_l, float* out_r, int n_samples,
+                          float inv_sr) noexcept {
+    for (int i = 0; i < n_samples; i++) {
+        // ── Onset ramp ──────────────────────────────────────────────────
+        float env_gate = 1.f;
+        if (in_onset) {
+            bool onset_done = false;
+            env_gate = piano::onset_ramp_tick(onset_gain, onset_step, onset_done);
+            if (onset_done) in_onset = false;
+        }
+
+        // ── Phase base ──────────────────────────────────────────────────
+        const float t_f  = (float)t_samples * inv_sr;
+        const float tpi2 = dsp::TAU * t_f;
+
+        // ── Partials (string model + bi-exp envelope) ────────────────────
+        float part_L = 0.f, part_R = 0.f;
+        for (int ki = 0; ki < n_partials; ki++) {
+            PianoPartialState& ps = partials[ki];
+
+            float env = piano::biexp_envelope_tick(
+                ps.a1, ps.env_fast, ps.env_slow,
+                ps.decay_fast, ps.decay_slow);
+
+            if (ps.A0_scaled * env < PIANO_SKIP_THRESH) continue;
+
+            const float phase_c = tpi2 * ps.f_hz + ps.phi;
+            const float phase_b = tpi2 * ps.beat_hz_h;
+
+            float A0_env = ps.A0_scaled * env;
+            piano::StereoSample ss;
+            if (n_model_strings == 1) {
+                ss = piano::string_model_1(phase_c, A0_env, gl1, gr1);
+            } else if (n_model_strings == 2) {
+                ss = piano::string_model_2(phase_c, phase_b, ps.phi_diff,
+                                           A0_env, gl1, gr1, gl2, gr2);
+            } else {
+                ss = piano::string_model_3(phase_c, phase_b,
+                                           tpi2 * ps.f_hz, ps.phi2,
+                                           ps.phi_diff, A0_env,
+                                           gl1, gr1, gl2, gr2, gl3, gr3);
+            }
+            part_L += ss.L;
+            part_R += ss.R;
+        }
+
+        // ── Attack rise envelope (partials only) ────────────────────────
+        float rise = piano::rise_envelope_tick(rise_env, rise_coeff);
+        part_L *= rise;
+        part_R *= rise;
+
+        // ── Noise (biquad bandpass) ─────────────────────────────────────
+        float noise_L = 0.f, noise_R = 0.f;
+        {
+            float noise_sc = A_noise_sc * noise_env;
+            noise_L = dsp::biquad_tick(noise_sc * ndist(rng),
+                                       noise_bpf, noise_bpf_L);
+            noise_R = dsp::biquad_tick(noise_sc * ndist(rng),
+                                       noise_bpf, noise_bpf_R);
+            noise_env *= noise_decay;
+        }
+
+        // ── Combine partials + noise ────────────────────────────────────
+        float samp_L = part_L + noise_L;
+        float samp_R = part_R + noise_R;
+
+        // ── Schroeder all-pass decorrelation ────────────────────────────
+        piano::allpass_decorrelate(samp_L, samp_R,
+                                   ap_g_L, ap_g_R, decor_str,
+                                   ap_x_L, ap_y_L, ap_x_R, ap_y_R);
+
+        // ── Spectral EQ biquad cascade ──────────────────────────────────
+        piano::eq_cascade_stereo(samp_L, samp_R,
+                                 n_biquad, eq_coeffs, eq_wL, eq_wR, eq_strength);
+
+        // ── M/S stereo width correction ─────────────────────────────────
+        piano::ms_stereo_width(samp_L, samp_R, stereo_width);
+
+        // ── Onset / release gates ───────────────────────────────────────
+        samp_L *= env_gate;
+        samp_R *= env_gate;
+        if (releasing) {
+            samp_L *= rel_gain;
+            samp_R *= rel_gain;
+            if (piano::release_ramp_tick(rel_gain, rel_step))
+                active = false;
+        }
+
+        out_l[i] += samp_L;
+        out_r[i] += samp_R;
+
+        t_samples++;
+        if (!active) break;
+        if ((uint64_t)t_samples >= max_t_samp) {
+            active = false;
+            break;
+        }
+    }
+    return active;
+}
+
+// ── Audio (RT thread) — delegates to per-voice process ──────────────────────
 
 bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept {
     bool any = false;
-
     for (int m = 0; m < PIANO_MAX_VOICES; m++) {
-        PianoVoice& v = voices_[m];
-        if (!v.active) continue;
+        if (!voices_[m].active) continue;
+        voices_[m].process(out_l, out_r, n_samples, inv_sr_);
         any = true;
-
-        for (int i = 0; i < n_samples; i++) {
-            // ── Onset ramp ──────────────────────────────────────────────────
-            float env_gate = 1.f;
-            if (v.in_onset) {
-                bool onset_done = false;
-                env_gate = piano::onset_ramp_tick(v.onset_gain, v.onset_step, onset_done);
-                if (onset_done) v.in_onset = false;
-            }
-
-            // ── Phase base ──────────────────────────────────────────────────
-            // t = t_samples / sr  (matching Python's float32 t[i] = i/sr)
-            const float t_f  = (float)v.t_samples * inv_sr_;
-            const float tpi2 = TAU * t_f;
-
-            // ── Partials (string model + bi-exp envelope) ────────────────────
-            float part_L = 0.f, part_R = 0.f;
-            for (int ki = 0; ki < v.n_partials; ki++) {
-                PianoPartialState& ps = v.partials[ki];
-
-                float env = piano::biexp_envelope_tick(
-                    ps.a1, ps.env_fast, ps.env_slow,
-                    ps.decay_fast, ps.decay_slow);
-
-                if (ps.A0_scaled * env < PIANO_SKIP_THRESH) continue;
-
-                const float phase_c = tpi2 * ps.f_hz + ps.phi;
-                const float phase_b = tpi2 * ps.beat_hz_h;
-
-                float A0_env = ps.A0_scaled * env;
-                piano::StereoSample ss;
-                if (v.n_model_strings == 1) {
-                    ss = piano::string_model_1(phase_c, A0_env,
-                                               v.gl1, v.gr1);
-                } else if (v.n_model_strings == 2) {
-                    ss = piano::string_model_2(phase_c, phase_b, ps.phi_diff,
-                                               A0_env,
-                                               v.gl1, v.gr1, v.gl2, v.gr2);
-                } else {
-                    ss = piano::string_model_3(phase_c, phase_b,
-                                               tpi2 * ps.f_hz, ps.phi2,
-                                               ps.phi_diff, A0_env,
-                                               v.gl1, v.gr1, v.gl2, v.gr2,
-                                               v.gl3, v.gr3);
-                }
-                part_L += ss.L;
-                part_R += ss.R;
-            }
-
-            // ── Attack rise envelope (partials only) ────────────────────────
-            // Models physical string excitation rise time.  Noise bypasses
-            // this so the hammer-knock transient is not suppressed.
-            float rise = piano::rise_envelope_tick(v.rise_env, v.rise_coeff);
-            part_L *= rise;
-            part_R *= rise;
-
-            // ── Noise (biquad bandpass at centroid_hz, Q=1.5) ────────────
-            // Noise bypasses rise envelope — it IS the attack transient.
-            float noise_L = 0.f, noise_R = 0.f;
-            {
-                float noise_sc = v.A_noise_sc * v.noise_env;
-                noise_L = dsp::biquad_tick(noise_sc * v.ndist(v.rng),
-                                           v.noise_bpf, v.noise_bpf_L);
-                noise_R = dsp::biquad_tick(noise_sc * v.ndist(v.rng),
-                                           v.noise_bpf, v.noise_bpf_R);
-                v.noise_env *= v.noise_decay;
-            }
-
-            // ── Combine partials + noise ────────────────────────────────────
-            float samp_L = part_L + noise_L;
-            float samp_R = part_R + noise_R;
-
-            // ── Schroeder all-pass decorrelation ─────────────────────────────
-            piano::allpass_decorrelate(samp_L, samp_R,
-                                       v.ap_g_L, v.ap_g_R, v.decor_str,
-                                       v.ap_x_L, v.ap_y_L,
-                                       v.ap_x_R, v.ap_y_R);
-
-            // ── Spectral EQ biquad cascade (Direct Form II, L/R independent) ──
-            piano::eq_cascade_stereo(samp_L, samp_R,
-                                     v.n_biquad, v.eq_coeffs,
-                                     v.eq_wL, v.eq_wR, v.eq_strength);
-
-            // ── M/S stereo width correction ──────────────────────────────────
-            piano::ms_stereo_width(samp_L, samp_R, v.stereo_width);
-
-            // ── Onset / release gates ────────────────────────────────────────
-            samp_L *= env_gate;
-            samp_R *= env_gate;
-            if (v.releasing) {
-                samp_L *= v.rel_gain;
-                samp_R *= v.rel_gain;
-                if (piano::release_ramp_tick(v.rel_gain, v.rel_step))
-                    v.active = false;
-            }
-
-            out_l[i] += samp_L;
-            out_r[i] += samp_R;
-
-            v.t_samples++;
-
-            if (!v.active) break;
-
-            // Auto-stop after natural decay
-            if ((uint64_t)v.t_samples >= v.max_t_samp) {
-                v.active = false;
-                break;
-            }
-        }
     }
-
     return any;
 }
 
