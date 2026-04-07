@@ -97,6 +97,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="Skip structural outlier detection")
     analyze.add_argument("--sr-tag",  default="f48",
                          help="SR suffix in filenames: f44 or f48 (default: f48)")
+    analyze.add_argument("--skip-ir", action="store_true",
+                         help="Skip soundboard IR extraction")
 
     return root
 
@@ -126,7 +128,41 @@ def main() -> int:
             skip_outliers=args.skip_outliers,
             sr_tag=args.sr_tag,
         )
-        print(f"\nDone -> {out}")
+        print(f"\nSoundbank -> {out}")
+
+        # Extract soundboard IR (convolution profile)
+        if not args.skip_ir:
+            ir_path = out_path.replace(".json", "-soundboard.wav")
+            print(f"\nExtracting soundboard IR...")
+            try:
+                from tools.extract_soundboard_ir import extract_transfer_function
+                import json as _json
+                import numpy as _np
+                import soundfile as _sf
+
+                _bank = _json.load(open(out_path))
+                from tools.extract_soundboard_ir import main as _ir_main
+                import sys as _sys
+                _orig_argv = _sys.argv
+                _sys.argv = ["extract_soundboard_ir", out_path,
+                             "--bank", args.bank, "--out", ir_path,
+                             "--sr-tag", args.sr_tag]
+                _ir_main()
+                _sys.argv = _orig_argv
+                print(f"Soundboard IR -> {ir_path}")
+            except Exception as e:
+                print(f"Soundboard IR extraction failed: {e}")
+                ir_path = None
+        else:
+            ir_path = None
+
+        print(f"\n{'='*60}")
+        print(f"Soundbank:     {out}")
+        if ir_path:
+            print(f"Soundboard IR: {ir_path}")
+        print(f"\nRun with:")
+        ir_arg = f' --ir {ir_path}' if ir_path else ''
+        print(f"  icrgui.exe --core PianoCore --params {out}{ir_arg}")
 
     finally:
         tee.close()

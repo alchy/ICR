@@ -109,7 +109,7 @@ Legenda sloupců:
 
 | Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `eq_biquads` | m,v | EQFitter→exporter | ✓ | ✓ | IIR EQ kaskáda | — | ✓ (mag.) | ✓ (EQ edit) | ✗ | 5 biquad sekcí (Direct Form II), formát viz sekce 4 |
+| `eq_biquads` | m,v | EQFitter→exporter | ✓ | ✓ | IIR EQ kaskáda | — | ✓ (mag.) | ✓ (EQ edit) | ✗ | 10 biquad sekcí (Direct Form II), formát viz sekce 4 |
 | `spectral_eq` | m,v | EQFitter | ✓ | ✗ | — | — | — | ✓ (re-fit) | ✗ | Surová EQ křivka `{freqs_hz, gains_db, stereo_width_factor}` pro editor re-fit; `stereo_width_factor` → flat `stereo_width` při exportu |
 
 ---
