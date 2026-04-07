@@ -271,15 +271,29 @@ PianoNoteParam PianoCore::lerpNoteParams(const PianoNoteParam& a,
         out.eq[bi].a2 = s * a.eq[bi].a2 + t * b.eq[bi].a2;
     }
 
-    // Interpolate per-partial params (use min K to avoid out-of-bounds)
-    out.K = std::min(a.K, b.K);
-    for (int ki = 0; ki < out.K; ki++) {
-        out.partials[ki].A0      = s * a.partials[ki].A0      + t * b.partials[ki].A0;
-        out.partials[ki].tau1    = s * a.partials[ki].tau1    + t * b.partials[ki].tau1;
-        out.partials[ki].tau2    = s * a.partials[ki].tau2    + t * b.partials[ki].tau2;
-        out.partials[ki].a1      = s * a.partials[ki].a1      + t * b.partials[ki].a1;
-        out.partials[ki].beat_hz = s * a.partials[ki].beat_hz + t * b.partials[ki].beat_hz;
-        // f_hz, k, phi: use from layer a (frequency structure is the same)
+    // Interpolate per-partial params.  Use max(K) so no partials are dropped.
+    // Where only one layer has a partial, fade A0 toward 0 using the factor.
+    int minK = std::min(a.K, b.K);
+    int maxK = std::max(a.K, b.K);
+    out.K = maxK;
+    for (int ki = 0; ki < maxK; ki++) {
+        if (ki < minK) {
+            // Both layers have this partial — interpolate
+            out.partials[ki].A0      = s * a.partials[ki].A0      + t * b.partials[ki].A0;
+            out.partials[ki].tau1    = s * a.partials[ki].tau1    + t * b.partials[ki].tau1;
+            out.partials[ki].tau2    = s * a.partials[ki].tau2    + t * b.partials[ki].tau2;
+            out.partials[ki].a1      = s * a.partials[ki].a1      + t * b.partials[ki].a1;
+            out.partials[ki].beat_hz = s * a.partials[ki].beat_hz + t * b.partials[ki].beat_hz;
+        } else if (ki < a.K) {
+            // Only layer a has this partial — fade A0 by (1-t)
+            out.partials[ki] = a.partials[ki];
+            out.partials[ki].A0 *= s;
+        } else {
+            // Only layer b has this partial — fade A0 by t
+            out.partials[ki] = b.partials[ki];
+            out.partials[ki].A0 *= t;
+        }
+        // f_hz, k, phi: use from whichever layer has the partial
     }
 
     return out;

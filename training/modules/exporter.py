@@ -406,14 +406,8 @@ class SoundbankExporter:
         centroid_hz_raw = float(sample.get("noise_centroid_hz", 3000.0) or 3000.0)
         CENTROID_MIN_HZ = 1000.0
         centroid_hz     = max(centroid_hz_raw, CENTROID_MIN_HZ)
-        # When the floor raises centroid, IIR noise RMS increases (α grows).
-        # Scale A_noise down so the absolute noise energy at onset is preserved.
-        if centroid_hz_raw < CENTROID_MIN_HZ:
-            def _iir_rms(fc: float) -> float:
-                import math as _math
-                a = 1.0 - _math.exp(-2.0 * _math.pi * fc / sr)
-                return _math.sqrt(a / (2.0 - a))
-            A_noise *= _iir_rms(centroid_hz_raw) / _iir_rms(CENTROID_MIN_HZ)
+        # Note: no A_noise correction needed when raising centroid — the biquad
+        # bandpass (Q=1.5) has consistent peak gain regardless of center frequency.
         tau1_k1         = (partials_out[0]["tau1"] if partials_out else 3.0)
         # Hard cap at 0.10 s — real hammer noise never exceeds ~50 ms.
         attack_tau      = min(attack_tau_raw, tau1_k1, 0.10)
@@ -576,7 +570,7 @@ def _render_note_rms_ref(
     """
     Render one note (rms_gain=1) matching the piano_core.cpp signal path:
       1. Partials — 1/2/3-string model depending on MIDI, bi-exp envelope
-      2. Attack noise — 1-pole IIR low-pass at centroid_hz (independent L+R averaged)
+      2. Attack noise — biquad bandpass at centroid_hz Q=1.5 (matches C++ exactly)
       3. Spectral EQ — biquad cascade (Direct Form II, same coeffs as C++)
 
     Result is mono (L+R average). Used exclusively to calibrate rms_gain so that
@@ -631,22 +625,31 @@ def _render_note_rms_ref(
             s3 = np.cos(phase_c + phase_b + np.float32(phi_diff))
             audio += A0 * env * (s1 + s2 + s3) / np.float32(3.0)
 
-    # 2. Attack noise — 1-pole IIR low-pass (centroid_hz), envelope-gated
-    #    Matches C++ initVoice + processBlock noise section.
+    # 2. Attack noise — biquad bandpass (centroid_hz, Q=1.5), envelope-gated
+    #    Matches C++ initVoice + processBlock noise section exactly:
+    #      v.noise_bpf = dsp::rbj_bandpass(centroid_hz, 1.5f, sr)
+    #      noise = biquad_tick(white * A_noise * noise_env, bpf, state)
     #    Use deterministic seed so rms_gain is reproducible.
     rng      = np.random.default_rng(0)
-    alp      = float(1.0 - math.exp(-2.0 * math.pi * min(centroid_hz, sr * 0.45) / sr))
     tau_n    = max(float(attack_tau), 1e-4)
     nenv     = np.exp(-t_f / np.float32(tau_n)).astype(np.float32)
+
+    # RBJ bandpass coefficients (matches dsp::rbj_bandpass in dsp_math.h)
+    Q  = 1.5
+    fc = min(float(centroid_hz), sr * 0.45)
+    w0 = 2.0 * math.pi * fc / sr
+    alpha_bpf = math.sin(w0) / (2.0 * Q)
+    a0 = 1.0 + alpha_bpf
+    bp_b = [alpha_bpf / a0, 0.0, -alpha_bpf / a0]
+    bp_a = [1.0, -2.0 * math.cos(w0) / a0, (1.0 - alpha_bpf) / a0]
+    # scipy sos format: [b0, b1, b2, a0=1, a1, a2]
+    noise_sos = np.array([[bp_b[0], bp_b[1], bp_b[2], 1.0, bp_a[1], bp_a[2]]])
+
     # Average of two independent channels (L+R) for mono estimate
     for _ in range(2):
         raw = rng.standard_normal(N).astype(np.float32)
-        # Apply 1-pole IIR in-place
-        y = 0.0
-        for i in range(N):
-            y = alp * float(raw[i]) + (1.0 - alp) * y
-            raw[i] = np.float32(y)
-        audio += np.float32(A_noise) * raw * nenv * np.float32(0.5)
+        filtered = sosfilt(noise_sos, raw.astype(np.float64)).astype(np.float32)
+        audio += np.float32(A_noise) * filtered * nenv * np.float32(0.5)
 
     # 3. Spectral EQ biquad cascade (Direct Form II)
     #    Converts eq_biquads list → scipy sos array and applies to mono signal.

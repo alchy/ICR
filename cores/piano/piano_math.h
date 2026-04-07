@@ -105,14 +105,17 @@ inline StereoSample string_model_3(float phase_c, float phase_b,
 
 // ── Schroeder first-order all-pass decorrelation ─────────────────────────────
 
-/// Single-channel first-order all-pass filter.
-///   y[n] = -g · x[n] + x[n-1] - g · y[n-1]
+/// Single-channel first-order all-pass filter (Schroeder).
+///   y[n] = -g · x[n] + x[n-1] + g · y[n-1]
+///
+/// Transfer function: H(z) = (-g + z^-1) / (1 - g·z^-1)
+/// |H(e^jw)| = 1 for all w (unity gain — true allpass).
 ///
 /// x_prev, y_prev: delay elements, updated in-place.
 /// Returns the all-pass filtered sample.
 inline float allpass_1st_tick(float x, float g,
                               float& x_prev, float& y_prev) {
-    float y = -g * x + x_prev - g * y_prev;
+    float y = -g * x + x_prev + g * y_prev;
     x_prev = x;
     y_prev = y;
     return y;
