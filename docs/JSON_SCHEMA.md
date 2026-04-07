@@ -94,6 +94,9 @@ Legenda sloupců:
 | `attack_tau` | m,v | extr→NN | ✓ | ✓ | noise env decay | ✓ | ✓ | ✓ | ✓ `0x03` | Časová konstanta náběhu šumu (s) |
 | `A_noise` | m,v | extr→NN | ✓ | ✓ | noise amplitude | ✓ | — | ✓ | ✓ `0x04` | Amplituda šumové složky |
 | `noise_centroid_hz` | m,v | extr | ✓ | ✓ | biquad BPF | ✓ | ✓ | ✓ | ✗ ¹ | Center frequency biquad bandpass (Q=1.5) pro barvení šumu; default 3000 Hz |
+| `rise_tau` | m | exporter | ✓ | ✓ | attack rise env | — | — | — | — | Attack rise time (s); -1 = midi-based default. Chabassier: 4ms bass → 0.2ms treble |
+| `n_strings` | m | exporter | ✓ | ✓ | string model | — | — | — | — | 1/2/3 string model; -1 = midi-based default (≤27→1, ≤48→2, >48→3) |
+| `decor_strength` | m | (future) | ✓ | ✓ | allpass decorr | — | — | — | — | Schroeder decorrelation strength; -1 = midi-based default |
 
 > ¹ `noise_centroid_hz` chybí v `noteParamKey()` v `core_engine.cpp` — SysEx ID není přiřazeno (existující mezera, ID `0x07` volné).
 

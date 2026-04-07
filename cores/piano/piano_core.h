@@ -77,6 +77,10 @@ struct PianoNoteParam {
     float stereo_width       = 1.f;   // M/S correction: S *= stereo_width post-EQ; M unchanged
     float f0_hz              = 440.f;
     float B                  = 0.f;   // inharmonicity; kept so setNoteParam("B") can recompute f_hz[k]
+    // Per-note synthesis parameters (override hardcoded defaults if present in JSON)
+    float rise_tau           = -1.f;  // attack rise time (s); -1 = use hardcoded midi-based default
+    int   n_strings          = -1;    // 1/2/3 string model; -1 = use hardcoded midi-based default
+    float decor_strength     = -1.f;  // Schroeder decorrelation; -1 = use hardcoded midi-based default
     // Spectral EQ: min-phase IIR fitted from soundbank spectral_eq curve
     int              n_biquad = 0;
     PianoBiquadCoeffs eq[PIANO_N_BIQUAD];

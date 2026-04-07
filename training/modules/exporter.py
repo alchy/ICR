@@ -537,6 +537,15 @@ class SoundbankExporter:
             note["stereo_width"] = round(w, 4)
         if sample.get("is_interpolated"):
             note["is_interpolated"] = True
+
+        # Per-note synthesis overrides (C++ falls back to midi-based defaults if absent)
+        # n_strings: acoustic string count for this MIDI note
+        note["n_strings"] = 1 if midi <= 27 else (2 if midi <= 48 else 3)
+        # rise_tau: attack rise time in seconds
+        # Chabassier: bass ~4ms, middle ~2ms, treble <1ms (hammer contact time)
+        rise_ms = 4.0 - (midi - 21) / (108 - 21) * 3.8  # 4.0ms -> 0.2ms
+        note["rise_tau"] = round(max(rise_ms * 0.001, 0.0002), 6)
+
         return note
 
     def _build_partial(self, p: dict, phi: float, k_idx: int = 0) -> dict:

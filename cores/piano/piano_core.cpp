@@ -95,6 +95,9 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
         np.stereo_width       = s.value("stereo_width", 1.f);
         np.f0_hz              = s["f0_hz"].get<float>();
         np.B                  = s.value("B", 0.f);
+        np.rise_tau           = s.value("rise_tau", -1.f);
+        np.n_strings          = s.value("n_strings", -1);
+        np.decor_strength     = s.value("decor_strength", -1.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
@@ -259,6 +262,7 @@ PianoNoteParam PianoCore::lerpNoteParams(const PianoNoteParam& a,
     out.noise_centroid_hz = s * a.noise_centroid_hz + t * b.noise_centroid_hz;
     out.rms_gain          = s * a.rms_gain          + t * b.rms_gain;
     out.stereo_width      = s * a.stereo_width      + t * b.stereo_width;
+    // rise_tau, n_strings, decor_strength: use from layer a (note-level, not velocity-dependent)
     // f0_hz, B: use from layer a (they should be identical across velocities)
 
     // Interpolate EQ coefficients
@@ -337,8 +341,9 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Attack rise envelope — models physical string excitation rise time
-    float rise_tau = piano::rise_tau_from_midi(midi);
+    // Attack rise envelope — from JSON if available, else midi-based heuristic
+    float rise_tau = (np.rise_tau > 0.f) ? np.rise_tau
+                                          : piano::rise_tau_from_midi(midi);
     v.rise_coeff  = dsp::decay_coeff(rise_tau, sample_rate_);
     v.rise_env    = 0.f;
 
@@ -350,11 +355,9 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     if (dur_s < 3.f) dur_s = 3.f;
     v.max_t_samp = (uint64_t)(dur_s * sample_rate_);
 
-    // String model per note: 1-string (bass MIDI≤27), 2-string (tenor 28–48),
-    // 3-string (treble MIDI>48, symmetric: f−beat, f, f+beat).
-    // phi_diff (per-note) = phase offset between outer strings 1 and 3.
-    // phi2     (per-partial, RNG) = independent phase for center string.
-    v.n_model_strings = (midi <= 27) ? 1 : (midi <= 48) ? 2 : 3;
+    // String model: from JSON if available, else midi-based default
+    v.n_model_strings = (np.n_strings > 0) ? np.n_strings
+                      : (midi <= 27) ? 1 : (midi <= 48) ? 2 : 3;
 
     std::uniform_real_distribution<float> phi2dist(0.f, TAU);
     v.n_partials = np.K;
@@ -395,11 +398,18 @@ void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
     }
 
     // Schroeder first-order all-pass decorrelation
+    // From JSON if available, else midi-based heuristic
     {
-        auto dc     = piano::compute_decor_coeffs(midi, stereo_decorr);
-        v.decor_str = dc.decor_str;
-        v.ap_g_L    = dc.g_L;
-        v.ap_g_R    = dc.g_R;
+        float ds;
+        if (np.decor_strength >= 0.f) {
+            ds = np.decor_strength * stereo_decorr;
+        } else {
+            auto dc = piano::compute_decor_coeffs(midi, stereo_decorr);
+            ds = dc.decor_str;
+        }
+        v.decor_str = ds;
+        v.ap_g_L    =   0.35f + ds * 0.25f;
+        v.ap_g_R    = -(0.35f + ds * 0.20f);
         v.ap_x_L = v.ap_y_L = v.ap_x_R = v.ap_y_R = 0.f;
     }
 
@@ -678,6 +688,9 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
         np.stereo_width       = s.value("stereo_width", 1.f);
         np.f0_hz              = s["f0_hz"].get<float>();
         np.B                  = s.value("B", 0.f);
+        np.rise_tau           = s.value("rise_tau", -1.f);
+        np.n_strings          = s.value("n_strings", -1);
+        np.decor_strength     = s.value("decor_strength", -1.f);
 
         const auto& partials = s["partials"];
         int K = std::min((int)partials.size(), PIANO_MAX_PARTIALS);
