@@ -80,40 +80,26 @@ Legenda sloupců:
 | `vel` | — | extr | ✓ | meta | meta | — | ✓ | — | — | Velocity index 0–7 |
 | `is_interpolated` | m,v | exporter | cond. | ✓ | — | — | ✓ badge | — | — | `true` = NN nota; zobrazí `[NN]` / `[MEASURED]` |
 
-### 2b. Nota — fyzika
+### 2b. Note-level keys
 
-| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `f0_hz` | m,v | extr→NN | ✓ | ✓ | noteOn | ✓ | ✓ | ✓ | ✓ `0x01` | Základní frekvence Hz |
-| `B` | **m** | BSplineFitter | ✓ | ✓ | přepočet `f_hz` | ✓ (→ všechny vel) | ✓ | ✓ | ✓ `0x02` | Inharmonicita; `f_k = k·f0·√(1+B·k²)` |
-
-### 2c. Nota — šum
-
-| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `attack_tau` | m,v | extr→NN | ✓ | ✓ | noise env decay | ✓ | ✓ | ✓ | ✓ `0x03` | Časová konstanta náběhu šumu (s) |
-| `A_noise` | m,v | extr→NN | ✓ | ✓ | noise amplitude | ✓ | — | ✓ | ✓ `0x04` | Amplituda šumové složky |
-| `noise_centroid_hz` | m,v | extr | ✓ | ✓ | biquad BPF | ✓ | ✓ | ✓ | ✗ ¹ | Center frequency biquad bandpass (Q=1.5) pro barvení šumu; default 3000 Hz |
-| `rise_tau` | m | exporter | ✓ | ✓ | attack rise env | — | — | — | — | Attack rise time (s); -1 = midi-based default. Chabassier: 4ms bass → 0.2ms treble |
-| `n_strings` | m | exporter | ✓ | ✓ | string model | — | — | — | — | 1/2/3 string model; -1 = midi-based default (≤27→1, ≤48→2, >48→3) |
-| `decor_strength` | m | (future) | ✓ | ✓ | allpass decorr | — | — | — | — | Schroeder decorrelation strength; -1 = midi-based default |
-
-> ¹ `noise_centroid_hz` chybí v `noteParamKey()` v `core_engine.cpp` — SysEx ID není přiřazeno (existující mezera, ID `0x07` volné).
-
-### 2d. Nota — normalizace a stereo
-
-| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `rms_gain` | m,v | exporter (RMS kalib.) | ✓ | ✓ | vel-scaled gain | ✓ | — | ✓ | ✓ `0x05` | Zesílení pro dosažení `target_rms`; kalibrováno nad mono M kanálem — invariantní vůči M/S |
-| `phi_diff` | m,v | exporter (RNG) | ✓ | ✓ | phase string 2 | ✓ | — | ✗ | ✗ | Fázový offset mezi strunami 1 a 2; `s2 = cos(…+phi+phi_diff)` |
-| `stereo_width` | m,v | EQFitter | ✓ | ✓ | M/S post-EQ | ✓ | ✓ | ✓ | ✗ | M/S korekce šíře: `S *= w`, kde `M=(L+R)/2`, `S=(L-R)/2`. Měřeno jako `rms(origS)/rms(origM) ÷ rms(synS)/rms(synM)`; `1.0` = bez korekce (NN noty) |
-
-### 2e. Nota — spektrální EQ
-
-| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `eq_biquads` | m,v | EQFitter→exporter | ✓ | ✓ | IIR EQ kaskáda | — | ✓ (mag.) | ✓ (EQ edit) | ✗ | 10 biquad sekcí (Direct Form II), formát viz sekce 4 |
-| `spectral_eq` | m,v | EQFitter | ✓ | ✗ | — | — | — | ✓ (re-fit) | ✗ | Surová EQ křivka `{freqs_hz, gains_db, stereo_width_factor}` pro editor re-fit; `stereo_width_factor` → flat `stereo_width` při exportu |
+| Klíč | Kategorie | Fallback | Aprox | Zdroj | C++ use | Popis |
+|---|---|---|---|---|---|---|
+| `f0_hz` | fyzika | 440.0 | | extractor | oscilátory | Základní frekvence (Hz) |
+| `B` | fyzika | 0.0 | | extractor | `f_k=k*f0*sqrt(1+B*k^2)` | Inharmonicita |
+| `attack_tau` | šum | 0.05 | | extractor | noise env decay | Noise decay tau (s). Cap 0.10 |
+| `A_noise` | šum | 0.04 | | extractor | noise amplitude | Noise amp (0..1). Cap 1.0 |
+| `noise_centroid_hz` | šum | 3000 | | extractor | biquad BPF center | Noise BPF (Hz, Q=1.5). Floor 1000 |
+| `rise_tau` | attack | **midi-based** | **ano** | exporter | attack rise env | Rise time (s). Fallback: `4ms(MIDI21)->0.2ms(MIDI108)` |
+| `n_strings` | model | **midi-based** | **ano** | exporter | 1/2/3-string | Fallback: `<=27->1, <=48->2, >48->3` |
+| `decor_strength` | stereo | **midi-based** | **ano** | (future) | allpass decorr | Fallback: `clamp((midi-40)/60)*0.45*decorr` |
+| `rms_gain` | level | 1.0 | | exporter | per-note gain | Kalibrován Python biquad BP rendererem |
+| `phi_diff` | fáze | 0.0 | | exporter (RNG) | string 2 phase | Fázový offset mezi strunami (rad) |
+| `stereo_width` | stereo | 1.0 | | EQ fitter | M/S post-EQ | `S *= width`. Clamped [0.2, 2.0] |
+| `eq_biquads` | EQ | [] (bypass) | | EQ fitter | IIR cascade | 10 biquad sekcí (DF-II) |
+| `spectral_eq` | EQ | — | | EQ fitter | (editor only) | Surová EQ křivka, nepoužito C++ |
+| `fit_quality` | diag | 0.0 | | extractor | (GUI only) | Bi-exp fit kvalita (0..1) |
+| `damping_derived` | diag | false | | extractor | (GUI only) | tau1 z damping law R+eta*f^2 |
+| `is_interpolated` | diag | false | | exporter | (GUI only) | NN-generated nota |
 
 ---
 
@@ -121,18 +107,18 @@ Legenda sloupců:
 
 Každá nota má pole `partials` — max 60 objektů.
 
-| Klíč | Dep | Extractor | JSON | C++ load | C++ synth | C++ set | GUI viz | GUI edit | SysEx | Popis |
-|---|---|---|---|---|---|---|---|---|---|---|
-| `k` | m,v,k | extr | ✓ | meta | B-recompute idx | — | ✓ | — | — | Index parciálu, 1-based |
-| `f_hz` | m,v,k | `k·f0·√(1+B·k²)` bake | ✓ | ✓ | oscilátor | ✓ | ✓ | ✓ | ✓ `0x10` | Frekvence parciálu Hz; přepočítána při `setNoteParam("B")` |
-| `A0` | m,v,k | extr→NN | ✓ | ✓ | amplituda | ✓ | ✓ | ✓ | ✓ `0x11` | Amplituda parciálu |
-| `tau1` | m,v,k | extr→NN | ✓ | ✓ | env fast τ | ✓ | ✓ | ✓ | ✓ `0x12` | Rychlá τ bi-exp obálky (s) |
-| `tau2` | m,v,k | extr→NN | ✓ | ✓ | env slow τ | ✓ | ✓ | ✓ | ✓ `0x13` | Pomalá τ (s); `τ2 ≥ τ1` |
-| `a1` | m,v,k | extr→NN | ✓ | ✓ | env mix | ✓ | ✓ | ✓ | ✓ `0x14` | Váha rychlé složky; `a1=1.0` = mono-exp |
-| `beat_hz` | m,v,k | extr→NN | ✓ | ✓ | detuning PM | ✓ | ✓ | ✓ | ✓ `0x15` | Frekvence beatingu Hz; `0` = mono struna |
-| `phi` | m,v,k | exporter (RNG) | ✓ | ✓ | phase string 1 | ✓ | — | ✓ | ✓ `0x16` | Počáteční fáze string 1 (rad) |
-| `fit_quality` | m,v,k | extractor | ✓ | ✓ | — | — | ✓ | — | — | Kvalita envelope fitu (0..1, 1=perfektní). Color-coded v GUI: zelená ≥0.9, žlutá ≥0.7, červená <0.7 |
-| `damping_derived` | m,v,k | extractor | ✓ | ✓ | — | — | ✓ | — | — | `true` = tau1 nahrazen hodnotou z damping law R+η·f². Zobrazeno jako "d" v GUI |
+| Klíč | Fallback | Aprox | Zdroj | C++ use | SysEx | Popis |
+|---|---|---|---|---|---|---|
+| `k` | — | | extractor | index | — | Partial index, 1-based |
+| `f_hz` | — | | extractor | oscilátor | `0x10` | Frekvence (Hz). Přepočtena při změně B. |
+| `A0` | — | | extractor | amplituda | `0x11` | Počáteční amplituda parciálu |
+| `tau1` | 0.5 | | extractor | env fast decay | `0x12` | Rychlá tau bi-exp (s). Floor 0.05 v exportéru. |
+| `tau2` | =tau1 | | extractor | env slow decay | `0x13` | Pomalá tau (s). Vždy >= tau1. |
+| `a1` | 1.0 | | extractor | env mix weight | `0x14` | Váha rychlé složky. 1.0 = mono-exp. |
+| `beat_hz` | 0.0 | | extractor | string detuning | `0x15` | Beat frekvence (Hz). 0 = mono struna. |
+| `phi` | 0.0 | | exporter (RNG) | phase string 1 | `0x16` | Počáteční fáze (rad) |
+| `fit_quality` | 0.0 | | extractor | (GUI only) | — | Kvalita fitu (0..1). GUI color-coded. |
+| `damping_derived` | false | | extractor | (GUI only) | — | tau1 z damping law. GUI "d" flag. |
 
 ---
 
