@@ -197,18 +197,41 @@ void PianoCore::handleNoteOn(uint8_t midi, uint8_t vel) noexcept {
     std::unique_lock<std::mutex> lk(bank_mutex_, std::try_to_lock);
     if (!lk.owns_lock()) return;
 
-    int vel_idx = midiVelToIdx(vel);
-    // Fall back to nearest available vel if exact not present
-    if (!note_params_[midi][vel_idx].valid) {
-        for (int dv = 1; dv < 8; dv++) {
-            int lo = vel_idx - dv, hi = vel_idx + dv;
-            if (lo >= 0 && note_params_[midi][lo].valid) { vel_idx = lo; break; }
-            if (hi <= 7 && note_params_[midi][hi].valid) { vel_idx = hi; break; }
-        }
-    }
-    if (!note_params_[midi][vel_idx].valid) return;  // no params for this note
+    // Map velocity to continuous float position and find two bounding layers
+    float vel_f = midiVelToFloat(vel);
+    int   lo    = (int)vel_f;                    // floor
+    int   hi    = std::min(lo + 1, 7);           // ceil
+    float frac  = vel_f - (float)lo;             // interpolation factor
 
-    initVoice(voices_[midi], midi, vel_idx,
+    // Find nearest valid layers around lo and hi
+    auto findValid = [&](int start) -> int {
+        if (start >= 0 && start <= 7 && note_params_[midi][start].valid) return start;
+        for (int dv = 1; dv < 8; dv++) {
+            int a = start - dv, b = start + dv;
+            if (a >= 0 && note_params_[midi][a].valid) return a;
+            if (b <= 7 && note_params_[midi][b].valid) return b;
+        }
+        return -1;
+    };
+
+    int lo_valid = findValid(lo);
+    int hi_valid = findValid(hi);
+    if (lo_valid < 0) return;  // no valid params at all
+    if (hi_valid < 0) hi_valid = lo_valid;
+
+    // Interpolate parameters between the two layers
+    int vel_idx;
+    PianoNoteParam np;
+    if (lo_valid == hi_valid || frac < 0.001f) {
+        vel_idx = lo_valid;
+        np      = note_params_[midi][lo_valid];
+    } else {
+        vel_idx = lo_valid;  // for GUI display
+        np      = lerpNoteParams(note_params_[midi][lo_valid],
+                                  note_params_[midi][hi_valid], frac);
+    }
+
+    initVoice(voices_[midi], midi, vel_idx, np,
               beat_scale_.load(std::memory_order_relaxed),
               noise_level_.load(std::memory_order_relaxed),
               rng_seed_.load(std::memory_order_relaxed),
@@ -221,6 +244,45 @@ void PianoCore::handleNoteOn(uint8_t midi, uint8_t vel) noexcept {
     last_vel_idx_.store(vel_idx, std::memory_order_relaxed);
 }
 
+PianoNoteParam PianoCore::lerpNoteParams(const PianoNoteParam& a,
+                                          const PianoNoteParam& b,
+                                          float t) noexcept {
+    PianoNoteParam out = a;  // copy structure from a
+    float s = 1.f - t;
+
+    // Note-level params
+    out.phi_diff          = s * a.phi_diff          + t * b.phi_diff;
+    out.attack_tau        = s * a.attack_tau        + t * b.attack_tau;
+    out.A_noise           = s * a.A_noise           + t * b.A_noise;
+    out.noise_centroid_hz = s * a.noise_centroid_hz + t * b.noise_centroid_hz;
+    out.rms_gain          = s * a.rms_gain          + t * b.rms_gain;
+    out.stereo_width      = s * a.stereo_width      + t * b.stereo_width;
+    // f0_hz, B: use from layer a (they should be identical across velocities)
+
+    // Interpolate EQ coefficients
+    out.n_biquad = std::min(a.n_biquad, b.n_biquad);
+    for (int bi = 0; bi < out.n_biquad; bi++) {
+        out.eq[bi].b0 = s * a.eq[bi].b0 + t * b.eq[bi].b0;
+        out.eq[bi].b1 = s * a.eq[bi].b1 + t * b.eq[bi].b1;
+        out.eq[bi].b2 = s * a.eq[bi].b2 + t * b.eq[bi].b2;
+        out.eq[bi].a1 = s * a.eq[bi].a1 + t * b.eq[bi].a1;
+        out.eq[bi].a2 = s * a.eq[bi].a2 + t * b.eq[bi].a2;
+    }
+
+    // Interpolate per-partial params (use min K to avoid out-of-bounds)
+    out.K = std::min(a.K, b.K);
+    for (int ki = 0; ki < out.K; ki++) {
+        out.partials[ki].A0      = s * a.partials[ki].A0      + t * b.partials[ki].A0;
+        out.partials[ki].tau1    = s * a.partials[ki].tau1    + t * b.partials[ki].tau1;
+        out.partials[ki].tau2    = s * a.partials[ki].tau2    + t * b.partials[ki].tau2;
+        out.partials[ki].a1      = s * a.partials[ki].a1      + t * b.partials[ki].a1;
+        out.partials[ki].beat_hz = s * a.partials[ki].beat_hz + t * b.partials[ki].beat_hz;
+        // f_hz, k, phi: use from layer a (frequency structure is the same)
+    }
+
+    return out;
+}
+
 void PianoCore::handleNoteOff(uint8_t midi) noexcept {
     PianoVoice& v = voices_[midi];
     if (!v.active) return;
@@ -230,11 +292,11 @@ void PianoCore::handleNoteOff(uint8_t midi) noexcept {
 }
 
 void PianoCore::initVoice(PianoVoice& v, int midi, int vel_idx,
+                           const PianoNoteParam& np,
                            float beat_scale, float noise_level,
                            int rng_seed, float pan_spread,
                            float stereo_decorr,
                            float keyboard_spread) noexcept {
-    const PianoNoteParam& np = note_params_[midi][vel_idx];
 
     v.active     = true;
     v.releasing  = false;

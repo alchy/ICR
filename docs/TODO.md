@@ -161,16 +161,23 @@ JSON with 704 notes × 60 partials = opaque multi-MB files.
 
 ---
 
-## Quick Wins
+## Quick Wins (remaining)
 
 | # | Task | Effort | Impact |
 |---|------|--------|--------|
-| A | Velocity interpolation between layers | 1 day | Smooth dynamics, no staircase |
 | B | Verify tau(k) follows R+η·k² law | 0.5 day | Validate extraction physics |
 | C | Unit tests for math headers | 1 day | Catch regressions |
 | D | Post-export quality report | 2 days | Detect bad extractions |
 | E | Bank inspector tool | 0.5 day | Fast parameter debugging |
-| F | Velocity-dependent noise_centroid | 0.5 day | Brighter attack at higher velocity |
+
+## Future: Hardware Velocity Resolution
+
+MIDI velocity is 7-bit (1-127).  The C++ engine now maps velocity to a
+**continuous float position 0.0-7.0** (`midiVelToFloat`) and interpolates
+all parameters between adjacent layers.  This architecture is ready for
+future hardware with **10+ bit velocity resolution** — the interpolation
+naturally uses any fractional position without code changes.  Higher
+velocity resolution → smoother dynamic transitions.
 
 ---
 
@@ -217,3 +224,11 @@ Key observations:
 - [x] Peak frame detection fix for short onsets
 - [x] Cleanup: removed 15 NN pipeline/module files + 5 docs
 - [x] Simplified run-training.py to single `analyze` command
+- [x] **Spectral shape borrowing** in exporter: average A0(k)/A0(1) from vel
+      layers 5-7, apply to vel 0-4 (fixes noise-floor contamination that made
+      pp sound like ff + low-pass filter)
+- [x] **Velocity interpolation** in C++: MIDI velocity mapped to continuous
+      float 0.0-7.0 (`midiVelToFloat`), all parameters (A0, tau1, tau2, a1,
+      beat_hz, noise, EQ coefficients) linearly interpolated between two
+      bounding layers via `lerpNoteParams`.  Ready for 10+ bit HW velocity.
+- [x] Revised TODO with Chabassier et al. (2012) physics reference

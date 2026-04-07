@@ -242,12 +242,23 @@ private:
     void handleNoteOn (uint8_t midi, uint8_t vel) noexcept;
     void handleNoteOff(uint8_t midi)              noexcept;
     void initVoice    (PianoVoice& v, int midi, int vel_idx,
+                       const PianoNoteParam& np,
                        float beat_scale, float noise_level, int rng_seed,
                        float pan_spread, float stereo_decorr,
                        float keyboard_spread) noexcept;
 
+    // Interpolate two PianoNoteParam structs by factor t (0=a, 1=b).
+    static PianoNoteParam lerpNoteParams(const PianoNoteParam& a,
+                                         const PianoNoteParam& b,
+                                         float t) noexcept;
+
     // Map MIDI velocity 1-127 to vel index 0-7
     static int midiVelToIdx(uint8_t velocity) {
         return std::min(7, (int)(velocity - 1) / 16);
+    }
+
+    // Map MIDI velocity 1-127 to continuous float position 0.0-7.0
+    static float midiVelToFloat(uint8_t velocity) {
+        return std::min(7.f, (float)(velocity - 1) / 16.f);
     }
 };

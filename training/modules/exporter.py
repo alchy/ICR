@@ -70,6 +70,15 @@ class SoundbankExporter:
             rng_seed:   Base seed for random phase generation.
         """
         samples = params["notes"]
+
+        # Spectral shape borrowing: fix noise-floor contamination in low velocity layers.
+        # Average the spectral shape A0(k)/A0(1) from vel layers 5-7 (forte/fortissimo),
+        # then apply to vel 0-4 while preserving each layer's overall amplitude.
+        # This is physically motivated: real piano spectral tilt changes only subtly
+        # with velocity (Chabassier 2012: nonlinear hammer exponent p causes gradual,
+        # not drastic, spectral change).
+        self._borrow_spectral_shape(samples)
+
         out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed,
                                     params.get("metadata"))
 
@@ -251,6 +260,92 @@ class SoundbankExporter:
                     print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
         self._write(out, out_path)
+
+    # ── Spectral shape borrowing ─────────────────────────────────────────────
+
+    @staticmethod
+    def _borrow_spectral_shape(samples: dict) -> None:
+        """
+        Fix noise-floor contamination in low-velocity layers.
+
+        For quiet recordings (vel 0-4), high partials often fall below the
+        analysis noise floor, producing artificially small A0 values — the
+        note sounds like ff with a low-pass filter instead of a softer touch.
+
+        Fix: compute reference spectral shape A0(k)/A0(1) averaged from
+        vel layers 5, 6, 7 (forte range — best SNR).  Apply this shape to
+        vel 0-4 while preserving each layer's own A0(1) (overall loudness).
+
+        Only partials where the reference shape has a HIGHER relative level
+        than the target are corrected — we never darken a layer.
+        """
+        # Group samples by MIDI note
+        by_midi: dict[int, dict[int, dict]] = {}
+        for key, sample in samples.items():
+            if not key.startswith("m"):
+                continue
+            try:
+                midi = int(key[1:4])
+                vel  = int(key.split("vel")[1])
+            except (ValueError, IndexError):
+                continue
+            by_midi.setdefault(midi, {})[vel] = sample
+
+        n_fixed = 0
+        for midi, vel_map in by_midi.items():
+            # Collect reference layers (vel 5, 6, 7)
+            ref_layers = [vel_map[v] for v in (5, 6, 7) if v in vel_map]
+            if not ref_layers:
+                continue
+
+            # Compute average spectral shape: A0(k) / A0(k=1) across ref layers
+            # Use the minimum partial count across references
+            ref_shapes = []
+            for ref in ref_layers:
+                parts = ref.get("partials", [])
+                if len(parts) < 2:
+                    continue
+                a0_1 = float(parts[0].get("A0", 1e-12) or 1e-12)
+                if a0_1 < 1e-12:
+                    continue
+                shape = [float(p.get("A0", 0) or 0) / a0_1 for p in parts]
+                ref_shapes.append(shape)
+
+            if not ref_shapes:
+                continue
+
+            # Average shapes (truncate to shortest)
+            min_k = min(len(s) for s in ref_shapes)
+            avg_shape = [0.0] * min_k
+            for s in ref_shapes:
+                for ki in range(min_k):
+                    avg_shape[ki] += s[ki]
+            avg_shape = [v / len(ref_shapes) for v in avg_shape]
+
+            # Apply to vel 0-4
+            for vel_idx in range(5):
+                if vel_idx not in vel_map:
+                    continue
+                sample = vel_map[vel_idx]
+                parts  = sample.get("partials", [])
+                if len(parts) < 2:
+                    continue
+
+                a0_1 = float(parts[0].get("A0", 1e-12) or 1e-12)
+                if a0_1 < 1e-12:
+                    continue
+
+                for ki in range(min(len(parts), min_k)):
+                    current_a0 = float(parts[ki].get("A0", 0) or 0)
+                    target_a0  = a0_1 * avg_shape[ki]
+                    # Only correct upward — never darken a layer
+                    if target_a0 > current_a0:
+                        parts[ki]["A0"] = target_a0
+                        n_fixed += 1
+
+        if n_fixed > 0:
+            print(f"Spectral shape borrowing: corrected {n_fixed} partial A0 values "
+                  f"across {len(by_midi)} MIDI notes", flush=True)
 
     # ── Internal builders ─────────────────────────────────────────────────────
 
