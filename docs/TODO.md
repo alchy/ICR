@@ -460,6 +460,67 @@ velocity resolution = smoother dynamic transitions.
 
 ---
 
+## Validation: pl-grand vs. Chabassier Steinway D
+
+Both our sample bank (`pl-grand`) and Chabassier et al. (2012) use a
+Steinway D grand piano, enabling direct parameter comparison.
+
+### Frequency (tuning)
+
+| Note | Chabassier f0 | Our f0 | Deviation |
+|------|--------------|--------|-----------|
+| D#1 (MIDI 27) | 38.9 Hz | 38.56 Hz | -0.9% (-15 cents) |
+| C2 (MIDI 36) | 65.4 Hz | 65.12 Hz | -0.4% (-7 cents) |
+| C#5 (MIDI 73) | 555.6 Hz | 553.93 Hz | -0.3% (-5 cents) |
+
+Consistent: our piano tunes slightly flat (~A=438-439).
+
+### Inharmonicity B
+
+| Note | Chabassier (from phys. params) | Our extraction | Ratio |
+|------|-------------------------------|----------------|-------|
+| D#1 | ~3.5e-5 (Euler-Bernoulli core) | 5.3e-4 | 15x higher |
+| C2 | ~3.6e-5 | 2.2e-4 | 6x higher |
+
+Our B is measured from actual partial frequencies; Chabassier computes
+from core-only stiffness.  Wound string wrapping adds effective stiffness
+beyond the Euler-Bernoulli core model — the discrepancy is expected.
+**Not a bug, but worth noting for future physical parameter modeling.**
+
+### Prompt decay (tau1 for k=1)
+
+| Note | Chabassier (~8 dB/s -> tau=1.1s) | Our tau1(k=1) | Status |
+|------|----------------------------------|---------------|--------|
+| D#1 | ~2.2 s | 0.66 s | Short (vel=4 ~mf, lower energy) |
+| C2 | ~1.5 s | 0.46 s | Short (same reason) |
+| C#5 | ~0.6 s | **0.01 s** | **BUG** — hammer-contact fit |
+
+C#5 tau1=0.01 confirmed as hammer-contact fitting artifact.
+D#1/C2 tau1 shorter than Chabassier — partially explained by different
+dynamics (our vel=4 ~mf vs Chabassier 3-4.5 m/s ~f-ff).
+
+### Partial count
+
+| Note | Chabassier (simulation) | Our extraction |
+|------|------------------------|----------------|
+| D#1 | ~50-60 | 60 (max) |
+| C2 | ~50-60 | 60 (max) |
+| C#5 | ~20-30 | 29 |
+
+Good agreement.
+
+### Known discrepancies to investigate
+
+| # | Issue | Severity | Notes |
+|---|-------|----------|-------|
+| 1 | tau1=0.01 for MIDI 49-90 | **Critical** | Hammer-contact skip fix pending (new analysis running) |
+| 2 | noise_centroid = 1000 Hz everywhere | Medium | Floor masks real variation; bass should be lower, treble higher |
+| 3 | stereo_width = 6.2 for C#5 | Medium | Abnormally high; EQ fitter stereo measurement issue |
+| 4 | B 6-15x higher than Chabassier theory | Low | Expected for wound strings (measured vs. core-only theory) |
+| 5 | tau1 shorter than Chabassier even after fix | Low | Different dynamics (mf vs ff); validate after re-analysis |
+
+---
+
 ## Physics Reference (Chabassier et al. 2012)
 
 ### String parameters (Steinway D measurements)
