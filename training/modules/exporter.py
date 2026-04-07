@@ -78,6 +78,7 @@ class SoundbankExporter:
         # with velocity (Chabassier 2012: nonlinear hammer exponent p causes gradual,
         # not drastic, spectral change).
         self._borrow_spectral_shape(samples)
+        self._apply_exploration_recipe(samples)
 
         out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed,
                                     params.get("metadata"))
@@ -348,6 +349,60 @@ class SoundbankExporter:
         if n_smoothed > 0:
             print(f"Keyboard smoothing: corrected {n_smoothed} parameters "
                   f"across {len(by_vel)} velocity layers", flush=True)
+
+    # ── Exploration recipe (from blind scoring random search) ────────────────
+
+    @staticmethod
+    def _apply_exploration_recipe(samples: dict) -> None:
+        """Apply perceptually-validated parameter corrections.
+
+        From random exploration (15 winning rounds across MIDI 55,63,69):
+        - Bass partials (k=1,2) systematically underestimated by extraction
+        - a1 too high (insufficient aftersound)
+        - Beating too weak or missing
+        - Attack too soft
+
+        Applied BEFORE RMS calibration so gain is automatically compensated.
+        """
+        n_modified = 0
+        for key, sample in samples.items():
+            if not key.startswith("m"):
+                continue
+            try:
+                midi = int(key[1:4])
+            except (ValueError, IndexError):
+                continue
+
+            parts = sample.get("partials", [])
+            if not parts:
+                continue
+
+            # Bass A0 boost (MIDI < 45 only — higher notes don't need it)
+            if midi <= 45:
+                t = (45 - midi) / 24.0  # 1.0 at MIDI 21, 0.0 at MIDI 45
+                if len(parts) > 0:
+                    parts[0]["A0"] = parts[0].get("A0", 0) * (1.0 + 0.8 * t)
+                if len(parts) > 1:
+                    parts[1]["A0"] = parts[1].get("A0", 0) * (1.0 + 0.4 * t)
+
+            # a1: blend 20% toward 0.73 (more aftersound)
+            for p in parts[:10]:
+                p["a1"] = 0.8 * p.get("a1", 0.8) + 0.2 * 0.73
+
+            # Beating: ensure minimum 0.25 Hz if missing
+            for p in parts[:8]:
+                if p.get("beat_hz", 0) < 0.1:
+                    p["beat_hz"] = 0.25
+
+            # Attack: cap at 10ms (sharper hammer)
+            sample["attack_tau"] = min(sample.get("attack_tau", 0.03), 0.010)
+
+            n_modified += 1
+
+        if n_modified > 0:
+            print(f"Exploration recipe: modified {n_modified} notes "
+                  f"(bass A0 boost, a1 blend, beating floor, sharp attack)",
+                  flush=True)
 
     # ── Spectral shape borrowing ─────────────────────────────────────────────
 
