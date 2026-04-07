@@ -1,0 +1,328 @@
+{
+  "timestamp": "20260407-204258",
+  "velocity": 80,
+  "duration_s": 10.0,
+  "params_file": "soundbanks/pl-grand-04072006.json",
+  "n_scored": 44,
+  "n_total": 44,
+  "scores": [
+    {
+      "midi": 21,
+      "note": "A0",
+      "score": 6,
+      "velocity": 80,
+      "order": 0
+    },
+    {
+      "midi": 29,
+      "note": "F1",
+      "score": 7,
+      "velocity": 80,
+      "order": 1
+    },
+    {
+      "midi": 87,
+      "note": "D#6",
+      "score": 8,
+      "velocity": 80,
+      "order": 2
+    },
+    {
+      "midi": 27,
+      "note": "D#1",
+      "score": 0,
+      "velocity": 80,
+      "order": 3
+    },
+    {
+      "midi": 33,
+      "note": "A1",
+      "score": 2,
+      "velocity": 80,
+      "order": 4
+    },
+    {
+      "midi": 41,
+      "note": "F2",
+      "score": 6,
+      "velocity": 80,
+      "order": 5
+    },
+    {
+      "midi": 89,
+      "note": "F6",
+      "score": 8,
+      "velocity": 80,
+      "order": 6
+    },
+    {
+      "midi": 51,
+      "note": "D#3",
+      "score": 5,
+      "velocity": 80,
+      "order": 7
+    },
+    {
+      "midi": 91,
+      "note": "G6",
+      "score": 9,
+      "velocity": 80,
+      "order": 8
+    },
+    {
+      "midi": 101,
+      "note": "F7",
+      "score": 8,
+      "velocity": 80,
+      "order": 9
+    },
+    {
+      "midi": 35,
+      "note": "B1",
+      "score": 3,
+      "velocity": 80,
+      "order": 10
+    },
+    {
+      "midi": 49,
+      "note": "C#3",
+      "score": 0,
+      "velocity": 80,
+      "order": 11
+    },
+    {
+      "midi": 55,
+      "note": "G3",
+      "score": 2,
+      "velocity": 80,
+      "order": 12
+    },
+    {
+      "midi": 45,
+      "note": "A2",
+      "score": 7,
+      "velocity": 80,
+      "order": 13
+    },
+    {
+      "midi": 107,
+      "note": "B7",
+      "score": 0,
+      "velocity": 80,
+      "order": 14
+    },
+    {
+      "midi": 57,
+      "note": "A3",
+      "score": 6,
+      "velocity": 80,
+      "order": 15
+    },
+    {
+      "midi": 83,
+      "note": "B5",
+      "score": 7,
+      "velocity": 80,
+      "order": 16
+    },
+    {
+      "midi": 97,
+      "note": "C#7",
+      "score": 9,
+      "velocity": 80,
+      "order": 17
+    },
+    {
+      "midi": 59,
+      "note": "B3",
+      "score": 5,
+      "velocity": 80,
+      "order": 18
+    },
+    {
+      "midi": 53,
+      "note": "F3",
+      "score": 5,
+      "velocity": 80,
+      "order": 19
+    },
+    {
+      "midi": 81,
+      "note": "A5",
+      "score": 5,
+      "velocity": 80,
+      "order": 20
+    },
+    {
+      "midi": 105,
+      "note": "A7",
+      "score": 6,
+      "velocity": 80,
+      "order": 21
+    },
+    {
+      "midi": 75,
+      "note": "D#5",
+      "score": 3,
+      "velocity": 80,
+      "order": 22
+    },
+    {
+      "midi": 93,
+      "note": "A6",
+      "score": 9,
+      "velocity": 80,
+      "order": 23
+    },
+    {
+      "midi": 67,
+      "note": "G4",
+      "score": 2,
+      "velocity": 80,
+      "order": 24
+    },
+    {
+      "midi": 69,
+      "note": "A4",
+      "score": 2,
+      "velocity": 80,
+      "order": 25
+    },
+    {
+      "midi": 103,
+      "note": "G7",
+      "score": 7,
+      "velocity": 80,
+      "order": 26
+    },
+    {
+      "midi": 85,
+      "note": "C#6",
+      "score": 6,
+      "velocity": 80,
+      "order": 27
+    },
+    {
+      "midi": 71,
+      "note": "B4",
+      "score": 2,
+      "velocity": 80,
+      "order": 28
+    },
+    {
+      "midi": 23,
+      "note": "B0",
+      "score": 5,
+      "velocity": 80,
+      "order": 29
+    },
+    {
+      "midi": 43,
+      "note": "G2",
+      "score": 6,
+      "velocity": 80,
+      "order": 30
+    },
+    {
+      "midi": 31,
+      "note": "G1",
+      "score": 6,
+      "velocity": 80,
+      "order": 31
+    },
+    {
+      "midi": 63,
+      "note": "D#4",
+      "score": 2,
+      "velocity": 80,
+      "order": 32
+    },
+    {
+      "midi": 37,
+      "note": "C#2",
+      "score": 3,
+      "velocity": 80,
+      "order": 33
+    },
+    {
+      "midi": 79,
+      "note": "G5",
+      "score": 4,
+      "velocity": 80,
+      "order": 34
+    },
+    {
+      "midi": 39,
+      "note": "D#2",
+      "score": 8,
+      "velocity": 80,
+      "order": 35
+    },
+    {
+      "midi": 99,
+      "note": "D#7",
+      "score": 8,
+      "velocity": 80,
+      "order": 36
+    },
+    {
+      "midi": 61,
+      "note": "C#4",
+      "score": 3,
+      "velocity": 80,
+      "order": 37
+    },
+    {
+      "midi": 77,
+      "note": "F5",
+      "score": 2,
+      "velocity": 80,
+      "order": 38
+    },
+    {
+      "midi": 25,
+      "note": "C#1",
+      "score": 2,
+      "velocity": 80,
+      "order": 39
+    },
+    {
+      "midi": 47,
+      "note": "B2",
+      "score": 3,
+      "velocity": 80,
+      "order": 40
+    },
+    {
+      "midi": 73,
+      "note": "C#5",
+      "score": 4,
+      "velocity": 80,
+      "order": 41
+    },
+    {
+      "midi": 95,
+      "note": "B6",
+      "score": 8,
+      "velocity": 80,
+      "order": 42
+    },
+    {
+      "midi": 65,
+      "note": "F4",
+      "score": 1,
+      "velocity": 80,
+      "order": 43
+    }
+  ],
+  "summary": {
+    "mean": 4.77,
+    "min": 0,
+    "max": 9,
+    "by_register": {
+      "bass": 4.57,
+      "treble": 6.17,
+      "mid": 2.92
+    }
+  }
+}
