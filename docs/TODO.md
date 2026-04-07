@@ -10,31 +10,176 @@ project analysis.  Issues ordered by impact on sound quality.
 
 ### Phase 1 — Extraction robustness (next)
 
-| Step | What | Where | Physics basis |
-|------|------|-------|---------------|
-| 1a | Global damping law fit: R + eta*f^2 | extractor.py | Chabassier Eq.8: damping = R_u + eta_u*f^2 |
-| 1b | Derive per-partial tau from damping law | extractor.py | Replace noisy independent fits with physics constraint |
-| 1c | Noise harmonic subtraction: add sin() basis | extractor.py | Current cos()-only removes max 50% |
-| 1d | Bi-exp fitter: 8 initializations + random restarts | extractor.py | Reduce local-optimum risk |
-| 1e | Per-note fit quality metric | extractor.py | Residual energy / total energy → flag bad fits |
+Goal: make the extraction pipeline physics-aware so that parameters are
+physically consistent even when individual partial measurements are noisy.
+
+**Step 1a — Global damping law fit: R + eta*f^2**
+
+Physics (Chabassier Eq.8): string damping in frequency domain is
+`damping(f) = R_u + eta_u * f^2`.  Two constants per note.
+
+Implementation in `extractor.py`:
+- After per-partial tau1/tau2 extraction, compute effective damping rate
+  for each partial: `rate_k = 1/tau1_k` (using fast component)
+- Fit `rate(f) = R + eta * f^2` via least-squares on partials k=1..K
+  where A0 > noise_floor (reliable partials only)
+- Weight by A0 — louder partials have more reliable tau measurements
+- Store R_u and eta_u in the note's output dict
+
+**Step 1b — Derive per-partial tau from damping law**
+
+For partials where the independent fit produced suspect values (tau > 10s
+for k>8, or fit residual > 50% of signal energy):
+- Replace tau1 with `1 / (R_u + eta_u * f_k^2)`
+- Keep tau2 as max(tau1 * 1.5, independently_fitted_tau2) to preserve
+  the aftersound component
+- Flag these partials as `damping_derived: true` in output
+
+This eliminates the core problem: vel=0 high partials with tau=37s
+(noise-floor fits) get physically correct short tau values instead.
+
+**Step 1c — Noise harmonic subtraction: add sin() basis**
+
+Current `_analyze_noise` in extractor.py builds a least-squares matrix
+with only cos(2*pi*f_k*t) columns.  This removes at most 50% of harmonic
+energy because the phase component (sin) is untouched.
+
+Fix: add sin(2*pi*f_k*t) columns to the regression matrix.  The residual
+after subtraction will contain only inharmonic energy (true noise).
+
+Implementation: in `_analyze_noise`, change the basis matrix from
+`[cos(w1*t), cos(w2*t), ...]` to `[cos(w1*t), sin(w1*t), cos(w2*t), sin(w2*t), ...]`
+
+**Step 1d — Bi-exp fitter: 8 initializations + random restarts**
+
+Current `_fit_decay` uses 4 fixed initializations.  For notes where the
+onset data is weak, the fitter may converge to a local minimum.
+
+Fix: expand to 8 initializations:
+- 4 existing deterministic starts
+- 4 random starts: sample tau1 from log-uniform(0.01, 1.0),
+  tau2 from log-uniform(0.5, 10.0), a1 from uniform(0.1, 0.9)
+- Keep the best (lowest residual) across all 8
+
+**Step 1e — Per-note fit quality metric**
+
+After fitting, compute: `quality = 1 - (residual_energy / total_energy)`
+
+Where `residual_energy = sum((signal - fitted_envelope)^2)` and
+`total_energy = sum(signal^2)`.
+
+- quality > 0.9: excellent fit
+- quality 0.7-0.9: acceptable
+- quality < 0.7: flag as suspect, log warning
+
+Store in output as `fit_quality` per partial and per note (average).
 
 ### Phase 2 — Validation and tools
 
-| Step | What | Where |
-|------|------|-------|
-| 2a | Bank inspector: per-register statistics | tools/inspect_bank.py |
-| 2b | Post-export quality report (spectral distance) | exporter.py + synthesizer.py |
-| 2c | `--validate` flag on run-training.py | run-training.py |
-| 2d | Unit tests for dsp_math.h + piano_math.h | tests/ |
+Goal: detect extraction failures automatically before they reach C++.
+
+**Step 2a — Bank inspector** (`tools/inspect_bank.py`)
+
+Command-line tool that reads a soundbank JSON and prints:
+- Per-register (bass/middle/treble) statistics: partial count, A0 range,
+  tau1/tau2 range, beat_hz range, noise params
+- Notes with anomalous values (tau > 10s, A0 < 1e-6 for k<10, etc.)
+- Spectral shape consistency across velocity layers
+- Missing notes / velocity layers
+
+Usage: `python tools/inspect_bank.py soundbanks/pl-grand.json`
+
+**Step 2b — Post-export quality report**
+
+After export, automatically synthesize 12 reference notes (one per octave,
+mid-velocity) and compute spectral distance vs original WAV:
+- MRSTFT distance (multi-resolution spectral loss)
+- Envelope correlation (is the decay shape correct?)
+- Attack onset match (first 20ms comparison)
+
+Output: quality_report.txt with per-note scores and overall grade.
+
+**Step 2c — `--validate` flag**
+
+Add to `run-training.py analyze`:
+```
+python run-training.py analyze --bank ... --validate
+```
+Runs 2b automatically after export.  Exit code 1 if any note below threshold.
+
+**Step 2d — Unit tests**
+
+C++ tests (`tests/test_dsp_math.cpp`, `tests/test_piano_math.cpp`):
+- Verify biquad against scipy.signal reference output
+- Verify decay_coeff: decay^N = exp(-N/(tau*sr))
+- Verify RBJ shelf coefficients against known values
+- Verify string models: known phase → known output
+- Verify allpass is unity gain: |H(e^jw)| = 1 for all w
+
+Python test: generate a synthetic piano note with known parameters,
+run extractor, verify extracted params match within tolerance.
 
 ### Phase 3 — Longitudinal string model
 
-| Step | What | Where | Physics basis |
-|------|------|-------|---------------|
-| 3a | Extract non-harmonic peaks in first 10ms | extractor.py | Chabassier Eq.7: f_longi = l/(2L)*sqrt(E/rho) |
-| 3b | Classify as longitudinal vs phantom vs noise | extractor.py | Longitudinal: f_longi series. Phantom: f_m+f_n |
-| 3c | Add longitudinal partial synthesis in C++ | piano_core.cpp | Separate cosine sum, rapid decay, bass only |
-| 3d | Export longitudinal params to JSON | exporter.py | New field: `longitudinal_partials[]` |
+Goal: add the metallic precursor sound that gives bass piano notes their
+characteristic "ping" attack.
+
+**Physics (Chabassier §2.1, Eq. 7):**
+
+Longitudinal eigenfrequencies: `f_longi_l = l * f_longi_0` where
+`f_longi_0 = 1/(2L) * sqrt(E/rho)`.
+
+For steel: E = 2.0e11 Pa, rho = 7850 kg/m^3 → sqrt(E/rho) = 5048 m/s.
+
+| Note | L (m) | f_longi_0 (Hz) | f_trans_0 (Hz) | Ratio |
+|------|-------|----------------|----------------|-------|
+| C2 | 1.60 | 1578 | 65.4 | 24:1 |
+| F3 | 0.96 | 2629 | 174.6 | 15:1 |
+| C#5 | 0.33 | 7648 | 555.6 | 14:1 |
+
+The longitudinal frequencies are NOT harmonically related to the transverse
+fundamental — they appear as "extra" spectral peaks during the attack.
+
+The longitudinal wave arrives at the bridge c_longi/c_trans = 14x faster
+than the transverse wave, creating the precursor.
+
+**Step 3a — Extract non-harmonic peaks**
+
+In `extractor.py`, after standard harmonic peak extraction:
+- Compute STFT of the first 10-20 ms only (attack window)
+- Find peaks that are NOT near any harmonic k*f0
+- Compare against predicted f_longi series for that note's string length
+- String length L can be estimated from f0 and typical scaling curves
+
+**Step 3b — Classify peaks**
+
+Three categories:
+- **Longitudinal:** peaks near f_longi_l = l*f_longi_0 (within ±2%)
+- **Phantom:** peaks near f_m + f_n for known harmonics m, n
+- **Noise/soundboard:** remaining non-harmonic peaks
+
+Store classified peaks with frequency, amplitude, decay time.
+
+**Step 3c — C++ longitudinal synthesis**
+
+Add to `PianoVoice`:
+```cpp
+int n_longi_partials;
+struct { float f_hz, A0, decay; } longi[8];  // max 8 longitudinal partials
+```
+
+In processBlock: separate cosine sum for longitudinal partials, rapid
+exponential decay (tau ~ 5-20 ms), added to output before noise.
+
+**Step 3d — Export to JSON**
+
+New field in note dict:
+```json
+"longitudinal_partials": [
+  {"l": 1, "f_hz": 1578, "A0": 0.02, "tau": 0.015},
+  {"l": 2, "f_hz": 3156, "A0": 0.008, "tau": 0.010}
+]
+```
 
 ### Phase 4 — Hammer excitation model
 
@@ -93,12 +238,59 @@ well-known piano design feature and should be visible in extracted A0 data.
 
 ### Phase 5 — Soundboard and advanced
 
-| Step | What | Where |
-|------|------|-------|
-| 5a | Extract soundboard IR (deconvolution) | tools/ |
-| 5b | Post-synthesis convolution stage | dsp/ |
-| 5c | Phantom partial extraction (f_m + f_n) | extractor.py |
-| 5d | Sympathetic resonance (open string coupling) | piano_core.cpp |
+Goal: add the remaining perceptually significant phenomena that
+differentiate a piano model from an organ-like additive synthesizer.
+
+**Step 5a — Extract soundboard IR**
+
+The soundboard filters all string vibrations before they reach the
+listener.  Its impulse response (IR) encodes body resonances, wood
+character, and radiation pattern.
+
+Approach: deconvolve the known synthesized string signal from the
+recorded signal.  The quotient in frequency domain is the soundboard
+transfer function.  Average across several notes to reduce noise.
+
+Output: `soundboard_ir.wav` (mono, ~100 ms, 48 kHz)
+
+**Step 5b — Post-synthesis convolution**
+
+Add a convolution stage in the DSP chain (after limiter, before output):
+```cpp
+class ConvolutionReverb {
+    float* ir_;       // impulse response samples
+    int    ir_len_;   // IR length
+    float* buf_L_;    // overlap-save buffer
+    float* buf_R_;
+    void process(float* L, float* R, int n);
+};
+```
+Use overlap-save FFT convolution for efficiency.  IR length ~4096
+samples (85 ms at 48 kHz) is sufficient for soundboard character.
+
+**Step 5c — Phantom partial extraction**
+
+Phantom partials appear at `f_m + f_n` and `|f_m - f_n|` due to
+geometrical nonlinearity (Chabassier §4).  Most prominent in bass
+where string displacement is large relative to diameter.
+
+After standard harmonic extraction, for each pair (m, n) where m,n <= 10:
+- Check for spectral energy at f_m + f_n (±1% tolerance)
+- If present and above noise floor, extract amplitude and decay
+- Store as `phantom_partials: [{m, n, f_hz, A0, tau}]`
+
+These can be synthesized as additional cosines in C++ — they have
+rapid decay (similar to longitudinal modes).
+
+**Step 5d — Sympathetic resonance**
+
+When a note plays, undamped strings resonate sympathetically at
+harmonically related frequencies.  This adds subtle richness.
+
+Simplified model: when voice[m] is active, add low-level energy
+(-40 dB) to voices whose f0 is an integer multiple of voice[m].f0.
+This requires tracking open (undamped) strings and applying
+a simple energy injection at noteOn.
 
 ---
 
