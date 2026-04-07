@@ -111,6 +111,8 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
             pp.a1      = p["a1"].get<float>();
             pp.beat_hz = p["beat_hz"].get<float>();
             pp.phi     = p["phi"].get<float>();
+            pp.fit_quality     = p.value("fit_quality", 0.f);
+            pp.damping_derived = p.value("damping_derived", false);
         }
 
         // Spectral EQ biquad cascade (optional — absent in NN-exported params)
@@ -677,6 +679,8 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
             pp.a1      = p["a1"].get<float>();
             pp.beat_hz = p["beat_hz"].get<float>();
             pp.phi     = p["phi"].get<float>();
+            pp.fit_quality     = p.value("fit_quality", 0.f);
+            pp.damping_derived = p.value("damping_derived", false);
         }
 
         np.n_biquad = 0;
@@ -821,7 +825,9 @@ CoreVizState PianoCore::getVizState() const {
             cpv.tau2    = pp.tau2;
             cpv.a1      = pp.a1;
             cpv.beat_hz = pp.beat_hz;
-            cpv.mono    = (pp.a1 >= 0.99f);
+            cpv.mono            = (pp.a1 >= 0.99f);
+            cpv.fit_quality     = pp.fit_quality;
+            cpv.damping_derived = pp.damping_derived;
             vv.partials.push_back(cpv);
         }
 

@@ -473,7 +473,7 @@ class SoundbankExporter:
         if tau2 <= tau1*1.001:
             a1 = 1.0
 
-        return {
+        out = {
             "k":       int(p.get("k", k_idx + 1)),
             "f_hz":    float(p["f_hz"]),
             "A0":      float(p["A0"]),
@@ -483,6 +483,13 @@ class SoundbankExporter:
             "beat_hz": beat,
             "phi":     phi,
         }
+        # Extraction diagnostics (optional, for GUI display)
+        fq = p.get("fit_quality")
+        if fq is not None:
+            out["fit_quality"] = round(float(fq), 4)
+        if p.get("damping_derived"):
+            out["damping_derived"] = True
+        return out
 
     def _compute_rms_gain(
         self,

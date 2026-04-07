@@ -60,6 +60,9 @@ struct PianoPartialParam {
     float a1       = 1.f;
     float beat_hz  = 0.f;
     float phi      = 0.f;   // initial phase (precomputed, matching Python RNG)
+    // Extraction diagnostics (loaded from JSON, used by GUI only — no RT impact)
+    float fit_quality    = 0.f;  // 0..1, 1=perfect fit
+    bool  damping_derived = false; // true = tau1 was replaced by damping law
 };
 
 struct PianoNoteParam {

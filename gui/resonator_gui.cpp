@@ -366,7 +366,7 @@ static void drawPartialsTable(const CoreVoiceViz& ln) {
     float row_h = ImGui::GetTextLineHeightWithSpacing();
     float tbl_h = 12.5f * row_h;
 
-    if (ImGui::BeginTable("##partials", 8, ptf, {0.f, tbl_h})) {
+    if (ImGui::BeginTable("##partials", 10, ptf, {0.f, tbl_h})) {
         ImGui::TableSetupScrollFreeze(0, 1);
         ImGui::TableSetupColumn("k",       ImGuiTableColumnFlags_WidthFixed, 26.f);
         ImGui::TableSetupColumn("f_hz",    ImGuiTableColumnFlags_WidthFixed, 66.f);
@@ -376,6 +376,8 @@ static void drawPartialsTable(const CoreVoiceViz& ln) {
         ImGui::TableSetupColumn("a1",      ImGuiTableColumnFlags_WidthFixed, 44.f);
         ImGui::TableSetupColumn("beat_hz", ImGuiTableColumnFlags_WidthFixed, 58.f);
         ImGui::TableSetupColumn("mo",      ImGuiTableColumnFlags_WidthFixed, 22.f);
+        ImGui::TableSetupColumn("Q",       ImGuiTableColumnFlags_WidthFixed, 36.f);
+        ImGui::TableSetupColumn("D",       ImGuiTableColumnFlags_WidthFixed, 16.f);
         ImGui::TableHeadersRow();
 
         for (const auto& pp : ln.partials) {
@@ -393,6 +395,22 @@ static void drawPartialsTable(const CoreVoiceViz& ln) {
             else                    ImGui::TextDisabled("0");
             ImGui::TableSetColumnIndex(7);
             ImGui::TextDisabled(pp.mono ? "y" : "n");
+            // Fit quality: color-coded 0..1
+            ImGui::TableSetColumnIndex(8);
+            if (pp.fit_quality >= 0.9f)
+                ImGui::TextColored({0.4f,1.f,0.4f,1.f}, "%.2f", pp.fit_quality);
+            else if (pp.fit_quality >= 0.7f)
+                ImGui::TextColored({1.f,0.9f,0.3f,1.f}, "%.2f", pp.fit_quality);
+            else if (pp.fit_quality > 0.01f)
+                ImGui::TextColored({1.f,0.4f,0.3f,1.f}, "%.2f", pp.fit_quality);
+            else
+                ImGui::TextDisabled("-");
+            // Damping-derived flag
+            ImGui::TableSetColumnIndex(9);
+            if (pp.damping_derived)
+                ImGui::TextColored({0.6f,0.8f,1.f,1.f}, "d");
+            else
+                ImGui::TextDisabled(" ");
         }
         ImGui::EndTable();
     }

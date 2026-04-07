@@ -58,6 +58,9 @@ struct CorePartialViz {
     float a1       = 1.f;
     float beat_hz  = 0.f;
     bool  mono     = false;
+    // Extraction diagnostics
+    float fit_quality     = 0.f;  // 0..1, how well the envelope fit matched
+    bool  damping_derived = false; // tau1 was replaced by R+eta*f^2 law
 };
 
 struct CoreVoiceViz {

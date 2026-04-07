@@ -128,6 +128,8 @@ Každá nota má pole `partials` — max 60 objektů.
 | `a1` | m,v,k | extr→NN | ✓ | ✓ | env mix | ✓ | ✓ | ✓ | ✓ `0x14` | Váha rychlé složky; `a1=1.0` = mono-exp |
 | `beat_hz` | m,v,k | extr→NN | ✓ | ✓ | detuning PM | ✓ | ✓ | ✓ | ✓ `0x15` | Frekvence beatingu Hz; `0` = mono struna |
 | `phi` | m,v,k | exporter (RNG) | ✓ | ✓ | phase string 1 | ✓ | — | ✓ | ✓ `0x16` | Počáteční fáze string 1 (rad) |
+| `fit_quality` | m,v,k | extractor | ✓ | ✓ | — | — | ✓ | — | — | Kvalita envelope fitu (0..1, 1=perfektní). Color-coded v GUI: zelená ≥0.9, žlutá ≥0.7, červená <0.7 |
+| `damping_derived` | m,v,k | extractor | ✓ | ✓ | — | — | ✓ | — | — | `true` = tau1 nahrazen hodnotou z damping law R+η·f². Zobrazeno jako "d" v GUI |
 
 ---
 
