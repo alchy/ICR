@@ -350,21 +350,27 @@ class SoundbankExporter:
             print(f"Keyboard smoothing: corrected {n_smoothed} parameters "
                   f"across {len(by_vel)} velocity layers", flush=True)
 
-    # ── Exploration recipe (from blind scoring random search) ────────────────
+    # ── Harmonic geometry correction (from blind scoring analysis) ──────────
 
     @staticmethod
     def _apply_exploration_recipe(samples: dict) -> None:
-        """Apply perceptually-validated parameter corrections.
+        """Correct harmonic ratios toward perceptually validated targets.
 
-        From random exploration (15 winning rounds across MIDI 55,63,69):
-        - Bass partials (k=1,2) systematically underestimated by extraction
-        - a1 too high (insufficient aftersound)
-        - Beating too weak or missing
-        - Attack too soft
+        Blind scoring revealed: good notes have strong EVEN harmonics
+        (k=2,4,6,8) relative to odd (k=1,3,5,7).  Target even/odd
+        energy ratio = 0.64 (from 17 good-scoring notes).
 
-        Applied BEFORE RMS calibration so gain is automatically compensated.
+        Bad notes have even/odd = 0.02-0.06 (10-30x too low).
+        Fix: boost even partials (k=2,4,6,8) to reach target ratio.
+
+        Also: a1 blend, beating floor, attack sharpening.
+        Applied BEFORE RMS calibration — gain auto-compensated.
         """
+        TARGET_EVEN_ODD = 0.50   # target even/odd energy ratio (conservative)
+
+        n_harmonics_fixed = 0
         n_modified = 0
+
         for key, sample in samples.items():
             if not key.startswith("m"):
                 continue
@@ -374,16 +380,31 @@ class SoundbankExporter:
                 continue
 
             parts = sample.get("partials", [])
-            if not parts:
+            if len(parts) < 6:
                 continue
 
-            # Bass A0 boost (MIDI < 45 only — higher notes don't need it)
-            if midi <= 45:
-                t = (45 - midi) / 24.0  # 1.0 at MIDI 21, 0.0 at MIDI 45
-                if len(parts) > 0:
-                    parts[0]["A0"] = parts[0].get("A0", 0) * (1.0 + 0.8 * t)
-                if len(parts) > 1:
-                    parts[1]["A0"] = parts[1].get("A0", 0) * (1.0 + 0.4 * t)
+            a = {}
+            for p in parts:
+                a[p.get("k", 0)] = p.get("A0", 0)
+
+            # Measure current even/odd ratio
+            even_energy = sum(a.get(k, 0)**2 for k in [2, 4, 6, 8])
+            odd_energy  = sum(a.get(k, 0)**2 for k in [1, 3, 5, 7])
+            if odd_energy < 1e-20:
+                continue
+
+            current_eo = even_energy / odd_energy
+
+            # If even harmonics are too weak, boost them
+            if current_eo < TARGET_EVEN_ODD * 0.7:
+                boost = math.sqrt(TARGET_EVEN_ODD / max(current_eo, 1e-10))
+                boost = min(boost, 6.0)  # cap at 6x to prevent extreme changes
+
+                for p in parts:
+                    k = p.get("k", 0)
+                    if k in (2, 4, 6, 8):
+                        p["A0"] = p.get("A0", 0) * boost
+                n_harmonics_fixed += 1
 
             # a1: blend 20% toward 0.73 (more aftersound)
             for p in parts[:10]:
@@ -400,8 +421,8 @@ class SoundbankExporter:
             n_modified += 1
 
         if n_modified > 0:
-            print(f"Exploration recipe: modified {n_modified} notes "
-                  f"(bass A0 boost, a1 blend, beating floor, sharp attack)",
+            print(f"Harmonic geometry: {n_harmonics_fixed}/{n_modified} notes had "
+                  f"even harmonics boosted (target even/odd={TARGET_EVEN_ODD:.2f})",
                   flush=True)
 
     # ── Spectral shape borrowing ─────────────────────────────────────────────

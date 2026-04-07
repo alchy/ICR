@@ -1,0 +1,14 @@
+[21:22:54] SESSION START — waiting for commands in tuning_cmd.txt
+[21:22:54] Score: 0-9, s=skip, q=quit
+[21:23:11] NOTE: Starting tuning session - MIDI 55 (G3) - known problem note
+[21:23:20] PLAY G3 (MIDI 55) vel=65 dur=8.0s
+[21:23:29] SCORE 55 2
+[21:24:18] SYSEX midi=55 vel=4 param=0x05 val=0.003000
+[21:24:27] PLAY G3 (MIDI 55) vel=65 dur=8.0s
+[21:24:35] SCORE 55 2
+[21:24:57] SYSEX midi=55 vel=4 param=0x04 val=0.950000
+[21:24:58] SYSEX midi=55 vel=4 param=0x07 val=1.200000
+[21:25:08] SYSEX midi=55 vel=4 param=0x04 val=0.950000
+[21:25:17] SYSEX midi=55 vel=4 param=0x03 val=0.015000
+[21:25:31] PLAY G3 (MIDI 55) vel=65 dur=8.0s
+[21:26:12] QUIT by user
