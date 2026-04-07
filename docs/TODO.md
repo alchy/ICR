@@ -292,6 +292,48 @@ Simplified model: when voice[m] is active, add low-level energy
 This requires tracking open (undamped) strings and applying
 a simple energy injection at noteOn.
 
+### Phase 6 — Stereo width extraction reform
+
+**Current state (short-term fix):**
+`stereo_width_factor` clamped to [0.2, 2.0] in `eq_fitter.py`.
+
+**Root cause of inflated values (6-8x):**
+The EQ fitter computes `width = (orig_S/orig_M) / (syn_S/syn_M)`.
+The Python RMS renderer uses symmetric constant-power pan with small
+spread — for notes near keyboard center, `gl ≈ gr` → `S = (L-R)/2 ≈ 0`.
+Meanwhile the real recording has substantial S from soundboard radiation,
+mic placement, and room reflections.  Result: `0.5 / 0.05 = 10x`.
+
+**Why adding decorrelation to the Python renderer would NOT help:**
+Even with allpass decorrelation, synthesis S would still be smaller than
+recording S.  Allpass is a heuristic phase shift; real stereo comes from
+physical radiation patterns, room acoustics, and mic placement — things
+the model cannot reproduce from parameters alone.
+
+**Proper long-term fix — frequency-dependent width:**
+Instead of a single global S/M ratio, compute width as a function of
+frequency.  In bands where synthesis HAS stereo content (beating
+frequencies, pan offset between strings), the S/M comparison is
+meaningful and width correction works.  In bands where synthesis is
+nearly mono (low frequencies, non-beating partials), S/M ratio is
+dominated by denominator noise and should be ignored (width = 1.0).
+
+Implementation sketch:
+```
+for each frequency band [f_lo, f_hi]:
+    orig_S_band = bandpass(orig_S, f_lo, f_hi)
+    syn_S_band  = bandpass(syn_S, f_lo, f_hi)
+    if rms(syn_S_band) > threshold:
+        width[band] = orig_S / syn_S   # meaningful comparison
+    else:
+        width[band] = 1.0              # synthesis has no stereo here
+```
+
+This would require per-band width storage in JSON and per-band M/S
+processing in C++ — significantly more complex than current scalar width.
+Deferred to after hammer model (Phase 4) since the spectral content
+of synthesis will change substantially with velocity-dependent excitation.
+
 ---
 
 ## Critical Model Gaps
@@ -541,7 +583,7 @@ Good agreement.
 |---|-------|----------|-------|
 | 1 | tau1=0.01 for MIDI 49-90 | **Critical** | Hammer-contact skip fix pending (new analysis running) |
 | 2 | noise_centroid = 1000 Hz everywhere | Medium | Floor masks real variation; bass should be lower, treble higher |
-| 3 | stereo_width = 6.2 for C#5 | Medium | Abnormally high; EQ fitter stereo measurement issue |
+| 3 | stereo_width = 6.2 for C#5 | **FIXED** | Clamped to [0.2, 2.0] in eq_fitter.py; long-term: freq-dependent width (Phase 6) |
 | 4 | B 6-15x higher than Chabassier theory | Low | Expected for wound strings (measured vs. core-only theory) |
 | 5 | tau1 shorter than Chabassier even after fix | Low | Different dynamics (mf vs ff); validate after re-analysis |
 
