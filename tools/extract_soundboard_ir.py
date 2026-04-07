@@ -92,8 +92,8 @@ def main():
                         help="Output WAV path (default: soundbanks/{name}-soundboard.wav)")
     parser.add_argument("--vel", type=int, default=4, help="Velocity index (default: 4)")
     parser.add_argument("--sr-tag", default="f48", help="SR suffix (default: f48)")
-    parser.add_argument("--ir-length-ms", type=float, default=100.0,
-                        help="IR length in ms (default: 100)")
+    parser.add_argument("--ir-length-ms", type=float, default=25.0,
+                        help="IR length in ms (default: 25 — body resonance only, no echo)")
     args = parser.parse_args()
 
     bank = json.load(open(args.soundbank))
@@ -183,12 +183,12 @@ def main():
     # This preserves the relative spectral shape (body resonance, warmth)
     # while preventing overall level boost / clipping.
     freqs_h = np.fft.rfftfreq((len(H_avg) - 1) * 2, 1.0 / sr)
-    norm_mask = (freqs_h >= 500) & (freqs_h <= 2000)
+    norm_mask = (freqs_h >= 2000) & (freqs_h <= 6000)
     if norm_mask.any():
         avg_mag = np.mean(np.abs(H_avg[norm_mask]))
         if avg_mag > 1e-12:
             H_avg /= avg_mag
-            print(f"Normalized: 500-2000 Hz avg magnitude -> 0 dB (was +{20*np.log10(avg_mag):.1f} dB)")
+            print(f"Normalized: 2000-6000 Hz avg magnitude -> 0 dB (was +{20*np.log10(avg_mag):.1f} dB)")
 
     # Convert to time domain IR
     ir_full = np.fft.irfft(H_avg)

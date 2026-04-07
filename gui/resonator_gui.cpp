@@ -119,6 +119,10 @@ struct GuiState {
     uint8_t bbe_bass    = 0;
     bool    bbe_enabled = false;
 
+    // Convolver (soundboard IR)
+    bool  conv_enabled = false;
+    int   conv_mix     = 30;   // 0-100 (percent)
+
     // Stats
     int  active_voices  = 0;
     bool sustain_on     = false;
@@ -571,6 +575,36 @@ static void drawBbeControls(GuiState& gs, CoreEngine& engine, DspChain* dsp) {
     }
 }
 
+// ── Section: Convolver (soundboard IR) controls ──────────────────────────────
+static void drawConvolverControls(GuiState& gs, DspChain* dsp) {
+    if (!dsp || !dsp->isConvolverLoaded()) {
+        ImGui::TextDisabled("CONVOLVER (no IR loaded)");
+        ImGui::TextDisabled("Use --ir <soundboard.wav>");
+        return;
+    }
+    {
+        bool ena = gs.conv_enabled;
+        if (ImGui::Checkbox("##convon", &ena)) {
+            gs.conv_enabled = ena;
+            dsp->setConvolverEnabled(ena);
+        }
+        ImGui::SameLine(); ImGui::AlignTextToFramePadding();
+        ImGui::TextUnformatted("SOUNDBOARD IR");
+    }
+    ImGui::Spacing();
+    {
+        int v = gs.conv_mix;
+        char desc[48]; snprintf(desc, sizeof(desc), "Wet: %d%%", v);
+        if (labeledSlider("##convmix", "Mix", desc, &v, 0, 100)) {
+            gs.conv_mix = v;
+            dsp->setConvolverMix(v / 100.f);
+        }
+    }
+    ImGui::Text("IR: %d samples (%.1f ms)",
+                dsp->convolver().irLength(),
+                dsp->convolver().irLength() / 48.0f);
+}
+
 // ── Right panel: data-driven core params + last-note detail ──────────────────
 static void drawCorePanel(CoreEngine& engine) {
     ISynthCore* core = engine.core();
@@ -660,6 +694,14 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
     ImGui_ImplOpenGL3_Init("#version 330");
 
     GuiState gs;
+    // Sync convolver state from engine (--ir may have loaded it)
+    if (DspChain* dsp = engine.getDspChain()) {
+        if (dsp->isConvolverLoaded()) {
+            gs.conv_enabled = dsp->convolver().isEnabled();
+            gs.conv_mix     = (int)(dsp->convolver().getMix() * 100.f);
+        }
+    }
+
     gs.ports = MidiInput::listPorts();
     MidiInput midi_in;
 
@@ -847,6 +889,13 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 ImGui::TableSetColumnIndex(1);
                 ImGui::Spacing();
                 drawBbeControls(gs, engine, dsp);
+                ImGui::Spacing();
+
+                // Row 3: CONVOLVER (full width)
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Spacing();
+                drawConvolverControls(gs, dsp);
                 ImGui::Spacing();
 
                 ImGui::EndTable();
