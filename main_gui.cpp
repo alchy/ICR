@@ -68,6 +68,7 @@ int main(int argc, char* argv[]) {
     std::string core_name = "SineCore";
     std::string params_json;
     std::string config_json;
+    std::string ir_path;
     int         midi_from = 0;    // --midi-range-limit-from
     int         midi_to   = 127;  // --midi-range-limit-to
     std::vector<std::pair<std::string,float>> core_params;
@@ -98,6 +99,8 @@ int main(int argc, char* argv[]) {
                              kv.c_str());
                 return 1;
             }
+        } else if (a == "--ir" && i + 1 < argc) {
+            ir_path = argv[++i];
         } else if (a == "--midi-range-limit-from" && i + 1 < argc) {
             midi_from = std::atoi(argv[++i]);
         } else if (a == "--midi-range-limit-to" && i + 1 < argc) {
@@ -118,6 +121,19 @@ int main(int argc, char* argv[]) {
         if (!engine->initialize(core_name, params_json, config_json, logger, midi_from, midi_to)) {
             logger.log("main", LogSeverity::Error, "Engine init failed");
             return 1;
+        }
+
+        // Load soundboard IR if provided
+        if (!ir_path.empty()) {
+            DspChain* dsp = engine->getDspChain();
+            if (dsp && dsp->loadConvolverIR(ir_path, 0)) {
+                dsp->setConvolverEnabled(true);
+                logger.log("main", LogSeverity::Info,
+                           "Loaded soundboard IR: " + ir_path);
+            } else {
+                logger.log("main", LogSeverity::Error,
+                           "Failed to load IR: " + ir_path);
+            }
         }
 
         // Apply --core-param overrides

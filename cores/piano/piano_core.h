@@ -42,7 +42,7 @@
 
 static constexpr int   PIANO_MAX_PARTIALS = 60;
 static constexpr int   PIANO_MAX_VOICES   = 128;   // one slot per MIDI note
-static constexpr int   PIANO_N_BIQUAD     = 10;    // spectral EQ cascade sections
+static constexpr int   PIANO_N_BIQUAD     = 5;     // spectral EQ cascade (fine correction only)
 static constexpr float PIANO_RELEASE_MS   = 100.f; // key-release fade-out
 static constexpr float PIANO_ONSET_MS     = 0.5f;  // click-prevention onset (minimal)
 static constexpr float PIANO_SKIP_THRESH  = 2e-7f; // skip silent partials

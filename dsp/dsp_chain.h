@@ -17,6 +17,7 @@
 
 #include "limiter/limiter.h"
 #include "bbe/bbe.h"
+#include "convolver/convolver.h"
 
 class DspChain {
 public:
@@ -43,14 +44,22 @@ public:
     uint8_t getBBEDefinition() const { return bbe_def_midi_; }
     uint8_t getBBEBassBoost()  const { return bbe_bas_midi_; }
 
-    Limiter& limiter() { return limiter_; }
-    BBE&     bbe()     { return bbe_;     }
+    // ── Convolver controls ─────────────────────────────────────────────────
+    bool loadConvolverIR(const std::string& path, float sr);
+    void setConvolverEnabled(bool on) { convolver_.setEnabled(on); }
+    void setConvolverMix(float mix)   { convolver_.setMix(mix); }
+    bool isConvolverLoaded() const    { return convolver_.irLength() > 0; }
 
-    int getEffectCount() const { return 2; }
+    Limiter&   limiter()   { return limiter_; }
+    BBE&       bbe()       { return bbe_;     }
+    Convolver& convolver() { return convolver_; }
+
+    int getEffectCount() const { return 3; }
 
 private:
-    Limiter limiter_;
-    BBE     bbe_;
+    Convolver convolver_;
+    Limiter   limiter_;
+    BBE       bbe_;
 
     uint8_t lim_thr_midi_ = 127;
     uint8_t lim_rel_midi_ = 64;

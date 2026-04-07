@@ -51,6 +51,7 @@ set(DSP_SOURCES
     dsp/dsp_chain.cpp
     dsp/limiter/limiter.cpp
     dsp/bbe/bbe.cpp
+    dsp/convolver/convolver.cpp
 )
 
 # ── Common include directories ────────────────────────────────────────────────

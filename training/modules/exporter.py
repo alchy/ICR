@@ -25,7 +25,7 @@ from training.modules.eq_fitter import _eq_to_biquads
 # ─────────────────────────────────────────────────────────────────────────────
 
 PIANO_MAX_PARTIALS = 60
-PIANO_N_BIQUAD     = 10
+PIANO_N_BIQUAD     = 5
 VEL_GAMMA          = 0.7
 TARGET_RMS_DEFAULT = 0.06
 SR_DEFAULT         = 44_100

@@ -104,6 +104,7 @@ int main(int argc, char* argv[]) {
 
     std::string core_name    = "SineCore";
     std::string params_json;
+    std::string ir_path;
     std::string config_json;
     int         midi_port    = 0;
     std::string render_batch;   // --render-batch <json>
@@ -142,6 +143,8 @@ int main(int argc, char* argv[]) {
                              kv.c_str());
                 return 1;
             }
+        } else if (a == "--ir" && i + 1 < argc) {
+            ir_path = argv[++i];
         } else if (a == "--port" && i + 1 < argc) {
             midi_port = std::atoi(argv[++i]);
         } else if (a == "--render-batch" && i + 1 < argc) {
@@ -168,6 +171,19 @@ int main(int argc, char* argv[]) {
         auto engine = std::make_unique<CoreEngine>();
         if (!engine->initialize(core_name, params_json, config_json, logger, midi_from, midi_to))
             return 1;
+
+        // Load soundboard IR if provided
+        if (!ir_path.empty()) {
+            DspChain* dsp = engine->getDspChain();
+            if (dsp && dsp->loadConvolverIR(ir_path, 0)) {
+                dsp->setConvolverEnabled(true);
+                logger.log("main", LogSeverity::Info,
+                           "Loaded soundboard IR: " + ir_path);
+            } else {
+                logger.log("main", LogSeverity::Error,
+                           "Failed to load IR: " + ir_path);
+            }
+        }
 
         // Apply --core-param overrides
         for (const auto& kv : core_params) {

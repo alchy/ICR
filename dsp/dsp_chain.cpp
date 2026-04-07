@@ -27,8 +27,13 @@ void DspChain::reset() {
 }
 
 void DspChain::process(float* L, float* R, int n_samples) {
-    bbe_.process    (L, R, n_samples);
-    limiter_.process(L, R, n_samples);
+    convolver_.process(L, R, n_samples);   // soundboard body first
+    bbe_.process      (L, R, n_samples);
+    limiter_.process  (L, R, n_samples);
+}
+
+bool DspChain::loadConvolverIR(const std::string& path, float sr) {
+    return convolver_.loadIR(path, sr);
 }
 
 // ── Limiter ───────────────────────────────────────────────────────────────────
