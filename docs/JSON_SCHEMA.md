@@ -93,7 +93,7 @@ Legenda sloupců:
 |---|---|---|---|---|---|---|---|---|---|---|
 | `attack_tau` | m,v | extr→NN | ✓ | ✓ | noise env decay | ✓ | ✓ | ✓ | ✓ `0x03` | Časová konstanta náběhu šumu (s) |
 | `A_noise` | m,v | extr→NN | ✓ | ✓ | noise amplitude | ✓ | — | ✓ | ✓ `0x04` | Amplituda šumové složky |
-| `noise_centroid_hz` | m,v | extr | ✓ | ✓ | 1-pole IIR | ✓ | ✓ | ✓ | ✗ ¹ | Cutoff 1-pólového IIR filtru pro barvení šumu; default 3000 Hz |
+| `noise_centroid_hz` | m,v | extr | ✓ | ✓ | biquad BPF | ✓ | ✓ | ✓ | ✗ ¹ | Center frequency biquad bandpass (Q=1.5) pro barvení šumu; default 3000 Hz |
 
 > ¹ `noise_centroid_hz` chybí v `noteParamKey()` v `core_engine.cpp` — SysEx ID není přiřazeno (existující mezera, ID `0x07` volné).
 
@@ -186,8 +186,8 @@ partial[k]:
 
 noise(t):
   white(t) = randn() · A_noise · exp(−t/attack_tau)
-  α = 1 − exp(−2π·noise_centroid_hz/sr)          # 1-pole IIR koef
-  y(t) = α·white(t) + (1−α)·y(t−1)              # L, R nezávisle
+  bpf = rbj_bandpass(noise_centroid_hz, Q=1.5, sr)  # biquad bandpass
+  y(t) = biquad_tick(white(t), bpf)                  # L, R nezávisle
 
 note(t)  = rms_gain·vel_gain · [Σ partial[k](t) + noise(t)]
          → biquad EQ cascade (eq_biquads)

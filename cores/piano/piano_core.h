@@ -15,7 +15,7 @@
  *                                    s3=cos(2π·(f+b)·t + φ+φ_diff) outer right
  *                                    partial = A0·env·(s1+s2+s3)/3
  *  - Bi-exponential envelope: a1·exp(−t/τ1) + (1−a1)·exp(−t/τ2)
- *  - Gaussian noise:  A_noise·randn()·exp(−t/attack_tau), 1-pole IIR colour
+ *  - Gaussian noise:  A_noise·randn()·exp(−t/attack_tau), biquad bandpass colour
  *  - Spectral EQ:     min-phase biquad cascade (Direct Form II)
  *  - M/S correction:  S *= stereo_width post-EQ
  *  - RMS normalisation: per-note rms_gain pre-computed at export time
@@ -72,7 +72,7 @@ struct PianoNoteParam {
     float phi_diff           = 0.f;
     float attack_tau         = 0.05f;
     float A_noise            = 0.04f;
-    float noise_centroid_hz  = 3000.f; // 1-pole IIR low-pass cutoff for noise colouring
+    float noise_centroid_hz  = 3000.f; // biquad bandpass center frequency for noise shaping
     float rms_gain           = 1.f;
     float stereo_width       = 1.f;   // M/S correction: S *= stereo_width post-EQ; M unchanged
     float f0_hz              = 440.f;

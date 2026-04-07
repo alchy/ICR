@@ -103,17 +103,6 @@ inline StereoSample string_model_3(float phase_c, float phase_b,
              base * (s1 * gr1 + s2 * gr2 + s3 * gr3) };
 }
 
-// ── Noise: 1-pole IIR coloured noise ────────────────────────────────────────
-
-/// Apply one sample of 1-pole IIR low-pass filter to shape noise.
-///   y[n] = alpha · x[n] + (1 - alpha) · y[n-1]
-///
-/// Returns the filtered output.  `state` is updated in-place.
-inline float noise_1pole_tick(float input, float alpha, float& state) {
-    state = alpha * input + (1.f - alpha) * state;
-    return state;
-}
-
 // ── Schroeder first-order all-pass decorrelation ─────────────────────────────
 
 /// Single-channel first-order all-pass filter.

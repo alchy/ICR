@@ -314,13 +314,15 @@ class SoundbankExporter:
             if not ref_shapes:
                 continue
 
-            # Average shapes (truncate to shortest)
-            min_k = min(len(s) for s in ref_shapes)
-            avg_shape = [0.0] * min_k
+            # Average shapes (extend to longest — use available data per k)
+            max_k = max(len(s) for s in ref_shapes)
+            avg_shape = [0.0] * max_k
+            counts    = [0] * max_k
             for s in ref_shapes:
-                for ki in range(min_k):
+                for ki in range(len(s)):
                     avg_shape[ki] += s[ki]
-            avg_shape = [v / len(ref_shapes) for v in avg_shape]
+                    counts[ki] += 1
+            avg_shape = [v / max(c, 1) for v, c in zip(avg_shape, counts)]
 
             # Apply to vel 0-4
             for vel_idx in range(5):
@@ -335,7 +337,7 @@ class SoundbankExporter:
                 if a0_1 < 1e-12:
                     continue
 
-                for ki in range(min(len(parts), min_k)):
+                for ki in range(min(len(parts), max_k)):
                     current_a0 = float(parts[ki].get("A0", 0) or 0)
                     target_a0  = a0_1 * avg_shape[ki]
                     # Only correct upward — never darken a layer
@@ -462,7 +464,7 @@ class SoundbankExporter:
             beat = 0.0
 
         raw_tau1 = p.get("tau1")
-        tau1 = max(float(raw_tau1) if raw_tau1 is not None else 0.5, 0.005)
+        tau1 = max(float(raw_tau1) if raw_tau1 is not None else 0.5, 0.05)
 
         raw_tau2 = p.get("tau2")
         tau2 = float(raw_tau2) if raw_tau2 is not None else tau1
