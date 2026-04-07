@@ -78,7 +78,6 @@ class SoundbankExporter:
         # with velocity (Chabassier 2012: nonlinear hammer exponent p causes gradual,
         # not drastic, spectral change).
         self._borrow_spectral_shape(samples)
-        self._smooth_across_keyboard(samples)
 
         out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed,
                                     params.get("metadata"))
