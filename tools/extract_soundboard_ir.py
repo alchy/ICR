@@ -179,6 +179,17 @@ def main():
     H_avg = H_total / n_good
     print(f"\nAveraged {n_good} notes")
 
+    # Normalize H so that average magnitude in 500-2000 Hz is unity (0 dB).
+    # This preserves the relative spectral shape (body resonance, warmth)
+    # while preventing overall level boost / clipping.
+    freqs_h = np.fft.rfftfreq((len(H_avg) - 1) * 2, 1.0 / sr)
+    norm_mask = (freqs_h >= 500) & (freqs_h <= 2000)
+    if norm_mask.any():
+        avg_mag = np.mean(np.abs(H_avg[norm_mask]))
+        if avg_mag > 1e-12:
+            H_avg /= avg_mag
+            print(f"Normalized: 500-2000 Hz avg magnitude -> 0 dB (was +{20*np.log10(avg_mag):.1f} dB)")
+
     # Convert to time domain IR
     ir_full = np.fft.irfft(H_avg)
 
@@ -186,9 +197,9 @@ def main():
     ir_samples = int(args.ir_length_ms * 0.001 * sr)
     ir = ir_full[:ir_samples].astype(np.float32)
 
-    # Normalize peak to 0.95
+    # Normalize peak to prevent clipping (keep < 1.0)
     peak = np.max(np.abs(ir))
-    if peak > 1e-12:
+    if peak > 0.95:
         ir = ir * (0.95 / peak)
 
     # Window the tail to avoid truncation artifacts
