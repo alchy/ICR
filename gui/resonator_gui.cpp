@@ -121,7 +121,7 @@ struct GuiState {
 
     // Convolver (soundboard IR)
     bool  conv_enabled = false;
-    int   conv_mix     = 30;   // 0-100 (percent)
+    int   conv_mix     = 50;   // 0-100% GUI range (maps to 0.0-0.04 real mix)
 
     // Stats
     int  active_voices  = 0;
@@ -594,10 +594,11 @@ static void drawConvolverControls(GuiState& gs, DspChain* dsp) {
     ImGui::Spacing();
     {
         int v = gs.conv_mix;
-        char desc[48]; snprintf(desc, sizeof(desc), "Wet: %d%%", v);
+        char desc[48]; snprintf(desc, sizeof(desc), "Body: %d%%", v);
         if (labeledSlider("##convmix", "Mix", desc, &v, 0, 100)) {
             gs.conv_mix = v;
-            dsp->setConvolverMix(v / 100.f);
+            // GUI 0-100% maps to mix 0.0-0.04 (usable range from listening test)
+            dsp->setConvolverMix(v * 0.04f / 100.f);
         }
     }
     ImGui::Text("IR: %d samples (%.1f ms)",
