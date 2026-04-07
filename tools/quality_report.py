@@ -74,6 +74,65 @@ def envelope_correlation(orig: np.ndarray, synth: np.ndarray,
     return float(np.corrcoef(env_o, env_s)[0, 1])
 
 
+def band_energy_diff(orig: np.ndarray, synth: np.ndarray, sr: int) -> dict:
+    """Per-octave-band energy difference in dB (synth - orig).
+
+    Positive = synth has MORE energy in that band.
+    Negative = synth is MISSING energy (the "hollow" indicator).
+
+    Bands: 0-250, 250-500, 500-1k, 1k-2k, 2k-4k, 4k-8k, 8k-16k Hz
+    """
+    n_fft = min(8192, min(len(orig), len(synth)))
+    n = n_fft
+    O = np.abs(np.fft.rfft(orig[:n] * np.hanning(n))) ** 2
+    S = np.abs(np.fft.rfft(synth[:n] * np.hanning(n))) ** 2
+    freqs = np.fft.rfftfreq(n, 1.0 / sr)
+
+    bands = [(0, 250), (250, 500), (500, 1000), (1000, 2000),
+             (2000, 4000), (4000, 8000), (8000, 16000)]
+    result = {}
+    for lo, hi in bands:
+        mask = (freqs >= lo) & (freqs < hi)
+        if not mask.any():
+            continue
+        e_o = float(np.sum(O[mask]) + 1e-30)
+        e_s = float(np.sum(S[mask]) + 1e-30)
+        result[f"{lo}-{hi}"] = 10 * math.log10(e_s / e_o)
+    return result
+
+
+def brightness_diff(orig: np.ndarray, synth: np.ndarray, sr: int) -> float:
+    """Difference in 'brightness' = ratio of energy above 1kHz to total.
+
+    Positive = synth is brighter than original.
+    Negative = synth is duller (the "muffled/hollow" indicator).
+    """
+    n_fft = min(8192, min(len(orig), len(synth)))
+    n = n_fft
+    freqs = np.fft.rfftfreq(n, 1.0 / sr)
+
+    O = np.abs(np.fft.rfft(orig[:n] * np.hanning(n))) ** 2
+    S = np.abs(np.fft.rfft(synth[:n] * np.hanning(n))) ** 2
+
+    hi_mask = freqs >= 1000
+    bright_o = float(np.sum(O[hi_mask]) / (np.sum(O) + 1e-30))
+    bright_s = float(np.sum(S[hi_mask]) / (np.sum(S) + 1e-30))
+
+    return bright_s - bright_o  # negative = synth duller
+
+
+def attack_energy_ratio(orig: np.ndarray, synth: np.ndarray,
+                        sr: int, window_ms: float = 50.0) -> float:
+    """Ratio of attack energy (first window_ms) between synth and orig, in dB.
+
+    Captures whether the hammer transient / onset is correctly reproduced.
+    """
+    n_atk = min(int(window_ms * 0.001 * sr), len(orig), len(synth))
+    e_o = float(np.sqrt(np.mean(orig[:n_atk] ** 2) + 1e-30))
+    e_s = float(np.sqrt(np.mean(synth[:n_atk] ** 2) + 1e-30))
+    return 20 * math.log10(e_s / e_o)
+
+
 def spectral_centroid_diff(orig: np.ndarray, synth: np.ndarray,
                            sr: int) -> float:
     """Difference in spectral centroid (Hz) between original and synthesis."""
@@ -197,13 +256,15 @@ def main():
     print()
 
     results = []
-    print(f"{'MIDI':>4} {'LSD':>6} {'EnvCorr':>7} {'CentDif':>8} {'Score':>6}  Notes")
-    print(f"{'----':>4} {'------':>6} {'-------':>7} {'--------':>8} {'------':>6}  -----")
+
+    # Header
+    print(f"{'MIDI':>4} {'Score':>5} {'EnvC':>5} {'Brite':>6} {'AtkdB':>6}  "
+          f"{'<250':>5} {' 500':>5} {'  1k':>5} {'  2k':>5} {'  4k':>5} {'  8k':>5}  Flags")
+    print("-" * 95)
 
     for midi in test_midis:
         wav_path = bank_dir / f"m{midi:03d}-vel{args.vel}-{args.sr_tag}.wav"
         if not wav_path.exists():
-            # Try other velocities
             found = False
             for v in range(8):
                 alt = bank_dir / f"m{midi:03d}-vel{v}-{args.sr_tag}.wav"
@@ -216,9 +277,8 @@ def main():
                 continue
 
         orig, orig_sr = load_wav_mono(str(wav_path))
-        sr = orig_sr  # render at WAV sample rate
+        sr = orig_sr
 
-        # Trim original to match render duration
         n_render = int(args.duration * sr)
         orig = orig[:n_render]
 
@@ -233,54 +293,80 @@ def main():
         if synth_rms > 1e-10:
             synth = synth * (orig_rms / synth_rms)
 
-        lsd = log_spectral_distance(orig, synth, sr)
         env_corr = envelope_correlation(orig, synth, sr)
-        cent_diff = spectral_centroid_diff(orig, synth, sr)
+        bright = brightness_diff(orig, synth, sr)
+        atk_db = attack_energy_ratio(orig, synth, sr)
+        bands = band_energy_diff(orig, synth, sr)
         manual = manual_scores.get(midi, float("nan"))
 
         results.append({
-            "midi": midi, "lsd": lsd, "env_corr": env_corr,
-            "cent_diff": cent_diff, "manual_score": manual,
+            "midi": midi, "env_corr": env_corr, "brightness": bright,
+            "attack_db": atk_db, "bands": bands, "manual_score": manual,
         })
 
-        score_str = f"{manual:.2f}" if not math.isnan(manual) else "     -"
-        notes = ""
-        if lsd > 15: notes += " HIGH-LSD"
-        if env_corr < 0.7: notes += " LOW-ENV"
-        if abs(cent_diff) > 500: notes += " CENTROID"
-        print(f"{midi:4d} {lsd:6.1f} {env_corr:7.3f} {cent_diff:+8.0f} {score_str}{notes}")
+        score_str = f"{manual:.2f}" if not math.isnan(manual) else "    -"
+        # Band columns: show dB difference per octave band
+        b = bands
+        band_str = f"{b.get('0-250',0):+5.1f} {b.get('250-500',0):+5.1f} " \
+                   f"{b.get('500-1000',0):+5.1f} {b.get('1000-2000',0):+5.1f} " \
+                   f"{b.get('2000-4000',0):+5.1f} {b.get('4000-8000',0):+5.1f}"
+        flags = ""
+        if bright < -0.1: flags += " DULL"
+        if bright > 0.1: flags += " BRIGHT"
+        if env_corr < 0.7: flags += " BAD-ENV"
+        if atk_db < -6: flags += " WEAK-ATK"
+        if atk_db > 6: flags += " LOUD-ATK"
+        # Flag bands with >6 dB deficit
+        for band_name, val in b.items():
+            if val < -6:
+                flags += f" -{band_name}"
+        print(f"{midi:4d} {score_str} {env_corr:5.2f} {bright:+6.3f} {atk_db:+6.1f}  {band_str}{flags}")
 
-    # Summary
+    # Summary and correlation
     if results:
-        lsds = [r["lsd"] for r in results]
-        envs = [r["env_corr"] for r in results]
-        print(f"\n{'='*60}")
-        print(f"  LSD:      {np.mean(lsds):5.1f} avg  [{min(lsds):.1f} - {max(lsds):.1f}]")
-        print(f"  EnvCorr:  {np.mean(envs):5.3f} avg  [{min(envs):.3f} - {max(envs):.3f}]")
+        print(f"\n{'='*95}")
 
-        # Correlation with manual scores
-        scored = [(r["manual_score"], r["lsd"], r["env_corr"])
-                  for r in results if not math.isnan(r["manual_score"])]
+        scored = [r for r in results if not math.isnan(r["manual_score"])]
         if len(scored) >= 4:
-            ms = np.array([s[0] for s in scored])
-            ls = np.array([s[1] for s in scored])
-            ec = np.array([s[2] for s in scored])
+            ms = np.array([r["manual_score"] for r in scored])
+            ec = np.array([r["env_corr"] for r in scored])
+            br = np.array([r["brightness"] for r in scored])
+            at = np.array([r["attack_db"] for r in scored])
 
-            corr_lsd = float(np.corrcoef(ms, -ls)[0, 1])  # negative: lower LSD = better
-            corr_env = float(np.corrcoef(ms, ec)[0, 1])
+            # Per-band correlations
+            band_names = ["0-250", "250-500", "500-1000", "1000-2000",
+                          "2000-4000", "4000-8000"]
+            band_corrs = {}
+            for bn in band_names:
+                vals = np.array([r["bands"].get(bn, 0) for r in scored])
+                if vals.std() > 0.01:
+                    band_corrs[bn] = float(np.corrcoef(ms, vals)[0, 1])
 
             print(f"\n  Correlation with manual scores ({len(scored)} notes):")
-            print(f"    LSD vs score:     r = {corr_lsd:+.3f}  ({'good' if abs(corr_lsd) > 0.5 else 'weak'})")
-            print(f"    EnvCorr vs score: r = {corr_env:+.3f}  ({'good' if abs(corr_env) > 0.5 else 'weak'})")
+            corr_env = float(np.corrcoef(ms, ec)[0, 1]) if ec.std() > 0 else 0
+            corr_bri = float(np.corrcoef(ms, br)[0, 1]) if br.std() > 0 else 0
+            corr_atk = float(np.corrcoef(ms, at)[0, 1]) if at.std() > 0 else 0
+            print(f"    EnvCorr:       r = {corr_env:+.3f}")
+            print(f"    Brightness:    r = {corr_bri:+.3f}")
+            print(f"    AttackEnergy:  r = {corr_atk:+.3f}")
+            print(f"\n  Per-band energy diff correlation with score:")
+            best_band = ("", 0)
+            for bn, c in sorted(band_corrs.items()):
+                marker = " <<<" if abs(c) > 0.4 else ""
+                print(f"    {bn:>10} Hz:  r = {c:+.3f}{marker}")
+                if abs(c) > abs(best_band[1]):
+                    best_band = (bn, c)
 
-            # Combined metric attempt
-            if abs(corr_lsd) > 0.3 or abs(corr_env) > 0.3:
-                # Normalize and combine
-                ls_norm = (ls - ls.mean()) / (ls.std() + 1e-10)
-                ec_norm = (ec - ec.mean()) / (ec.std() + 1e-10)
-                combined = -ls_norm + ec_norm  # lower LSD + higher env = better
-                corr_comb = float(np.corrcoef(ms, combined)[0, 1])
-                print(f"    Combined:         r = {corr_comb:+.3f}  ({'good' if abs(corr_comb) > 0.5 else 'weak'})")
+            # Best composite metric
+            if best_band[0]:
+                best_vals = np.array([r["bands"].get(best_band[0], 0) for r in scored])
+                # Combine best band + env_corr
+                if ec.std() > 0 and best_vals.std() > 0:
+                    ec_n = (ec - ec.mean()) / ec.std()
+                    bv_n = (best_vals - best_vals.mean()) / best_vals.std()
+                    composite = ec_n + bv_n
+                    corr_comp = float(np.corrcoef(ms, composite)[0, 1])
+                    print(f"\n  Best composite (EnvCorr + {best_band[0]}Hz band): r = {corr_comp:+.3f}")
 
 
 if __name__ == "__main__":
