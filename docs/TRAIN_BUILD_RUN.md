@@ -42,17 +42,73 @@ Requires: CMake 3.16+, C++17 compiler.
 .venv312/Scripts/python.exe run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
 ```
 
-**Pipeline:**
-1. **Extract** — per-note partial analysis (frequency, amplitude, bi-exp envelope, beating, noise)
-2. **Filter** — remove statistical outliers across the keyboard
-3. **EQ fit** — spectral envelope correction via 10-section biquad cascade
-4. **Export** — assemble JSON with RMS calibration (biquad BP noise model matching C++)
-5. **Soundboard IR** — extract body resonance by deconvolving synthesis from recordings
+### What happens
+
+The pipeline produces two files from the WAV recordings:
+
+**1. Soundbank JSON (params.json)** — per-note physical parameters
+
+For each recorded note, the extractor analyzes the WAV and fits a
+parametric model:
+
+- **Partial detection:** FFT peak-picking finds harmonic frequencies.
+  Inharmonicity `f_k = k * f0 * sqrt(1 + B * k^2)` is fitted from the
+  measured peak positions.  Up to 60 partials per note.
+
+- **Envelope fitting:** Each partial's amplitude over time is fitted with
+  a bi-exponential decay `a1*exp(-t/tau1) + (1-a1)*exp(-t/tau2)` which
+  captures the piano's double-decay (fast prompt sound + slow aftersound).
+  Onset STFT measures peak A0, main STFT data feeds the decay fit (avoids
+  hammer transient contamination).
+
+- **Noise analysis:** The hammer knock is modeled as filtered Gaussian
+  noise.  Harmonics are subtracted (sin+cos basis), the residual gives
+  `A_noise` (amplitude) and `noise_centroid_hz` (spectral center).
+
+- **Beat detection:** String detuning between unison strings produces
+  amplitude beating.  Per-partial autocorrelation extracts `beat_hz`.
+
+- **Spectral EQ:** LTASE comparison between original recording and
+  additive synthesis gives a correction curve, fitted as a 10-section
+  biquad cascade.  This captures fine spectral details the partial model
+  misses.
+
+- **RMS calibration:** Each note is rendered through the Python synthesizer
+  (matching the C++ signal path exactly) and normalized to `target_rms`.
+
+- **Cross-velocity correction:** Spectral shape from forte layers (vel 5-7)
+  is applied to piano layers (vel 0-4) where noise-floor contamination
+  would otherwise make quiet notes sound muffled.
+
+**2. Soundboard IR (soundboard.wav)** — instrument body resonance
+
+The additive synthesis model produces "clean" cosine partials, but a real
+piano sound is shaped by the soundboard, bridge, and room.  The IR
+captures this missing character:
+
+- For ~20 notes spread across the keyboard, the pipeline renders pure
+  additive synthesis (no EQ, no noise) and compares its spectrum with
+  the original recording.
+
+- The ratio `H(f) = FFT(original) / FFT(synthesis)` is the effective
+  transfer function of everything the model doesn't capture — soundboard
+  resonance, room reflections, string-bridge coupling.
+
+- The transfer functions are averaged across notes (Wiener regularized
+  deconvolution) to produce a stable, note-independent body profile.
+
+- The result is normalized to unity gain at 2-6 kHz (so high frequencies
+  pass through unchanged) and truncated to 25 ms (captures resonance
+  character without reverb/echo artifacts).
+
+- At playback, the IR is convolved with the synthesis output at low mix
+  (0-4%), adding subtle warmth and body without coloring the sound
+  aggressively.
 
 **Output:**
 ```
-soundbanks/pl-grand-04071830.json              ← soundbank parameters
-soundbanks/pl-grand-04071830-soundboard.wav    ← soundboard impulse response (25ms)
+soundbanks/pl-grand-04071830.json              <- soundbank parameters
+soundbanks/pl-grand-04071830-soundboard.wav    <- soundboard IR (25ms)
 ```
 
 **Options:**
