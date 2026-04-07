@@ -159,22 +159,17 @@ compounds this: it adjusts for 1-pole characteristics, not bandpass.
 
 ### High (affects specific notes)
 
-**3. stereo_width unclamped — values up to 6.85**
-EQ fitter extracts stereo_width from recording S/M ratio divided by synthesis
-S/M ratio.  Values >2.0 indicate extraction error (not a real piano property).
-MIDI 77 (width=6.85, score=0.30) and MIDI 65 (width=6.12, score=0.45) directly
-correlate with bad listening scores.
+**3. stereo_width unclamped — values up to 6.85 (FIXED in extraction)**
+Root cause: `rms(syn_S)` near zero (synthesis nearly mono) → division
+explosion → width_factor 6-8.  Clamped to [0.2, 2.0] in eq_fitter.py.
+Real piano S/M ratio is 0.3-1.5; values >2.0 are extraction artifacts.
 
-**Fix should be in extraction** (EQ fitter stereo measurement), not player
-clamping.  Player should remain transparent — what it receives, it plays.
+Second listening test confirmed: MIDI 65 (width=8.0, score=0.44),
+MIDI 71 (width=7.13), MIDI 74 (width=4.18, score=0.24) — all "břinkavý",
+"praskla struna" character directly caused by extreme stereo width.
 
-**4. lerpNoteParams drops partials when layer counts differ**
-`out.K = std::min(a.K, b.K)` — if layer A has 60 partials and layer B has 29,
-result gets 29.  At `frac=0.0` you hear 60 partials; at `frac=0.001` you jump
-to 29.  Causes discontinuity in velocity sweep.
-
-**Fix:** use `max(a.K, b.K)`, interpolate where both exist, fade A0 toward 0
-for partials only in one layer.
+**4. lerpNoteParams drops partials when layer counts differ (FIXED)**
+Changed `min(K)` to `max(K)` with A0 fade for single-layer partials.
 
 ### Medium
 

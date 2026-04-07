@@ -200,8 +200,11 @@ def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
         syn_M   = (synth_stereo_trim[skip:,0] + synth_stereo_trim[skip:,1]) / 2
         syn_S   = (synth_stereo_trim[skip:,0] - synth_stereo_trim[skip:,1]) / 2
         rms     = lambda x: float(np.sqrt(np.mean(x**2)) + 1e-12)
+        # Clip to physically plausible range: real piano S/M ratio is 0.2-2.0.
+        # Values > 2.0 indicate synthesis S is near-zero (nearly mono) causing
+        # division explosion — not a real property of the recording.
         width_factor = float(np.clip(rms(orig_S)/rms(orig_M) / (rms(syn_S)/rms(syn_M)+1e-12),
-                                     0.2, 8.0))
+                                     0.2, 2.0))
 
     # Adaptive N_FFT
     n_fft, hop = _adaptive_nfft(midi, sr_use)
