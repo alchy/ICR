@@ -188,6 +188,37 @@ may be EQ artifact or phase coherence issue
 
 ---
 
+## Latest Iteration: pl-grand-04071611
+
+Includes: allpass revert, biquad BP RMS match, stereo_width clamp [0.2, 2.0],
+lerpNoteParams max(K).
+
+**Notable improvements vs previous:**
+- MIDI 62: 0.79 -> 0.98 (allpass + RMS match)
+- MIDI 98: 0.79 -> 0.99
+- MIDI 91: 0.88 -> 0.99
+- Treble register consistently 0.87-0.99
+
+**Per-note diagnosis (quality report per-band analysis):**
+
+MIDI 28 (score 0.50, "brinkava"): A_noise=1.32 (highest in bank, harmonic
+contamination), EnvCorr=0.10 (worst), -13 dB deficit in 500-2000 Hz.
+
+MIDI 40 (score 0.40, "prebuzena"): -18 dB in 1-2 kHz (body missing),
+attack -5.6 dB weaker than original.
+
+MIDI 57 (score 0.30, "rezonujici"): OPPOSITE problem — synth +10-29 dB
+brighter than original.  width=2.0 (clamp hit) + tau1=0.26, a1=0.91.
+
+MIDI 74 (score 0.30, "praskla struna"): +45 dB in 4-8 kHz over-bright,
+tau1=0.057 (bound), tau2=0.22 (very short) -> rapid die-off.
+
+**Patterns identified:**
+1. "Dull" notes (50): missing 1-4 kHz energy in extracted A0 values
+2. "Over-bright/resonant" notes (57, 74): excess HF from noise or EQ
+3. "Brinkava" notes (28): A_noise harmonic contamination dominates partials
+4. Individual extraction failures — not systemic
+
 ## Output Naming
 Soundbank outputs now have timestamp suffix: `pl-grand-04071430.json`
 (MMDDHHmm format) to preserve good iterations.
