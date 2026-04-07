@@ -206,6 +206,10 @@ def _analyze_file(path: str, midi: int, vel: int) -> dict:
         partial = _extract_partial(audio, sr, stft_times, stft_freqs, stft_mag, p, fk)
         partials_out.append(partial)
 
+    # Apply physics-constrained damping law: tau(f) = 1/(R + eta*f^2)
+    # Fit R, eta from well-measured partials, then correct suspect values.
+    partials_out = _apply_damping_law(partials_out, f0_fit, B)
+
     result["partials"] = partials_out
     noise_info = _analyze_noise(audio, sr, peaks, f0_fit, B)
     result["attack_tau"]        = noise_info["attack_tau"]
@@ -471,6 +475,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
         "tau1": None, "tau2": None, "a1": 1.0,
         "A0": float(amps[i_peak]) if len(amps) > i_peak else 0.0,
         "mono": True,
+        "fit_quality": 0.0,
     }
     if i_peak >= len(times):
         return default
@@ -508,12 +513,19 @@ def _fit_decay(times, amps, i_peak) -> dict:
             tau2 = max(tau2, tau1 * 1.1)
             return a1 * np.exp(-t / tau1) + (1 - a1) * np.exp(-t / tau2)
 
-        # Four diverse initializations to escape local minima
+        # 8 diverse initializations: 4 deterministic + 4 random restarts
+        rng_fit = np.random.default_rng(42)
         inits = [
+            # Deterministic: cover different tau1/tau2 ratios
             (0.3,  min(mono_tau * 0.15, tau1_max * 0.5),  mono_tau),
             (0.5,  min(mono_tau * 0.30, tau1_max * 0.5),  min(mono_tau * 2.5, tau2_max * 0.8)),
             (0.2,  0.05,                                   min(mono_tau * 0.5, tau2_max * 0.5)),
             (0.7,  min(mono_tau * 0.50, tau1_max * 0.8),  min(mono_tau * 4.0, tau2_max * 0.8)),
+            # Random restarts: log-uniform sampling for tau, uniform for a1
+            *[(float(rng_fit.uniform(0.1, 0.9)),
+               float(np.exp(rng_fit.uniform(np.log(0.01), np.log(max(0.02, tau1_max))))),
+               float(np.exp(rng_fit.uniform(np.log(0.5), np.log(max(0.6, tau2_max))))))
+              for _ in range(4)],
         ]
 
         best_popt = None
@@ -546,6 +558,16 @@ def _fit_decay(times, amps, i_peak) -> dict:
                 result["tau2"] = tau2
                 result["a1"]   = a1
                 result["mono"] = False
+
+    # Fit quality: 1 - (residual_energy / total_energy)
+    tau1_final = result.get("tau1") or mono_tau
+    if result["mono"] or result.get("tau2") is None:
+        pred_final = np.exp(-t / tau1_final)
+    else:
+        pred_final = bi_exp(t, result["a1"], tau1_final, result["tau2"])
+    residual_e = float(np.sum((a_norm - pred_final) ** 2))
+    total_e    = float(np.sum(a_norm ** 2))
+    result["fit_quality"] = 1.0 - residual_e / max(total_e, 1e-30)
 
     return result
 
@@ -596,12 +618,15 @@ def _analyze_noise(audio, sr, peaks, f0, B) -> dict:
     n       = len(attack)
     t_vec   = np.arange(n) / sr
 
-    # Subtract top harmonics via least squares
+    # Subtract top harmonics via least squares (cos + sin basis for
+    # complete harmonic removal — cos-only leaves ~50% of harmonic energy)
     basis = []
     for p in peaks[:30]:
         fk = _inharmonic_freq(p["k"], f0, B)
         if fk < sr/2*0.95:
-            basis.append(np.cos(2*math.pi*fk*t_vec).astype(np.float32))
+            phase = 2*math.pi*fk*t_vec
+            basis.append(np.cos(phase).astype(np.float32))
+            basis.append(np.sin(phase).astype(np.float32))
 
     if basis:
         H = np.column_stack(basis)
@@ -750,6 +775,93 @@ def _compute_summary(results: dict) -> dict:
         "f0_fitted_hz_by_midi": {str(k): v for k, v in f0_mean.items()},
         "tuning_cents_by_midi": {str(k): v for k, v in tuning_cents.items()},
     }
+
+
+def _apply_damping_law(partials: list, f0: float, B: float) -> list:
+    """
+    Apply Chabassier damping constraint: damping_rate(f) = R + eta * f^2.
+
+    1. Compute damping rate = 1/tau1 for each partial
+    2. Fit R and eta from well-measured partials (A0 > median, tau1 < 10s)
+    3. For suspect partials (tau1 > 10s or fit_quality flagged), replace
+       tau1 with 1/(R + eta*f^2) derived from the physical law
+    """
+    if len(partials) < 4:
+        return partials
+
+    # Collect reliable measurements for the fit
+    freqs_good  = []
+    rates_good  = []
+    weights     = []
+
+    for p in partials:
+        tau1 = p.get("tau1")
+        f_hz = p.get("f_hz", 0)
+        A0   = p.get("A0", 0)
+        if tau1 is None or tau1 <= 0 or f_hz <= 0 or A0 <= 0:
+            continue
+        rate = 1.0 / tau1
+        # Reliable: tau1 < 10s and A0 above median
+        if tau1 < 10.0:
+            freqs_good.append(f_hz)
+            rates_good.append(rate)
+            weights.append(A0)
+
+    if len(freqs_good) < 3:
+        return partials
+
+    freqs_good = np.array(freqs_good)
+    rates_good = np.array(rates_good)
+    weights    = np.array(weights)
+    # Normalize weights
+    weights = weights / (weights.max() + 1e-15)
+
+    # Weighted least-squares fit: rate = R + eta * f^2
+    # Design matrix: [1, f^2] @ [R, eta]^T = rate
+    F2 = freqs_good ** 2
+    W  = np.diag(weights)
+    A_mat = np.column_stack([np.ones_like(freqs_good), F2])
+    try:
+        # Solve W @ A @ [R, eta] = W @ rates
+        WA = W @ A_mat
+        Wr = W @ rates_good
+        params, *_ = np.linalg.lstsq(WA, Wr, rcond=None)
+        R_u, eta_u = float(params[0]), float(params[1])
+    except Exception:
+        return partials
+
+    # Sanity check: R and eta should be positive
+    if R_u < 0:
+        R_u = 0.0
+    if eta_u < 0:
+        return partials  # quadratic law doesn't hold — don't correct
+
+    # Apply corrections to suspect partials
+    n_corrected = 0
+    for p in partials:
+        tau1 = p.get("tau1")
+        f_hz = p.get("f_hz", 0)
+        if tau1 is None or f_hz <= 0:
+            continue
+
+        predicted_rate = R_u + eta_u * f_hz ** 2
+        if predicted_rate < 0.01:
+            predicted_rate = 0.01  # floor: tau_max = 100s
+        predicted_tau1 = 1.0 / predicted_rate
+
+        # Correct if: tau1 > 10s (clearly noise-floor fit) or
+        # tau1 deviates from prediction by more than 5x
+        ratio = tau1 / predicted_tau1 if predicted_tau1 > 0 else 999
+        if tau1 > 10.0 or ratio > 5.0:
+            p["tau1"] = float(predicted_tau1)
+            # Ensure tau2 >= tau1 * 1.5
+            tau2 = p.get("tau2")
+            if tau2 is not None and tau2 < predicted_tau1 * 1.5:
+                p["tau2"] = float(predicted_tau1 * 1.5)
+            p["damping_derived"] = True
+            n_corrected += 1
+
+    return partials
 
 
 def _sanitize_for_json(obj):
