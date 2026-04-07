@@ -118,6 +118,7 @@ soundbanks/pl-grand-04071830-soundboard.wav    <- soundboard IR (25ms)
 --skip-eq                         Skip spectral EQ fitting
 --skip-outliers                   Skip outlier detection
 --skip-ir                         Skip soundboard IR extraction
+--skip-physics-floor              Raw extraction only (no harmonic correction)
 --sr-tag f44                      If WAVs are 44.1 kHz (default: f48)
 ```
 

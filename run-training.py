@@ -99,6 +99,8 @@ def _build_parser() -> argparse.ArgumentParser:
                          help="SR suffix in filenames: f44 or f48 (default: f48)")
     analyze.add_argument("--skip-ir", action="store_true",
                          help="Skip soundboard IR extraction")
+    analyze.add_argument("--skip-physics-floor", action="store_true",
+                         help="Skip physics floor correction (raw extraction only)")
 
     return root
 
@@ -127,6 +129,7 @@ def main() -> int:
             skip_eq=args.skip_eq,
             skip_outliers=args.skip_outliers,
             sr_tag=args.sr_tag,
+            skip_physics_floor=args.skip_physics_floor,
         )
         print(f"\nSoundbank -> {out}")
 

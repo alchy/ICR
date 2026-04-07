@@ -57,6 +57,7 @@ class SoundbankExporter:
         duration:   float = DURATION_DEFAULT,
         target_rms: float = TARGET_RMS_DEFAULT,
         rng_seed:   int   = RNG_SEED_DEFAULT,
+        skip_physics_floor: bool = False,
     ) -> None:
         """
         Export a soundbank from real extracted physics params.
@@ -78,7 +79,8 @@ class SoundbankExporter:
         # with velocity (Chabassier 2012: nonlinear hammer exponent p causes gradual,
         # not drastic, spectral change).
         self._borrow_spectral_shape(samples)
-        self._apply_exploration_recipe(samples)
+        if not skip_physics_floor:
+            self._apply_exploration_recipe(samples)
 
         out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed,
                                     params.get("metadata"))

@@ -17,7 +17,8 @@ from training.modules.exporter                   import SoundbankExporter
 def run(bank_dir: str, out_path: str,
         workers: int = None, skip_eq: bool = False,
         skip_outliers: bool = False,
-        sr_tag: str = "f48") -> str:
+        sr_tag: str = "f48",
+        skip_physics_floor: bool = False) -> str:
     """
     Simple pipeline: Extract → filter outliers → fit EQ → export soundbank.
 
@@ -39,5 +40,6 @@ def run(bank_dir: str, out_path: str,
     if not skip_eq:
         params = EQFitter().fit_bank(params, bank_dir, workers)
 
-    SoundbankExporter().from_params(params, out_path)
+    SoundbankExporter().from_params(params, out_path,
+                                     skip_physics_floor=skip_physics_floor)
     return out_path
