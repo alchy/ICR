@@ -398,7 +398,7 @@ class SoundbankExporter:
 
         # Noise params (flat keys; cap attack_tau at tau1 of k=1 partial)
         attack_tau_raw  = float(sample.get("attack_tau", 0.05) or 0.05)
-        A_noise         = float(sample.get("A_noise", 0.04) or 0.04)
+        A_noise         = min(float(sample.get("A_noise", 0.04) or 0.04), 1.0)
         # noise_centroid_hz floor: extracted values for bass/tenor notes are dominated
         # by harmonic residual (centroid ~120-200 Hz), causing boomy "bottle" noise
         # at the same frequency as the piano tone.  Floor at 1000 Hz ensures the
