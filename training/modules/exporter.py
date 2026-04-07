@@ -487,15 +487,15 @@ class SoundbankExporter:
         # Noise params (flat keys; cap attack_tau at tau1 of k=1 partial)
         attack_tau_raw  = float(sample.get("attack_tau", 0.05) or 0.05)
         A_noise         = min(float(sample.get("A_noise", 0.04) or 0.04), 1.0)
-        # noise_centroid_hz floor: extracted values for bass/tenor notes are dominated
-        # by harmonic residual (centroid ~120-200 Hz), causing boomy "bottle" noise
-        # at the same frequency as the piano tone.  Floor at 1000 Hz ensures the
-        # attack noise is spectrally above the lower harmonics for all registers.
+        # noise_centroid_hz: MIDI-dependent floor instead of fixed 1000 Hz.
+        # Bass notes need higher floor (harmonics are low → residual centroid
+        # is dominated by harmonic leakage).  Middle/treble notes should use
+        # their extracted centroid — blind test showed fixed 1000 Hz floor
+        # correlates with bad scores (r=+0.33).
         centroid_hz_raw = float(sample.get("noise_centroid_hz", 3000.0) or 3000.0)
-        CENTROID_MIN_HZ = 1000.0
-        centroid_hz     = max(centroid_hz_raw, CENTROID_MIN_HZ)
-        # Note: no A_noise correction needed when raising centroid — the biquad
-        # bandpass (Q=1.5) has consistent peak gain regardless of center frequency.
+        # Floor: ~1200 Hz for bass (MIDI 21), ~400 Hz for treble (MIDI 108)
+        centroid_floor  = max(400.0, 1200.0 - (midi - 21) * 800.0 / 87.0)
+        centroid_hz     = max(centroid_hz_raw, centroid_floor)
         tau1_k1         = (partials_out[0]["tau1"] if partials_out else 3.0)
         # Hard cap at 0.10 s — real hammer noise never exceeds ~50 ms.
         attack_tau      = min(attack_tau_raw, tau1_k1, 0.10)
