@@ -78,6 +78,7 @@ class SoundbankExporter:
         # with velocity (Chabassier 2012: nonlinear hammer exponent p causes gradual,
         # not drastic, spectral change).
         self._borrow_spectral_shape(samples)
+        self._smooth_across_keyboard(samples)
 
         out     = self._make_header("soundbank:params", sr, target_rms, duration, rng_seed,
                                     params.get("metadata"))
@@ -260,6 +261,94 @@ class SoundbankExporter:
                     print(f"  {n_done}/{n_total} ({pct}%)  {ela:.1f}s", flush=True)
 
         self._write(out, out_path)
+
+    # ── Keyboard smoothing ────────────────────────────────────────────────────
+
+    @staticmethod
+    def _smooth_across_keyboard(samples: dict) -> None:
+        """
+        Smooth per-partial parameters across the keyboard to reduce
+        extraction artifacts (e.g. tau1 jumping 9x between neighbors).
+
+        Real piano parameters change gradually across MIDI range.
+        A 5-note weighted median filter smooths outliers while preserving
+        genuine register transitions (wound→plain string crossover).
+
+        Smoothed params: tau1, tau2 (per partial k=1..8), A_noise, attack_tau.
+        NOT smoothed: A0 (spectral shape), f_hz, beat_hz, phi (note-specific).
+        """
+        from scipy.ndimage import median_filter
+
+        # Group by velocity layer
+        by_vel: dict[int, dict[int, dict]] = {}
+        for key, sample in samples.items():
+            if not key.startswith("m"):
+                continue
+            try:
+                midi = int(key[1:4])
+                vel  = int(key.split("vel")[1])
+            except (ValueError, IndexError):
+                continue
+            by_vel.setdefault(vel, {})[midi] = sample
+
+        n_smoothed = 0
+        for vel, midi_map in by_vel.items():
+            midis = sorted(midi_map.keys())
+            if len(midis) < 5:
+                continue
+
+            # Smooth note-level params
+            for param_name in ["attack_tau", "A_noise"]:
+                vals = np.array([float(midi_map[m].get(param_name, 0) or 0)
+                                 for m in midis])
+                if vals.max() < 1e-12:
+                    continue
+                # Median filter (size=5 = 2 neighbors each side)
+                smoothed = median_filter(vals, size=5, mode='nearest')
+                for i, m in enumerate(midis):
+                    if abs(vals[i] - smoothed[i]) / (vals[i] + 1e-12) > 0.3:
+                        midi_map[m][param_name] = float(smoothed[i])
+                        n_smoothed += 1
+
+            # Smooth per-partial tau1, tau2 for k=1..8
+            for ki in range(8):
+                tau1_vals = []
+                tau2_vals = []
+                valid_midis = []
+                for m in midis:
+                    parts = midi_map[m].get("partials", [])
+                    if ki < len(parts) and parts[ki].get("tau1"):
+                        tau1_vals.append(float(parts[ki]["tau1"]))
+                        tau2_vals.append(float(parts[ki].get("tau2") or parts[ki]["tau1"]))
+                        valid_midis.append(m)
+
+                if len(tau1_vals) < 5:
+                    continue
+
+                tau1_arr = np.array(tau1_vals)
+                tau2_arr = np.array(tau2_vals)
+
+                # Log-domain median filter (tau values span orders of magnitude)
+                log_tau1 = np.log(np.maximum(tau1_arr, 1e-6))
+                log_tau2 = np.log(np.maximum(tau2_arr, 1e-6))
+                sm_log1 = median_filter(log_tau1, size=5, mode='nearest')
+                sm_log2 = median_filter(log_tau2, size=5, mode='nearest')
+                sm_tau1 = np.exp(sm_log1)
+                sm_tau2 = np.exp(sm_log2)
+
+                for i, m in enumerate(valid_midis):
+                    parts = midi_map[m]["partials"]
+                    # Only correct if deviation > 50% from smoothed
+                    if abs(tau1_arr[i] - sm_tau1[i]) / (tau1_arr[i] + 1e-6) > 0.5:
+                        parts[ki]["tau1"] = float(max(sm_tau1[i], 0.05))
+                        n_smoothed += 1
+                    if abs(tau2_arr[i] - sm_tau2[i]) / (tau2_arr[i] + 1e-6) > 0.5:
+                        parts[ki]["tau2"] = float(max(sm_tau2[i], parts[ki]["tau1"]))
+                        n_smoothed += 1
+
+        if n_smoothed > 0:
+            print(f"Keyboard smoothing: corrected {n_smoothed} parameters "
+                  f"across {len(by_vel)} velocity layers", flush=True)
 
     # ── Spectral shape borrowing ─────────────────────────────────────────────
 
