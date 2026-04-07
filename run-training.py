@@ -109,7 +109,8 @@ def main() -> int:
 
     try:
         bank_name = Path(args.bank).name
-        out_path  = args.out or str(REPO_ROOT / "soundbanks" / f"{bank_name}.json")
+        ts        = datetime.now().strftime("%m%d%H%M")
+        out_path  = args.out or str(REPO_ROOT / "soundbanks" / f"{bank_name}-{ts}.json")
 
         print(f"Bank:   {args.bank}")
         print(f"Output: {out_path}")
