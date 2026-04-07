@@ -121,17 +121,75 @@ preserves the dark spectral shape → pp sounds like ff + low-pass filter.
 
 ## Open Issues (priority order)
 
-1. **stereo_width extraction** — EQ fitter produces values up to 6.85;
-   root cause in extraction, not player
-2. **Python/C++ noise model mismatch** — RMS calibration uses 1-pole,
-   playback uses biquad → systematic gain error
-3. **Allpass filter** — audit questions whether "fix" created correct allpass;
-   needs mathematical re-verification
-4. **A_noise too low for bass** — extraction harmonic subtraction may still
-   leak harmonics into noise estimate despite sin() basis addition
-5. **lerpNoteParams drops partials** when layer counts differ (min instead of max)
-6. **MIDI 55 "bottle blowing"** — not explained by stereo_width or tau1;
-   may be EQ artifact or phase coherence issue
+### Critical (affects all notes)
+
+**1. Allpass filter is NOT unity-gain**
+The audit revealed that the current implementation:
+```cpp
+y[n] = -g*x[n] + x[n-1] - g*y[n-1]   // piano_math.h:126
+```
+yields `H(z) = (-g + z^-1) / (1 + g*z^-1)`.  This is NOT an allpass filter
+(`|H(e^jw)| != 1`).  The correct Schroeder first-order allpass requires:
+```
+H(z) = (-g + z^-1) / (1 - g*z^-1)     // correct: note MINUS in denominator
+```
+which gives the difference equation:
+```
+y[n] = -g*x[n] + x[n-1] + g*y[n-1]    // note PLUS on feedback term
+```
+Our original code had `+g*y[n-1]` (correct), our "fix" changed it to
+`-g*y[n-1]` (incorrect).  **The fix broke a working allpass into a
+frequency-dependent filter.**  Must revert the sign change.
+
+**2. Python/C++ noise model mismatch → wrong rms_gain for ALL notes**
+Python RMS calibration renderer (`exporter.py:632-647`) uses 1-pole LPF:
+```python
+y = alpha * x + (1-alpha) * y    # low-pass, passes everything below centroid
+```
+C++ playback (`piano_core.cpp:474-477`) uses biquad bandpass:
+```cpp
+dsp::biquad_tick(noise, v.noise_bpf, v.noise_bpf_L)  // bandpass, rejects both low and high
+```
+1-pole LPF has broader bandwidth → higher noise energy → Python overestimates
+noise RMS → `rms_gain` is calibrated too low → C++ output is systematically
+quieter than target.  The `_iir_rms` correction in exporter (lines 410-414)
+compounds this: it adjusts for 1-pole characteristics, not bandpass.
+
+**Fix:** Python renderer must use the same biquad bandpass as C++.
+
+### High (affects specific notes)
+
+**3. stereo_width unclamped — values up to 6.85**
+EQ fitter extracts stereo_width from recording S/M ratio divided by synthesis
+S/M ratio.  Values >2.0 indicate extraction error (not a real piano property).
+MIDI 77 (width=6.85, score=0.30) and MIDI 65 (width=6.12, score=0.45) directly
+correlate with bad listening scores.
+
+**Fix should be in extraction** (EQ fitter stereo measurement), not player
+clamping.  Player should remain transparent — what it receives, it plays.
+
+**4. lerpNoteParams drops partials when layer counts differ**
+`out.K = std::min(a.K, b.K)` — if layer A has 60 partials and layer B has 29,
+result gets 29.  At `frac=0.0` you hear 60 partials; at `frac=0.001` you jump
+to 29.  Causes discontinuity in velocity sweep.
+
+**Fix:** use `max(a.K, b.K)`, interpolate where both exist, fade A0 toward 0
+for partials only in one layer.
+
+### Medium
+
+**5. A_noise too low for bass** (0.33 vs 0.98 treble)
+Bass hammer noise should be at least as strong as treble.  Low A_noise in
+bass/middle explains weak attack character.  Likely caused by harmonic
+leakage in noise residual despite sin() basis addition.
+
+**6. noise_centroid = 1000 Hz everywhere** below MIDI 91
+Floor masks real per-note variation.  Treble hammers are harder → higher
+centroid (2-5 kHz).  Bass hammers are softer → lower centroid but still
+above 800 Hz.
+
+**7. MIDI 55 "bottle blowing"** — not explained by stereo_width or tau1;
+may be EQ artifact or phase coherence issue
 
 ---
 
