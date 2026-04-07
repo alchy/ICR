@@ -350,25 +350,35 @@ class SoundbankExporter:
             print(f"Keyboard smoothing: corrected {n_smoothed} parameters "
                   f"across {len(by_vel)} velocity layers", flush=True)
 
-    # ── Harmonic geometry correction (from blind scoring analysis) ──────────
+    # ── Physics floor — fill missing partials to physical minimum ────────────
 
     @staticmethod
     def _apply_exploration_recipe(samples: dict) -> None:
-        """Correct harmonic ratios toward perceptually validated targets.
+        """Fill gaps in extracted partial amplitudes to physical floor.
 
-        Blind scoring revealed: good notes have strong EVEN harmonics
-        (k=2,4,6,8) relative to odd (k=1,3,5,7).  Target even/odd
-        energy ratio = 0.64 (from 17 good-scoring notes).
+        Piano string struck at x0/L ≈ 1/8 produces:
+            A(n) = sin(n * π * x0/L) / n
 
-        Bad notes have even/odd = 0.02-0.06 (10-30x too low).
-        Fix: boost even partials (k=2,4,6,8) to reach target ratio.
+        This is the MINIMUM spectral profile any properly struck piano
+        string should have.  If extraction found less energy in a partial,
+        it's an extraction failure — boost it to the floor.  Never CUT
+        partials that are already above the floor (extraction got it right).
 
-        Also: a1 blend, beating floor, attack sharpening.
-        Applied BEFORE RMS calibration — gain auto-compensated.
+        Energy conservation: total energy in all partials is constrained
+        by hammer kinetic energy E = ½Mv².  RMS calibration (applied AFTER
+        this step) automatically compensates the overall level, so we only
+        need to fix the DISTRIBUTION, not the absolute values.
+
+        Also: a1 blend toward 0.73, beating floor, attack sharpening.
         """
-        TARGET_EVEN_ODD = 0.50   # target even/odd energy ratio (conservative)
+        X0_L = 1.0 / 8.0   # standard piano striking position
 
-        n_harmonics_fixed = 0
+        def physics_floor(n):
+            """Ideal partial amplitude for harmonic n (energy-normalized)."""
+            return abs(math.sin(n * math.pi * X0_L)) / n
+
+        n_floor_applied = 0
+        n_partials_boosted = 0
         n_modified = 0
 
         for key, sample in samples.items():
@@ -380,33 +390,40 @@ class SoundbankExporter:
                 continue
 
             parts = sample.get("partials", [])
-            if len(parts) < 6:
+            if len(parts) < 4:
                 continue
 
-            a = {}
-            for p in parts:
-                a[p.get("k", 0)] = p.get("A0", 0)
-
-            # Measure current even/odd ratio
-            even_energy = sum(a.get(k, 0)**2 for k in [2, 4, 6, 8])
-            odd_energy  = sum(a.get(k, 0)**2 for k in [1, 3, 5, 7])
-            if odd_energy < 1e-20:
+            # Compute physics floor scaled to this note's total energy.
+            # The floor has same total energy as extracted — only reshapes.
+            extracted_energy = sum(p.get("A0", 0)**2 for p in parts[:12])
+            if extracted_energy < 1e-20:
                 continue
 
-            current_eo = even_energy / odd_energy
+            floor_profile = [physics_floor(k + 1) for k in range(min(12, len(parts)))]
+            floor_energy = sum(a**2 for a in floor_profile)
+            if floor_energy < 1e-20:
+                continue
 
-            # If even harmonics are too weak, boost them
-            if current_eo < TARGET_EVEN_ODD * 0.7:
-                boost = math.sqrt(TARGET_EVEN_ODD / max(current_eo, 1e-10))
-                boost = min(boost, 6.0)  # cap at 6x to prevent extreme changes
+            # Scale floor to 50% of extracted energy — conservative floor
+            scale = math.sqrt(extracted_energy / floor_energy) * 0.5
 
-                for p in parts:
-                    k = p.get("k", 0)
-                    if k in (2, 4, 6, 8):
-                        p["A0"] = p.get("A0", 0) * boost
-                n_harmonics_fixed += 1
+            note_boosted = False
+            for ki in range(min(12, len(parts))):
+                p = parts[ki]
+                k = p.get("k", ki + 1)
+                current_A0 = p.get("A0", 0)
+                floor_A0 = physics_floor(k) * scale
 
-            # a1: blend 20% toward 0.73 (more aftersound)
+                # Boost only — never cut
+                if current_A0 < floor_A0:
+                    p["A0"] = floor_A0
+                    n_partials_boosted += 1
+                    note_boosted = True
+
+            if note_boosted:
+                n_floor_applied += 1
+
+            # a1: blend 20% toward 0.73 (more aftersound sustain)
             for p in parts[:10]:
                 p["a1"] = 0.8 * p.get("a1", 0.8) + 0.2 * 0.73
 
@@ -421,8 +438,9 @@ class SoundbankExporter:
             n_modified += 1
 
         if n_modified > 0:
-            print(f"Harmonic geometry: {n_harmonics_fixed}/{n_modified} notes had "
-                  f"even harmonics boosted (target even/odd={TARGET_EVEN_ODD:.2f})",
+            print(f"Physics floor: {n_floor_applied}/{n_modified} notes had partials "
+                  f"boosted ({n_partials_boosted} total partials, "
+                  f"floor=sin(n*pi/8)/n at 50% energy)",
                   flush=True)
 
     # ── Spectral shape borrowing ─────────────────────────────────────────────
