@@ -1,238 +1,186 @@
 # ICR — C++ Engine Architecture
 
-## Overview
+## High-Level Overview
 
-```
-MIDI input
-    │
-    ▼
-CoreEngine  ──────────────────────────────────────────────────────┐
-│  MIDI queue (lock-free ring)                                     │
-│  master gain / master pan (atomic<float>)                        │
-│  LFO (panning modulation)                                        │
-│                                                                  │
-│   ISynthCore  (pluggable — selected at startup via --core)       │
-│   ┌─────────────────────────────────────────────────────┐        │
-│   │  PianoCore  /  SineCore  /  …                       │        │
-│   │  voice pool · envelopes · oscillators · EQ · noise  │        │
-│   └─────────────────────────────────────────────────────┘        │
-│                                                                  │
-│   DspChain                                                       │
-│   ┌──────────────────────────────┐                               │
-│   │  limiter → BBE exciter       │                               │
-│   └──────────────────────────────┘                               │
-│                                                                  │
-│   miniaudio output device                                        │
-└──────────────────────────────────────────────────────────────────┘
-```
+```mermaid
+graph TD
+    MIDI[MIDI Input / GUI Keyboard] --> CE[CoreEngine]
+    CE --> |MIDI queue| SC[ISynthCore]
+    SC --> DSP[DspChain]
+    DSP --> OUT[Audio Output]
 
-## Directory structure
+    CE --> |master gain/pan/LFO| DSP
+    SC --> |processBlock| DSP
 
-```
-engine/        CoreEngine, ISynthCore interface, SynthCoreRegistry,
-               MidiInput, CoreLogger, miniaudio.h
-cores/         Pluggable synth cores
-  piano/         PianoCore — 2-string bi-exponential piano synth
-  sine/          SineCore  — simple sine-wave test tone
-dsp/           DspChain, limiter, BBE exciter
-gui/           Dear ImGui frontend (ResonatorGUI)
-third_party/   nlohmann/json, RtMidi
-training/      Python training pipeline (extract → learn → export)
-soundbanks/    Parameter JSON files (not in git — generate or copy)
-docs/          Documentation
+    subgraph "ISynthCore (pluggable)"
+        SC --> PM[PatchManager]
+        PM --> VM[VoiceManager]
+        VM --> V1[Voice 0]
+        VM --> V2[Voice 1]
+        VM --> VN[Voice 127]
+    end
+
+    subgraph "DspChain (master bus)"
+        DSP --> CONV[Convolver]
+        CONV --> BBE[BBE]
+        BBE --> LIM[Limiter]
+    end
 ```
 
-## Core interface: ISynthCore
+## Three-Layer Core Architecture (Ithaca Core)
 
-`engine/i_synth_core.h` defines the contract every core must implement.
+Každý ISynthCore implementuje 3-vrstvou architekturu:
 
-| Method | Thread | Notes |
-|--------|--------|-------|
-| `load(params_path, sr, logger)` | main | Load JSON params, allocate voices |
-| `setSampleRate(sr)` | main | Call only when RT is stopped |
-| `noteOn / noteOff / sustainPedal / allNotesOff` | RT | Called from CoreEngine after queue drain |
-| `processBlock(out_l, out_r, n)` | RT | **No alloc, no lock, no IO** |
-| `setParam / getParam` | GUI | Implementations use atomics |
-| `describeParams()` | GUI | Returns slider metadata |
-| `getVizState()` | GUI | Snapshot for visualization panel |
-| `coreName / coreVersion / isLoaded` | any | Metadata |
-| `setNoteParam(midi, vel, key, value)` | MIDI cb | Per-slot scalar update (SysEx 0x01) |
-| `setNotePartialParam(midi, vel, k, key, value)` | MIDI cb | Per-partial update (SysEx 0x02) |
-| `loadBankJson(json_str)` | MIDI cb | Full bank reload (SysEx 0x03) |
+```mermaid
+graph TD
+    subgraph "PatchManager"
+        PM_IN[MIDI noteOn/Off/Sustain] --> PM_XLAT[Velocity/Note Translation]
+        PM_XLAT --> PM_INTERP[Parameter Interpolation]
+        PM_INTERP --> PM_SUSTAIN[Sustain Pedal Logic]
+    end
 
-### Registration macro
+    subgraph "VoiceManager"
+        VM_INIT[initVoice] --> VM_POOL[Voice Pool 128]
+        VM_REL[releaseVoice] --> VM_POOL
+        VM_PROC[processBlock] --> VM_POOL
+    end
 
-Each core self-registers at static-init time — no central list to edit:
+    subgraph "Voice (nezavisla jednotka)"
+        V_OSC[Oscilatory] --> V_ENV[Envelope]
+        V_ENV --> V_NOISE[Noise]
+        V_NOISE --> V_DECOR[Decorrelation]
+        V_DECOR --> V_EQ[EQ Cascade]
+        V_EQ --> V_MS[M/S Width]
+        V_MS --> V_OUT[Stereo Output]
+    end
 
-```cpp
-// in cores/piano/piano_core.cpp
-REGISTER_SYNTH_CORE("PianoCore", PianoCore)
+    PM_INTERP --> VM_INIT
+    PM_SUSTAIN --> VM_REL
+    VM_POOL --> V_OSC
 ```
 
-`SynthCoreRegistry::instance().create("PianoCore")` instantiates on demand.
+---
 
-## CoreEngine
+## Layer Responsibilities
 
-`engine/core_engine.h/.cpp`
+### Voice (SineVoice / PianoVoice)
 
-- Owns the audio device (miniaudio callback).
-- MIDI events arrive on the GUI/MIDI thread, are pushed into a lock-free ring
-  buffer (`midi_q_`), and drained into the core at the top of each audio callback.
-- Master gain, master pan, LFO speed/depth: `std::atomic<float>` — safe
-  concurrent read from RT, write from GUI.
-- `DspChain` applied to the mixed stereo output after `ISynthCore::processBlock`.
+Nezavisla vypocetni jednotka. Nevi o MIDI, nepristupuje ke globalnimu
+stavu. Prijima parametry v nativnim float formatu a produkuje stereo audio.
+Muze byt distribuovana na samostatny HW modul.
 
-## PianoCore
+| Metoda | Popis |
+|--------|-------|
+| `process(out_l, out_r, n_samples, ...)` | Produkuje audio, vraci false kdyz dohasne |
 
-`cores/piano/piano_core.cpp`
+| Stav (SineVoice) | Typ | Popis |
+|---|---|---|
+| `active` | bool | Hlas aktivni |
+| `releasing` | bool | Ve fazi dohasinani |
+| `phase` | float | Faze oscilatoru (rad) |
+| `omega` | float | Uhlova frekvence per sample |
+| `amp` | float | Cilova amplituda |
+| `onset_gain/step` | float | Onset rampa (click prevention) |
+| `rel_gain/step` | float | Release rampa |
 
-### Synthesis model
+| Stav (PianoVoice) — navic | Typ | Popis |
+|---|---|---|
+| `partials[60]` | struct | Per-partial: env_fast/slow, decay, A0, f_hz, beat_hz, phi |
+| `noise_bpf` | BiquadCoeffs | Bandpass noise filter |
+| `rise_coeff/env` | float | Attack rise envelope |
+| `eq_coeffs/wL/wR` | array | EQ biquad cascade state |
+| `gl1..gr3` | float | Constant-power pan gains |
+| `ap_g_L/R, ap_x/y` | float | Schroeder allpass state |
+| `stereo_width` | float | M/S correction factor |
 
-Each note spawns a voice with up to 60 partials × 2 strings:
+### VoiceManager (SineVoiceManager / PianoVoiceManager)
 
-```
-partial k:
-  f_k  = k · f0 · √(1 + B·k²)           inharmonic frequency
-  A(t) = A0 · (a1·e^(-t/τ1) + (1-a1)·e^(-t/τ2))   bi-exponential envelope
-  x_L  = A(t)·cos(2π·f_k·t + φ_L)
-  x_R  = A(t)·cos(2π·f_k·t + φ_R)       φ_R = φ_L + φ_diff (per-partial random)
-```
+Spravuje pool hlasu. Inicializuje je s nativnimi parametry,
+ridi release, procesuje vsechny aktivni hlasy.
 
-String 2 is detuned by `beat_hz` (≈0.3–3 Hz): produces the natural piano chorus.
-`φ_diff` is drawn independently per partial at note-on → true stereo for every partial.
+| Metoda | Popis |
+|--------|-------|
+| `processBlock(out_l, out_r, n_samples, ...)` | Iteruje aktivni hlasy, deleguje na Voice::process |
+| `initVoice(midi, ...)` | Inicializuje hlas s nativnimi parametry |
+| `releaseVoice(midi, sr)` | Zahaji release fazi |
+| `releaseAll(sr)` | Uvolni vsechny hlasy |
+| `voice(midi)` | Getter — pristup k hlasu (pro vizualizaci) |
 
-### Noise model
+### PatchManager (SinePatchManager / PianoPatchManager)
 
-Filtered noise added during the attack transient:
-```
-σ²(t) = A_noise² · e^(-2t/τ_n)
-rms normalised against partial stack to give consistent total level
-```
+Vstupni bod systemu. Prijima MIDI a preklada do nativni parametrizace.
 
-### Spectral EQ
+| Metoda | Popis |
+|--------|-------|
+| `noteOn(midi, velocity, vm, ...)` | MIDI velocity → nativni amp/omega, deleguje na VoiceManager |
+| `noteOff(midi, vm, sr)` | Sustain-aware release |
+| `sustainPedal(down, vm, sr)` | Odlozene note-off pri sustain |
+| `allNotesOff(vm, sr)` | Uvolni vse |
+| `lastMidi/lastVel/lastVelIdx()` | Info pro GUI |
 
-Per-(note, velocity) min-phase IIR biquad cascade, 5 sections, fitted from
-LTASE (Long-Term Average Spectral Envelope) measurements:
+PianoPatchManager navic:
+| Metoda | Popis |
+|--------|-------|
+| `midiVelToFloat(vel)` | Velocity 1-127 → float 0.0-7.0 |
+| `lerpNoteParams(a, b, t)` | Interpolace parametru mezi velocity vrstvami |
 
-```
-fitting: WAV → FFT magnitude → cepstral minimum-phase → invfreqz lstsq → sos
-runtime: Direct Form II, applied after Schroeder all-pass decorrelation
-blend:   dry/wet controlled by eq_strength parameter (0 = off, 1 = full)
-```
+---
 
-EQ frequency response is evaluated at 32 log-spaced frequencies in
-`getVizState()` and displayed in the GUI's Spectral EQ column.
+## Signal Chain
 
-### Stereo pipeline
+```mermaid
+graph LR
+    subgraph "Per-Voice (PianoCore)"
+        P[Partials 1-60] --> RE[Rise Envelope]
+        RE --> PLUS((+))
+        N[Noise BPF] --> PLUS
+        PLUS --> AP[Allpass Decorr]
+        AP --> EQ[EQ 10x Biquad]
+        EQ --> MS[M/S Width]
+    end
 
-```
-per-partial:  constant-power pan (keyboard position)
-              φ_diff  → independent phase per partial
-after sum:    Schroeder all-pass decorrelation (5 stages)
-post:         5-section biquad EQ cascade (independent L/R state)
-```
+    subgraph "Master Bus (DspChain)"
+        MS --> CONV[Convolver IR]
+        CONV --> BBE2[BBE]
+        BBE2 --> LIM2[Limiter]
+        LIM2 --> MG[Master Gain + LFO Pan]
+    end
 
-### Parameters (runtime-adjustable)
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `beat_scale` | 1.0 | Scales all beat_hz values |
-| `noise_level` | 1.0 | Noise amplitude multiplier |
-| `keyboard_spread` | 0.8 | Stereo width across keyboard |
-| `eq_strength` | 1.0 | EQ wet/dry blend |
-
-## Threading model
-
-```
-GUI thread:   setParam / getParam / describeParams / getVizState
-              MIDI callbacks → CoreEngine::pushMidiEvt (ring buffer write)
-
-MIDI cb thread:  CoreEngine::handleSysEx
-                 ├─ SET_NOTE_PARAM / SET_NOTE_PARTIAL → ISynthCore::setNoteParam/setNotePartialParam
-                 │  (individual float writes; safe on x86 per codebase convention)
-                 ├─ SET_BANK → ISynthCore::loadBankJson
-                 │  (parse outside lock; memcpy under bank_mutex_; PianoCore::handleNoteOn
-                 │   uses try_to_lock so the RT thread never blocks on a bank load)
-                 ├─ SET_MASTER → ISynthCore::setParam
-                 └─ PING → MidiInput::sendRaw (PONG via optional RtMidiOut)
-
-RT thread:    CoreEngine audio callback
-              ├─ drain MIDI ring → ISynthCore::noteOn/Off/etc.
-              ├─ ISynthCore::processBlock
-              └─ DspChain (limiter, BBE)
+    MG --> AUDIO[Audio Device]
 ```
 
-No locks on the RT path. MIDI ring buffer is sized 256 events; full buffer
-drops incoming events gracefully. FTZ/DAZ denormal flush enabled at startup.
+## Threading Model
 
-## DspChain
+| Vlakno | Pristup | Poznamka |
+|--------|---------|----------|
+| RT (audio callback) | Voice::process, VoiceManager::processBlock | Zero-allocation, lock-free |
+| MIDI callback | PatchManager::noteOn/Off/sustainPedal | Pushuje do MIDI queue |
+| GUI | setParam/getParam, getVizState | Atomic reads/writes |
 
-`dsp/dsp_chain.cpp`
+Komunikace RT ← GUI: pres `std::atomic<float>` (relaxed ordering).
+Komunikace MIDI → RT: pres lock-free SPSC ring buffer (256 events).
+Jedina mutex: `bank_mutex_` pri loadBankJson (try_lock z RT, block z MIDI).
 
-Post-processing on the stereo mix:
-- **Limiter**: peak limiter, configurable ceiling and release
-- **BBE exciter**: high-frequency harmonic enhancement
-
-Both stages are bypass-able at runtime.
-
-## SysEx — Sound Editor integration
-
-The ICR SysEx protocol (`docs/SYSEX_PROTOCOL.md`) is fully implemented on the
-C++ side. The flow from Sound Editor to synthesis engine:
+## File Structure
 
 ```
-Sound Editor (Python)
-  └─ sysex_bridge.py  ──MIDI loopback──▶  MidiInput::callback
-                                               │
-                                               ▼
-                                         CoreEngine::handleSysEx
-                                           ├─ 0x01 SET_NOTE_PARAM
-                                           │    └▶ PianoCore::setNoteParam
-                                           ├─ 0x02 SET_NOTE_PARTIAL
-                                           │    └▶ PianoCore::setNotePartialParam
-                                           ├─ 0x03 SET_BANK (chunked)
-                                           │    └▶ PianoCore::loadBankJson
-                                           ├─ 0x10 SET_MASTER
-                                           │    └▶ ISynthCore::setParam
-                                           └─ 0xF0 PING
-                                                └▶ MidiInput::sendRaw (PONG)
+cores/
+  sine/
+    sine_core.h/cpp        SineVoice + SineVoiceManager + SinePatchManager + SineCore
+  piano/
+    piano_core.h/cpp       PianoVoice + PianoVoiceManager + PianoPatchManager + PianoCore
+    piano_math.h           Cista DSP matematika (stateless, inline)
+engine/
+    core_engine.h/cpp      CoreEngine (audio callback, MIDI queue, master bus)
+    i_synth_core.h         ISynthCore interface + viz structs
+    synth_core_registry.h  Factory pattern pro pluggable cores
+    midi_input.h/cpp       RtMidi wrapper
+dsp/
+    dsp_math.h             Sdilene DSP primitivy (biquad, RBJ, decay_coeff)
+    dsp_chain.h/cpp        Master bus orchestrator
+    limiter/               Peak limiter
+    bbe/                   BBE Sonic Maximizer
+    convolver/             Soundboard IR convolution
+gui/
+    resonator_gui.h/cpp    ImGui real-time GUI
 ```
-
-### SET_BANK thread safety
-
-`loadBankJson` parses the JSON string without holding any lock (potentially
-several ms for a full soundbank), then performs a brief `memcpy` under
-`bank_mutex_` to swap in the new `note_params_[128][8]`. `handleNoteOn` uses
-`std::unique_lock(bank_mutex_, std::try_to_lock)` — if the lock is busy it
-skips the noteOn rather than blocking the RT audio thread.
-
-### PONG (optional)
-
-To send PONG responses, call `MidiInput::openOutput(port_index)` after
-`MidiInput::open()`. The output port is separate from the input port. If no
-output port is open, PING is processed but PONG is silently dropped.
-
-### SET_MASTER param ranges
-
-| ID range  | Target              | How                                          |
-|-----------|---------------------|----------------------------------------------|
-| 0x01–0x07 | ISynthCore globals  | `core_->setParam(key, value)`                |
-| 0x10–0x13 | CoreEngine mix      | Direct atomic write (`master_gain_`, `pan_l_/r_`, `lfo_*`) |
-| 0x20–0x24 | DspChain            | `dsp_.set*()` via uint8 normalisation        |
-
-### `B` (inharmonicity)
-
-SysEx param ID `0x02` (`B`) in SET_NOTE_PARAM **is runtime-settable**.
-`PianoCore` stores `B` per note (soundbank v2) and `setNoteParam("B", value)`
-immediately recomputes all `f_hz[k] = k · f0 · √(1 + B·k²)` using the stored
-`PianoPartialParam::k` index (correct even for longitudinal partials where k ≠ ki+1).
-
-## Build targets
-
-| Target | Output | Description |
-|--------|--------|-------------|
-| `ICR` | `ICR.exe` | Headless CLI, real-time MIDI synthesis |
-| `ICRGUI` | `ICRGUI.exe` | Dear ImGui frontend (GLFW + OpenGL3) |
-
-Both targets link the same `engine/`, `cores/`, `dsp/` sources.
-AVX2 + FMA enabled on x86-64 (MSVC `/arch:AVX2`, GCC/Clang `-mavx2 -mfma`).

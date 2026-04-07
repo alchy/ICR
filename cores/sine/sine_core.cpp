@@ -1,36 +1,167 @@
 /*
- * synth-core/sine/sine_core.cpp
- * ──────────────────────────────
+ * cores/sine/sine_core.cpp
+ * ────────────────────────
+ * Referenční implementace 3-vrstvé Ithaca Core architektury.
+ * Každá vrstva má jasně definovanou odpovědnost:
+ *
+ *   Voice:        nezávislý výpočet zvuku (distribuce na HW)
+ *   VoiceManager: životní cyklus hlasů (init, release, process)
+ *   PatchManager:  MIDI → nativní překlad (velocity, sustain pedál)
+ *   SineCore:     ISynthCore adaptér (propojení s CoreEngine)
  */
 #include "sine_core.h"
 #include "engine/synth_core_registry.h"
 
-// Self-register into the global SynthCoreRegistry.
+// Registrace do globálního registru — CoreEngine najde SineCore podle jména
 REGISTER_SYNTH_CORE("SineCore", SineCore)
 
-static constexpr float PI  = 3.14159265358979f;
-static constexpr float TAU = 2.f * PI;
+static constexpr float TAU = 2.f * 3.14159265358979f;
 
-// ── Constructor ───────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// Voice — nezávislá výpočetní jednotka
+// ═════════════════════════════════════════════════════════════════════════════
 
-SineCore::SineCore() {
-    voices_.fill(SineVoice{});
-    for (auto& d : delayed_offs_) d.store(false, std::memory_order_relaxed);
+bool SineVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
+    for (int i = 0; i < n_samples; i++) {
+        // Obálka: onset rampa (click prevention 0→1)
+        float env = 1.f;
+        if (in_onset) {
+            onset_gain += onset_step;
+            if (onset_gain >= 1.f) { onset_gain = 1.f; in_onset = false; }
+            env = onset_gain;
+        }
+
+        // Obálka: release rampa (fade-out 1→0)
+        if (releasing) {
+            rel_gain += rel_step;
+            if (rel_gain <= 0.f) {
+                active = releasing = false;
+                rel_gain = 0.f;
+            }
+            env *= rel_gain;
+        }
+
+        // Syntéza: sinusový oscilátor
+        float s = amp * env * std::sin(phase);
+        out_l[i] += s;
+        out_r[i] += s;   // mono → stereo (identické kanály)
+
+        // Posun fáze (akumulace)
+        phase += omega;
+        if (phase >= TAU) phase -= TAU;
+
+        if (!active) break;
+    }
+    return active;
 }
 
-// ── Lifecycle ─────────────────────────────────────────────────────────────────
+// ═════════════════════════════════════════════════════════════════════════════
+// VoiceManager — životní cyklus hlasů
+// ═════════════════════════════════════════════════════════════════════════════
+
+bool SineVoiceManager::processBlock(float* out_l, float* out_r,
+                                     int n_samples) noexcept {
+    bool any = false;
+    for (int m = 0; m < SINE_N_VOICES; m++) {
+        if (!voices_[m].active) continue;
+        voices_[m].process(out_l, out_r, n_samples);
+        any = true;
+    }
+    return any;
+}
+
+void SineVoiceManager::initVoice(int midi, float omega, float amp,
+                                  float sample_rate) noexcept {
+    SineVoice& v = voices_[midi];
+    v.omega      = omega;
+    v.amp        = amp;
+    v.phase      = 0.f;
+    v.in_onset   = true;
+    v.onset_gain = 0.f;
+    v.onset_step = 1.f / (SINE_ONSET_MS * 0.001f * sample_rate);
+    v.releasing  = false;
+    v.rel_gain   = 1.f;
+    v.active     = true;
+}
+
+void SineVoiceManager::releaseVoice(int midi, float sample_rate) noexcept {
+    SineVoice& v = voices_[midi];
+    if (!v.active) return;
+    v.releasing = true;
+    v.rel_step  = -1.f / (SINE_RELEASE_MS * 0.001f * sample_rate);
+    v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
+}
+
+void SineVoiceManager::releaseAll(float sample_rate) noexcept {
+    for (int m = 0; m < SINE_N_VOICES; m++)
+        if (voices_[m].active) releaseVoice(m, sample_rate);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// PatchManager — MIDI → nativní překlad
+// ═════════════════════════════════════════════════════════════════════════════
+
+void SinePatchManager::noteOn(uint8_t midi, uint8_t velocity,
+                               SineVoiceManager& vm,
+                               float sample_rate, float gain,
+                               float detune_cents) noexcept {
+    // Překlad MIDI velocity 0-127 → nativní amplituda 0.0-1.0
+    float amp   = (velocity / 127.f) * gain;
+    // Překlad MIDI nota → úhlová frekvence (rad/sample)
+    float f     = midiToHz(midi, detune_cents);
+    float omega = TAU * f / sample_rate;
+
+    // Delegace na VoiceManager — voice dostane jen nativní parametry
+    vm.initVoice(midi, omega, amp, sample_rate);
+
+    last_midi_.store(midi,     std::memory_order_relaxed);
+    last_vel_ .store(velocity, std::memory_order_relaxed);
+}
+
+void SinePatchManager::noteOff(uint8_t midi, SineVoiceManager& vm,
+                                float sample_rate) noexcept {
+    // Sustain pedál: odloží note-off
+    if (sustain_.load(std::memory_order_relaxed))
+        delayed_offs_[midi].store(true, std::memory_order_relaxed);
+    else
+        vm.releaseVoice(midi, sample_rate);
+}
+
+void SinePatchManager::sustainPedal(bool down, SineVoiceManager& vm,
+                                     float sample_rate) noexcept {
+    sustain_.store(down, std::memory_order_relaxed);
+    // Při uvolnění pedálu: zpracuj všechny odložené note-off
+    if (!down) {
+        for (int m = 0; m < SINE_N_VOICES; m++) {
+            if (delayed_offs_[m].load(std::memory_order_relaxed)) {
+                vm.releaseVoice(m, sample_rate);
+                delayed_offs_[m].store(false, std::memory_order_relaxed);
+            }
+        }
+    }
+}
+
+void SinePatchManager::allNotesOff(SineVoiceManager& vm,
+                                    float sample_rate) noexcept {
+    vm.releaseAll(sample_rate);
+    for (int m = 0; m < SINE_N_VOICES; m++)
+        delayed_offs_[m].store(false, std::memory_order_relaxed);
+    sustain_.store(false, std::memory_order_relaxed);
+}
+
+// ═════════════════════════════════════════════════════════════════════════════
+// SineCore — ISynthCore adaptér
+// ═════════════════════════════════════════════════════════════════════════════
+//
+// Tenká vrstva: přijímá ISynthCore volání a deleguje na 3-vrstvou architekturu.
+// Drží GUI-nastavitelné parametry (atomic) a sample_rate.
+
+SineCore::SineCore() {}
 
 bool SineCore::load(const std::string& /*params_path*/, float sr, Logger& logger,
                     int /*midi_from*/, int /*midi_to*/) {
     sample_rate_ = sr;
     loaded_      = true;
-    // Recompute omega for voices already active (e.g. after setSampleRate call)
-    for (int m = 0; m < N_VOICES; m++) {
-        if (voices_[m].active) {
-            float f = midiToHz(m, detune_cents_.load());
-            voices_[m].omega = TAU * f / sample_rate_;
-        }
-    }
     logger.log("SineCore", LogSeverity::Info,
                "Ready. SR=" + std::to_string((int)sr));
     return true;
@@ -38,115 +169,36 @@ bool SineCore::load(const std::string& /*params_path*/, float sr, Logger& logger
 
 void SineCore::setSampleRate(float sr) {
     sample_rate_ = sr;
-    for (int m = 0; m < N_VOICES; m++) {
-        if (voices_[m].active) {
-            float f = midiToHz(m, detune_cents_.load());
-            voices_[m].omega = TAU * f / sample_rate_;
-        }
-    }
 }
 
-// ── MIDI (RT thread) ──────────────────────────────────────────────────────────
-
-void SineCore::noteOn(uint8_t midi, uint8_t vel) {
-    if (midi >= N_VOICES) return;
-    handleNoteOn(midi, vel);
+// MIDI → PatchManager
+void SineCore::noteOn(uint8_t midi, uint8_t velocity) {
+    if (midi >= SINE_N_VOICES) return;
+    if (velocity == 0) { noteOff(midi); return; }
+    patch_mgr_.noteOn(midi, velocity, voice_mgr_, sample_rate_,
+                      gain_.load(std::memory_order_relaxed),
+                      detune_cents_.load(std::memory_order_relaxed));
 }
 
 void SineCore::noteOff(uint8_t midi) {
-    if (midi >= N_VOICES) return;
-    if (sustain_.load(std::memory_order_relaxed))
-        delayed_offs_[midi].store(true, std::memory_order_relaxed);
-    else
-        handleNoteOff(midi);
+    if (midi >= SINE_N_VOICES) return;
+    patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_);
 }
 
 void SineCore::sustainPedal(bool down) {
-    sustain_.store(down, std::memory_order_relaxed);
-    if (!down) {
-        for (int m = 0; m < N_VOICES; m++) {
-            if (delayed_offs_[m].load(std::memory_order_relaxed)) {
-                handleNoteOff((uint8_t)m);
-                delayed_offs_[m].store(false, std::memory_order_relaxed);
-            }
-        }
-    }
+    patch_mgr_.sustainPedal(down, voice_mgr_, sample_rate_);
 }
 
 void SineCore::allNotesOff() {
-    for (int m = 0; m < N_VOICES; m++) {
-        if (voices_[m].active)
-            handleNoteOff((uint8_t)m);
-        delayed_offs_[m].store(false, std::memory_order_relaxed);
-    }
-    sustain_.store(false, std::memory_order_relaxed);
+    patch_mgr_.allNotesOff(voice_mgr_, sample_rate_);
 }
 
-void SineCore::handleNoteOn(uint8_t midi, uint8_t vel) noexcept {
-    SineVoice& v = voices_[midi];
-    float f      = midiToHz(midi, detune_cents_.load(std::memory_order_relaxed));
-    v.omega      = TAU * f / sample_rate_;
-    v.amp        = (vel / 127.f) * gain_.load(std::memory_order_relaxed);
-    v.phase      = 0.f;
-    v.in_onset   = true;
-    v.onset_gain = 0.f;
-    v.onset_step = 1.f / (ONSET_MS * 0.001f * sample_rate_);
-    v.releasing  = false;
-    v.rel_gain   = 1.f;
-    v.active     = true;
-
-    last_midi_.store(midi, std::memory_order_relaxed);
-    last_vel_ .store(vel,  std::memory_order_relaxed);
-}
-
-void SineCore::handleNoteOff(uint8_t midi) noexcept {
-    SineVoice& v = voices_[midi];
-    if (!v.active) return;
-    v.releasing = true;
-    v.rel_step  = -1.f / (RELEASE_MS * 0.001f * sample_rate_);
-    v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
-}
-
-// ── Audio rendering (RT thread, additive) ────────────────────────────────────
-
+// Audio rendering → VoiceManager → Voice::process()
 bool SineCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept {
-    bool any = false;
-    for (int m = 0; m < N_VOICES; m++) {
-        SineVoice& v = voices_[m];
-        if (!v.active) continue;
-        any = true;
-        for (int i = 0; i < n_samples; i++) {
-            // Onset ramp
-            float env = 1.f;
-            if (v.in_onset) {
-                v.onset_gain += v.onset_step;
-                if (v.onset_gain >= 1.f) { v.onset_gain = 1.f; v.in_onset = false; }
-                env = v.onset_gain;
-            }
-            // Release ramp
-            if (v.releasing) {
-                v.rel_gain += v.rel_step;
-                if (v.rel_gain <= 0.f) {
-                    v.active = v.releasing = false;
-                    v.rel_gain = 0.f;
-                }
-                env *= v.rel_gain;
-            }
-
-            float s = v.amp * env * std::sin(v.phase);
-            out_l[i] += s;
-            out_r[i] += s;
-
-            v.phase += v.omega;
-            if (v.phase >= TAU) v.phase -= TAU;
-            if (!v.active) break;
-        }
-    }
-    return any;
+    return voice_mgr_.processBlock(out_l, out_r, n_samples);
 }
 
-// ── Parameters (GUI thread) ───────────────────────────────────────────────────
-
+// GUI parametry
 bool SineCore::setParam(const std::string& key, float value) {
     if (key == "gain") {
         gain_.store(std::max(0.f, std::min(2.f, value)), std::memory_order_relaxed);
@@ -173,26 +225,25 @@ std::vector<CoreParamDesc> SineCore::describeParams() const {
     };
 }
 
-// ── Visualization (GUI thread) ────────────────────────────────────────────────
-
+// GUI vizualizace
 CoreVizState SineCore::getVizState() const {
     CoreVizState vs;
-    vs.sustain_active = sustain_.load(std::memory_order_relaxed);
 
-    for (int m = 0; m < N_VOICES; m++) {
-        if (voices_[m].active) {
+    for (int m = 0; m < SINE_N_VOICES; m++) {
+        if (voice_mgr_.voice(m).active) {
             vs.active_midi_notes.push_back(m);
             vs.active_voice_count++;
         }
     }
 
-    int last_midi = last_midi_.load(std::memory_order_relaxed);
-    int last_vel  = last_vel_ .load(std::memory_order_relaxed);
+    int last_midi = patch_mgr_.lastMidi();
+    int last_vel  = patch_mgr_.lastVel();
     if (last_midi >= 0) {
         CoreVoiceViz vv;
         vv.midi  = last_midi;
         vv.vel   = last_vel;
-        vv.f0_hz = midiToHz(last_midi, detune_cents_.load(std::memory_order_relaxed));
+        vv.f0_hz = SinePatchManager::midiToHz(
+            last_midi, detune_cents_.load(std::memory_order_relaxed));
         vs.last_note       = std::move(vv);
         vs.last_note_valid = true;
     }
