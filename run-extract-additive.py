@@ -73,7 +73,7 @@ def _start_tee(cmd: str, bank: str) -> _Tee:
 
 def _build_parser() -> argparse.ArgumentParser:
     root = argparse.ArgumentParser(
-        prog="run-training",
+        prog="run-extract-additive",
         description="ICR soundbank analysis pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog=__doc__,
@@ -114,7 +114,7 @@ def main() -> int:
     try:
         bank_name = Path(args.bank).name
         ts        = datetime.now().strftime("%m%d%H%M")
-        out_path  = args.out or str(REPO_ROOT / "soundbanks" / f"{bank_name}-{ts}.json")
+        out_path  = args.out or str(REPO_ROOT / "soundbanks-additive" / f"{bank_name}-{ts}.json")
 
         print(f"Bank:   {args.bank}")
         print(f"Output: {out_path}")

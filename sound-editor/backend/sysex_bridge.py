@@ -3,18 +3,25 @@ sound-editor/backend/sysex_bridge.py
 ──────────────────────────────────────
 SysEx communication with ICRGUI / ICR.exe.
 
-Protocol: F0 7D 01 <cmd> <data...> F7
+Protocol: F0 7D 01 <cmd> <core_id> <data...> F7
   7D = non-commercial manufacturer ID
   01 = ICR device ID
 
+Core IDs:
+  00  Active core (whichever is selected)
+  01  AdditiveSynthesisPianoCore
+  02  PhysicalModelingPianoCore
+  03  SamplerCore
+  04  SineCore
+  7F  Engine-level (master mix, DspChain)
+
 Commands:
-  01  SET_NOTE_PARAM    midi vel param_id value_f32
-  02  SET_NOTE_PARTIAL  midi vel k param_id value_f32
-  03  SET_BANK          <chunked JSON>
-  10  SET_MASTER        param_id value_f32
-  70  PING
-  71  PONG
-  72  EXPORT_BANK       <ASCII path bytes>
+  01  SET_NOTE_PARAM    core_id midi vel param_id value_f32
+  02  SET_NOTE_PARTIAL  core_id midi vel k param_id value_f32
+  03  SET_BANK          core_id <chunked JSON>
+  10  SET_MASTER        core_id param_id value_f32
+  70  PING              (no core_id)
+  72  EXPORT_BANK       core_id <ASCII path bytes>
 """
 
 import struct
@@ -32,6 +39,14 @@ except ImportError:
 
 MANUFACTURER_ID = 0x7D   # non-commercial
 DEVICE_ID       = 0x01
+
+# Core IDs for per-core SysEx addressing
+CORE_ID_ACTIVE       = 0x00   # whichever core is currently selected
+CORE_ID_ADDITIVE     = 0x01   # AdditiveSynthesisPianoCore
+CORE_ID_PHYSICAL     = 0x02   # PhysicalModelingPianoCore
+CORE_ID_SAMPLER      = 0x03   # SamplerCore
+CORE_ID_SINE         = 0x04   # SineCore
+CORE_ID_ENGINE       = 0x7F   # engine-level (master mix, DspChain)
 
 CMD_SET_NOTE_PARAM   = 0x01
 CMD_SET_NOTE_PARTIAL = 0x02
@@ -94,11 +109,18 @@ CHUNK_SIZE = 240   # max SysEx data bytes per message (safe MIDI limit)
 class SysExBridge:
     """
     Sends SysEx messages to the ICR synthesizer via a MIDI output port.
+
+    core_id determines which core receives the messages:
+      CORE_ID_ADDITIVE (0x01) — AdditiveSynthesisPianoCore (default for editor)
+      CORE_ID_ACTIVE (0x00)   — whichever core is active
+      CORE_ID_ENGINE (0x7F)   — engine-level (master mix, DspChain)
     """
 
-    def __init__(self, port_name: Optional[str] = None):
+    def __init__(self, port_name: Optional[str] = None,
+                 core_id: int = CORE_ID_ADDITIVE):
         self._port_name = port_name
         self._port = None
+        self._core_id = core_id
         if MIDO_AVAILABLE and port_name:
             self.open(port_name)
 
@@ -151,16 +173,23 @@ class SysExBridge:
             time.sleep(0.002)   # give ICR time to buffer
 
     def set_master(self, param_key: str, value: float):
-        """Update a master/global parameter (beat_scale, master_gain, limiter_threshold, …)."""
+        """Update a master/global parameter (beat_scale, master_gain, limiter_threshold, …).
+
+        Core-specific params (0x01-0x07) are sent with this bridge's core_id.
+        Engine params (0x10+) are sent with CORE_ID_ENGINE (0x7F).
+        """
         param_id = MASTER_PARAM_IDS.get(param_key)
         if param_id is None:
             raise ValueError(f"Unknown master param key: {param_key!r}. "
                              f"Valid keys: {list(MASTER_PARAM_IDS)}")
-        self._send(CMD_SET_MASTER, [param_id] + _f32_to_sysex_bytes(value))
+        # Engine-level params always go to core_id 0x7F
+        cid = CORE_ID_ENGINE if param_id >= 0x10 else None
+        self._send(CMD_SET_MASTER, [param_id] + _f32_to_sysex_bytes(value),
+                   core_id=cid)
 
     def ping(self) -> bool:
         """Send PING; returns True if sent (no ACK over SysEx yet)."""
-        self._send(CMD_PING, [])
+        self._send_raw(CMD_PING, [])  # PING has no core_id
         return True
 
     def export_bank(self, path: str):
@@ -175,7 +204,13 @@ class SysExBridge:
 
     # ── Low-level ─────────────────────────────────────────────────────────────
 
-    def _send(self, cmd: int, data: list[int]):
+    def _send(self, cmd: int, data: list[int], core_id: Optional[int] = None):
+        """Send SysEx with core_id: F0 7D 01 <cmd> <core_id> <data...> F7"""
+        cid = core_id if core_id is not None else self._core_id
+        self._send_raw(cmd, [cid] + data)
+
+    def _send_raw(self, cmd: int, data: list[int]):
+        """Send raw SysEx without auto core_id (used for PING)."""
         if not self._port:
             raise RuntimeError("MIDI port not open")
         payload = [MANUFACTURER_ID, DEVICE_ID, cmd] + data

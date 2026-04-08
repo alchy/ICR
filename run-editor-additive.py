@@ -1,9 +1,9 @@
 """
-run-editor.py  —  ICR Sound Editor launcher
-────────────────────────────────────────────
+run-editor-additive.py  —  ICR Sound Editor launcher (AdditiveSynthesisPianoCore)
+─────────────────────────────────────────────────────────────────────────────────
 Run from anywhere (repo root, IDE, double-click):
 
-    python run-editor.py
+    python run-editor-additive.py
 
 Starts:
   • FastAPI backend  on http://localhost:8000
@@ -44,7 +44,7 @@ npm_cmd = "npm.cmd" if sys.platform == "win32" else "npm"
 print("ICR Sound Editor")
 print(f"  backend : http://localhost:8000")
 print(f"  editor  : http://localhost:5173")
-print(f"  banks   : {REPO_ROOT / 'soundbanks'}")
+print(f"  banks   : {REPO_ROOT / 'soundbanks-additive'}")
 print()
 
 # Backend: uvicorn in a thread

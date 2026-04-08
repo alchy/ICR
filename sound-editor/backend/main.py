@@ -37,10 +37,10 @@ app.add_middleware(
 )
 
 # ── Soundbank search paths ────────────────────────────────────────────────────
-# Resolved relative to this file: backend/ → repo root → soundbanks/
+# Resolved relative to this file: backend/ → repo root → soundbanks-additive/
 _BACKEND_DIR  = Path(__file__).parent
 _REPO_ROOT    = _BACKEND_DIR.parent.parent          # sound-editor/backend → repo root
-_BANKS_DIR    = Path(os.environ.get("ICR_BANKS_DIR", _REPO_ROOT / "soundbanks"))
+_BANKS_DIR    = Path(os.environ.get("ICR_BANKS_DIR", _REPO_ROOT / "soundbanks-additive"))
 
 
 # ── Singletons ────────────────────────────────────────────────────────────────

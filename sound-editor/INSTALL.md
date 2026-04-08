@@ -80,7 +80,7 @@ npm run preview      # serve the production build locally
 5. Open `http://localhost:5173`
 6. In the bottom bar enter the soundbank path and click **Load**:
    ```
-   C:/Users/jindr/PycharmProjects/ICR/soundbanks/params-ks-grand-simple.json
+   C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive/params-ks-grand-simple.json
    ```
 7. In the right panel select the loopMIDI port and click **Connect**.
 8. Select a layer from the left panel — cards appear in 3D space.
