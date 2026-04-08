@@ -354,11 +354,9 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
         float f0 = np.f0_hz + detuning.offsets[si];
         s.f0_hz = f0;
 
-        // Loss filter (uses scaled damping times)
-        // Strengthen high-freq damping: use tau_high/4 for more aggressive rolloff.
-        // Real piano strings damp high partials much faster than one-pole predicts.
-        s.loss = physics::compute_loss_filter(f0, eff_tau_fund,
-                                               eff_tau_high * 0.25f, sr);
+        // Loss filter: T60_fund and T60_nyq computed from defaults or JSON.
+        // Smith/Bank design: g_dc ~ 0.99, g_nyq ~ 0.3, pole ~ 0.5
+        s.loss = physics::compute_loss_filter(f0, eff_tau_fund, eff_tau_high, sr);
 
         // Felt low-pass: cutoff rises with pitch (softer hammer = darker)
         //   Bass (MIDI 21): ~800 Hz,  Treble (MIDI 108): ~6 kHz
@@ -395,10 +393,31 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
         s.u_at_hammer = 0.f;
     }
 
-    // -- Setup hammer (uses scaled stiffness) ---------------------------------
+    // -- Excitation: raised-cosine pulse written into delay line ─────────────
+    // Replaces per-sample hammer model. The raised-cosine simulates the
+    // felt hammer's low-pass character: wider pulse = softer hammer = darker.
+    //   Width: bass ~15 samples (~0.3 ms), treble ~3 samples (~0.06 ms)
+    //   Position: 1/8 of string length (suppresses k=8,16,24 harmonics)
+    //   Amplitude: scaled by hammer velocity (from MIDI velocity)
+    {
+        float hammer_vel = physics::midi_to_hammer_velocity(velocity);
+        float amp = hammer_vel * 0.15f;  // scale to reasonable level
 
-    float hammer_vel = physics::midi_to_hammer_velocity(velocity);
-    physics::hammer_init(v.hammer, hammer_vel, eff_K_H, np.p, np.M_H);
+        for (int si = 0; si < np.n_strings; si++) {
+            PhysicsString& s = v.strings[si];
+            int width = (std::max)(3, (int)(0.0003f * sr * (1.f + (float)midi / 127.f)));
+            int strike = (std::max)(1, (int)(s.delay_r.len * np.x0_ratio));
+
+            for (int i = 0; i < width; i++) {
+                int idx = (s.delay_r.write_ix + strike + i) % s.delay_r.len;
+                float pulse = 0.5f * (1.f - std::cos(dsp::TAU * (float)i / (float)width));
+                s.delay_r.buf[idx] += amp * pulse;
+            }
+        }
+
+        // Disable per-sample hammer (excitation is already in the delay line)
+        v.hammer.in_contact = false;
+    }
 
     // Soundboard coloring: handled by DspChain convolver (soundboard IR),
     // not by per-voice mode bank.  See strategy A in docs.
@@ -439,32 +458,7 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples,
             env_gate = onset_gain;
         }
 
-        // -- Per-string waveguide processing ----------------------------------
-        //
-        // The hammer is a single rigid body that contacts all strings in
-        // the unison group simultaneously.  We compute the average string
-        // displacement at the strike point, advance the hammer once, then
-        // inject the resulting force into each string's waveguide.
-
-        // Step 1: Compute average string displacement at hammer contact
-        float u_avg = 0.f;
-        if (hammer.in_contact) {
-            for (int si = 0; si < n_strings; si++) {
-                PhysicsString& s = strings[si];
-                float u = physics::delay_read(s.delay_r, s.strike_tap);
-                s.u_at_hammer = u;
-                u_avg += u;
-            }
-            u_avg /= (float)n_strings;
-        }
-
-        // Step 2: Advance hammer once (single rigid body)
-        float hammer_force = physics::hammer_tick(hammer, u_avg, dt);
-        // Force per string, impedance-matched to wave variable:
-        //   injection = F / n_strings / (2*Z)  ≈  F / n_strings * injection_scale
-        float injection_per_string = hammer_force * injection_scale;
-
-        // Step 3: Process each string — single-loop Karplus-Strong topology
+        // -- Per-string Karplus-Strong loop ──────────────────────────────────
         //
         //   delay_r is the full round-trip delay line (sr/f0 samples).
         //   Signal path per sample:
@@ -487,19 +481,10 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples,
             // Output: bridge radiation (before filtering)
             bridge_out_total += bridge_sample;
 
-            // Felt low-pass filter on excitation: shapes hammer force spectrum
-            // (softer felt = darker attack, harder felt = brighter)
-            float filtered_injection = injection_per_string;
-            if (injection_per_string != 0.f) {
-                s.felt_lp_state += s.felt_lp_coeff
-                                 * (injection_per_string - s.felt_lp_state);
-                filtered_injection = s.felt_lp_state;
-            }
-
-            // Karplus-Strong loop: loss filter + dispersion + filtered injection
+            // Karplus-Strong loop: loss filter + dispersion (no injection —
+            // excitation was pre-loaded as raised-cosine in initVoice)
             float looped = physics::loss_filter_tick(bridge_sample, s.loss);
             looped = physics::dispersion_tick(looped, s.dispersion);
-            looped += filtered_injection;
 
             physics::delay_write(s.delay_r, looped);
         }

@@ -137,30 +137,44 @@ struct LossFilter {
     float s = 0.f;     // filter state
 };
 
-/// Compute loss filter coefficients from physical parameters.
+/// Compute loss filter coefficients from T60 decay times.
 ///
-///   f0       = fundamental frequency [Hz]
-///   tau_fund  = decay time of fundamental [s] (corresponds to tau2 in biexp)
-///   tau_high  = decay time at Nyquist [s] (corresponds to tau1 in biexp)
-///   sr       = sample rate
+/// Smith/Bank design: the loop filter gain at DC determines how fast the
+/// fundamental decays; the gain at Nyquist determines how fast the highest
+/// partials decay.  For piano, high partials must die within milliseconds
+/// while the fundamental rings for seconds.
 ///
-/// The gain g is set so that the fundamental decays with time constant tau_fund.
-/// The pole b is set so that high frequencies decay faster (tau_high).
-inline LossFilter compute_loss_filter(float f0, float tau_fund,
-                                       float tau_high, float sr) {
-    // Gain per round-trip at fundamental: exp(-1 / (tau_fund * f0))
-    //   because there are f0 round-trips per second.
-    float g_fund = std::exp(-1.f / std::max(tau_fund * f0, 1.f));
-    float g_high = std::exp(-1.f / std::max(tau_high * f0, 1.f));
+///   f0        = fundamental frequency [Hz]
+///   T60_fund  = time for fundamental to decay 60 dB [s]
+///   T60_nyq   = time for Nyquist component to decay 60 dB [s]
+///   sr        = sample rate
+///
+/// Filter: H(z) = g * (1-p) / (1 - p*z^-1)
+///   g = DC gain per round-trip (sets fundamental decay)
+///   p = pole (sets spectral tilt: how much faster treble decays)
+inline LossFilter compute_loss_filter(float f0, float T60_fund,
+                                       float T60_nyq, float sr) {
+    float N = sr / f0;  // samples per round-trip
 
-    // From the filter response at DC and Nyquist:
-    //   |H(1)|  = g*(1-b)/(1-b) = g        (matches g_fund)
-    //   |H(-1)| = g*(1-b)/(1+b)            (matches g_high)
-    // Solving: b = (g_fund - g_high) / (g_fund + g_high)
-    float b = (g_fund - g_high) / std::max(g_fund + g_high, 1e-9f);
-    b = std::max(0.f, std::min(b, 0.98f));
+    // Per-loop gain at DC and Nyquist from T60:
+    //   g = 10^(-3 * N / (T60 * sr))
+    // Clamp T60_nyq to minimum 0.001s to avoid zero gain
+    float g_dc  = std::pow(10.f, -3.f * N / std::max(T60_fund * sr, 1.f));
+    float g_nyq = std::pow(10.f, -3.f * N / std::max(T60_nyq * sr, 0.001f * sr));
 
-    return { g_fund, b, 0.f };
+    // Clamp gains to stable range
+    g_dc  = std::max(0.5f, std::min(g_dc, 0.9999f));
+    g_nyq = std::max(0.01f, std::min(g_nyq, g_dc));
+
+    // Pole coefficient from DC and Nyquist gain ratio:
+    //   |H(1)| = g_dc,  |H(-1)| = g*(1-p)/(1+p) = g_nyq
+    //   p = (g_dc - g_nyq) / (g_dc + g_nyq)
+    float p = (g_dc - g_nyq) / std::max(g_dc + g_nyq, 1e-9f);
+    p = std::max(0.f, std::min(p, 0.95f));
+
+    // Normalize so that DC gain = g_dc:
+    //   H(1) = g*(1-p)/(1-p) = g  =>  g = g_dc
+    return { g_dc, p, 0.f };
 }
 
 /// Process one sample through the loss filter.
@@ -512,16 +526,20 @@ inline float default_impedance_ratio(int midi) {
     return 0.0002f + t * 0.0018f;
 }
 
-/// Fundamental decay time tau2 (s): bass ~20s, treble ~1s.
+/// T60 of fundamental (s): bass ~15s, middle ~5s, treble ~1.5s.
+/// These are -60dB decay times (time to drop 60 dB).
 inline float default_tau_fund(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 20.f - t * 19.f;
+    return 15.f - t * 13.5f;  // 15 -> 1.5
 }
 
-/// High-frequency decay time tau1 (s): bass ~2s, treble ~0.2s.
+/// T60 at Nyquist (s): how fast the brightest partials decay.
+/// Must be short enough to create spectral tilt (piano warmth) but
+/// not so short that the tone has no brightness at all.
+///   Bass: ~0.08s, treble: ~0.03s
 inline float default_tau_high(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 2.f - t * 1.8f;
+    return 0.08f - t * 0.05f;  // 80ms -> 30ms
 }
 
 /// Inharmonicity B: bass ~5e-4, treble ~5e-5.
