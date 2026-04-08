@@ -186,6 +186,74 @@ Deferred to after Phase 4 (hammer model changes spectral content).
 
 ---
 
+## Sound Editor — New Features
+
+### SE1. Note Compare & Correct (Source → Destination)
+
+Interactive tool for fixing problematic notes by referencing good ones.
+
+**Concept:**
+
+1. User selects **Source** (good note, e.g. MIDI 64) and **Destination** (bad note, e.g. MIDI 70)
+2. Editor computes **Base** — theoretical expected values for destination derived from source proportions:
+   - For each parameter, base = source_value × (dest_f0 / src_f0) scaling factor
+   - Velocity-dependent parameters scale additionally by velocity ratio
+3. Editor shows per-parameter comparison:
+   - Absolute value (what destination currently has)
+   - Base value (what it "should" have based on source proportions)
+   - **Relative deviation** in % (how far destination is from base)
+
+**Example:**
+- Source: f0=261.6, partial k=3 A0=0.15
+- Destination: f0=369.9, base A0 for k=3 = 0.15 (amplitude preserved)
+- Destination actual A0=0.18 → deviation = +20%
+- Source: partial k=3 f_hz=785 (ratio to f0 = 3.0×)
+- Destination base f_hz = 369.9 × 3.0 = 1109.7
+- Destination actual f_hz = 1115.2 → deviation = +0.5% (inharmonicity)
+
+**Correction modes:**
+- **100% correction** — set destination parameter to base (exact proportional match to source)
+- **Partial correction** — slider to shift up/down from base (e.g. +5%, -3%)
+- **Copy missing partials** — if destination lacks a partial that source has, create it with f0-proportional scaling
+
+**Implementation:**
+- [ ] Backend: `/editor/compare` endpoint — takes source (midi,vel) and dest (midi,vel), returns per-parameter base + deviation table
+- [ ] Backend: `/editor/correct` endpoint — applies corrections to destination params in store
+- [ ] Frontend: new panel with source/dest selectors, deviation table with color-coded %, correction sliders, Apply button
+- [ ] Frontend: visual diff overlay on 3D spline view (highlight deviating parameters)
+
+### SE2. MIDI Audition (Note Playback via Loopback)
+
+Send MIDI noteOn/noteOff from the editor to ICR for instant listening.
+
+**Workflow:**
+1. User connects MIDI output port in editor (same as SysEx port or separate)
+2. User clicks a note in the compare panel or the 3D view
+3. Editor sends noteOn (configurable velocity) → ICR plays the note
+4. After configurable duration (or on mouse release), sends noteOff
+
+**Implementation:**
+- [ ] Backend: `/midi/audition` endpoint — sends noteOn, waits duration_ms, sends noteOff via mido
+- [ ] Backend: sysex_bridge.py already has mido — extend with `send_note_on(midi, vel)` and `send_note_off(midi)`
+- [ ] Frontend: "Play" button next to source/dest note selectors
+- [ ] Frontend: click-to-play on 3D cards (with shift or middle-click modifier)
+- [ ] Velocity slider (pp to ff) in audition controls
+
+**SysEx bridge extension:**
+```python
+def note_on(self, midi: int, velocity: int = 80):
+    """Send MIDI noteOn via the open port."""
+    msg = mido.Message("note_on", note=midi, velocity=velocity)
+    self._port.send(msg)
+
+def note_off(self, midi: int):
+    """Send MIDI noteOff via the open port."""
+    msg = mido.Message("note_off", note=midi, velocity=0)
+    self._port.send(msg)
+```
+
+---
+
 ## Operational Issues
 
 ### Tests

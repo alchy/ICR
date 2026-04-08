@@ -390,6 +390,27 @@ The canvas shows `spectral_eq` (freq/gain) stored alongside `eq_biquads` in the 
 
 ---
 
+## Planned Features
+
+### Note Compare & Correct (Source → Destination)
+
+Compare a good note (source) against a problematic note (destination).
+The editor computes per-parameter relative deviation from a proportional
+base derived from source, letting the user see exactly where the destination
+diverges and correct it with sliders or 100% profile transfer.
+
+See [TODO.md](../cores/additive-synthesis-piano/TODO.md#se1-note-compare--correct-source--destination) for full specification.
+
+### MIDI Audition
+
+Click-to-play notes directly from the editor via MIDI loopback to ICR.
+The editor sends noteOn/noteOff through the connected MIDI port for
+instant listening feedback during editing.
+
+See [TODO.md](../cores/additive-synthesis-piano/TODO.md#se2-midi-audition-note-playback-via-loopback) for full specification.
+
+---
+
 ## Adding a new layer
 
 1. Add an entry to `SCALAR_LAYERS` or `_PARTIAL_TEMPLATES` in `layer_registry.py`.
