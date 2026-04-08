@@ -1,6 +1,6 @@
 {
   "log_file": "icr.log",
-  "default_core": "SamplerCore",
+  "default_core": "SineCore",
   "cores": {
     "SamplerCore": {
       "params_path": "C:/SoundBanks/IthacaPlayer"
