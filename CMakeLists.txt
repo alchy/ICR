@@ -56,13 +56,6 @@ set(DSP_SOURCES
     dsp/convolver/convolver.cpp
 )
 
-# ── Sample bank directory (cross-platform, overridable) ──────────────────────
-
-set(ICR_SAMPLE_DIR "" CACHE STRING "Default sample bank directory for SamplerCore")
-if (ICR_SAMPLE_DIR)
-    add_compile_definitions(ICR_SAMPLE_DIR="${ICR_SAMPLE_DIR}")
-endif()
-
 # ── Common include directories ────────────────────────────────────────────────
 
 set(COMMON_INCLUDES
