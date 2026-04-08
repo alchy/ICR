@@ -28,7 +28,8 @@
 
 | Document | Content |
 |----------|---------|
-| [OVERVIEW](cores/physical-modeling-piano/OVERVIEW.md) | Waveguide approach, GUI params, physics defaults, v0.1 status |
+| [OVERVIEW](cores/physical-modeling-piano/OVERVIEW.md) | Waveguide approach, GUI params, physics defaults |
+| [JSON_SCHEMA](cores/physical-modeling-piano/JSON_SCHEMA.md) | Soundbank format: per-note string params (gauge, B, T60, excitation) |
 | [TODO](cores/physical-modeling-piano/TODO.md) | Roadmap: loss filter, soundboard modes, damper, coupling |
 | [DEVELOPMENT_LOG](cores/physical-modeling-piano/DEVELOPMENT_LOG.md) | Implementation notes, bugs fixed, references |
 
