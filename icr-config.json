@@ -7,7 +7,7 @@
     },
     "AdditiveSynthesisPianoCore": {
       "params_path": "",
-      "soundbank_dir": "soundbanks"
+      "soundbank_dir": "soundbanks-additive"
     },
     "PhysicalModelingPianoCore": {
       "params_path": ""

@@ -8,7 +8,7 @@ and exporting JSON soundbanks + soundboard IR for the C++ ICR engine.
 ## Pipeline
 
 ```
-python run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
+python run-extract-additive.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
 ```
 
 ```
@@ -35,8 +35,8 @@ extract_soundboard_ir.py    tools/
     | deconvolve synthesis from recordings
     | average across ~20 notes, normalize, 25ms IR
     v
-soundbanks/{bank}-{timestamp}.json         ← parameters
-soundbanks/{bank}-{timestamp}-soundboard.wav  ← body IR
+soundbanks-additive/{bank}-{timestamp}.json         ← parameters
+soundbanks-additive/{bank}-{timestamp}-soundboard.wav  ← body IR
 ```
 
 ---

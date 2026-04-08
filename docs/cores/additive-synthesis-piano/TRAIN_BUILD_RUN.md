@@ -9,7 +9,7 @@ Module reference: [TRAINING_MODULES.md](TRAINING_MODULES.md).
 ## 1. Analyze a WAV Bank
 
 ```bash
-.venv312/Scripts/python.exe run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
+.venv312/Scripts/python.exe run-extract-additive.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
 ```
 
 ### What happens
@@ -35,13 +35,13 @@ Deconvolved from recordings, averaged across ~20 notes, normalized to unity at 2
 
 **Output:**
 ```
-soundbanks/pl-grand-04071830.json
-soundbanks/pl-grand-04071830-soundboard.wav
+soundbanks-additive/pl-grand-04071830.json
+soundbanks-additive/pl-grand-04071830-soundboard.wav
 ```
 
 **Options:**
 ```
---out soundbanks/my-piano.json    Custom output path
+--out soundbanks-additive/my-piano.json    Custom output path
 --workers 8                       Parallel extraction workers
 --skip-eq                         Skip spectral EQ fitting
 --skip-outliers                   Skip outlier detection
@@ -64,8 +64,8 @@ m{midi:03d}-vel{idx}-{sr_tag}.wav
 ```bash
 ./build/bin/Release/icrgui.exe \
     --core AdditiveSynthesisPianoCore \
-    --params soundbanks/pl-grand-04071830.json \
-    --ir soundbanks/pl-grand-04071830-soundboard.wav
+    --params soundbanks-additive/pl-grand-04071830.json \
+    --ir soundbanks-additive/pl-grand-04071830-soundboard.wav
 ```
 
 Without soundboard IR: omit `--ir` for dry additive synthesis + EQ only.
@@ -96,21 +96,21 @@ Master bus (DspChain):
 
 ```bash
 # Inspect soundbank parameters per register
-python tools/inspect_bank.py soundbanks/pl-grand.json
+python tools/inspect_bank.py soundbanks-additive/pl-grand.json
 
 # Inspect specific note with partials detail
-python tools/inspect_bank.py soundbanks/pl-grand.json --midi 57 --vel 4
+python tools/inspect_bank.py soundbanks-additive/pl-grand.json --midi 57 --vel 4
 
 # Quality report (compare synthesis vs original WAV)
-python tools/quality_report.py soundbanks/pl-grand.json \
+python tools/quality_report.py soundbanks-additive/pl-grand.json \
     --bank C:/SoundBanks/IthacaPlayer/pl-grand
 
 # Blind listening test via MIDI loopback
 python tools/blind_scoring.py --port "loopMIDI Port" \
-    --params soundbanks/pl-grand.json
+    --params soundbanks-additive/pl-grand.json
 
 # Profile optimizer -- learn from good notes, fix bad ones
-python tools/profile_optimizer.py soundbanks/pl-grand.json \
+python tools/profile_optimizer.py soundbanks-additive/pl-grand.json \
     --scores "62:0.98,88:0.98,57:0.30,50:0.34"
 ```
 

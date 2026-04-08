@@ -285,7 +285,7 @@ F0 7D 01  10  7F  10  <float32>  F7
 | Core | Registration string | params_path meaning | Bank selector |
 |------|--------------------|--------------------|---------------|
 | `SamplerCore` | `"SamplerCore"` | Base directory for WAV banks (e.g. `C:/SoundBanks/IthacaPlayer`) | GUI combo: subdirectories |
-| `AdditiveSynthesisPianoCore` | `"AdditiveSynthesisPianoCore"` | Soundbank JSON path (or empty) | GUI combo: `soundbanks/*.json` |
+| `AdditiveSynthesisPianoCore` | `"AdditiveSynthesisPianoCore"` | Soundbank JSON path (or empty) | GUI combo: `soundbanks-additive/*.json` |
 | `PhysicalModelingPianoCore` | `"PhysicalModelingPianoCore"` | Optional JSON with overrides (or empty = physics defaults) | -- |
 | `SineCore` | `"SineCore"` | Ignored (no params needed) | -- |
 

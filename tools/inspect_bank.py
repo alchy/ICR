@@ -5,9 +5,9 @@ tools/inspect_bank.py
 Inspect a soundbank JSON and print diagnostic statistics per register.
 
 Usage:
-    python tools/inspect_bank.py soundbanks/pl-grand.json
-    python tools/inspect_bank.py soundbanks/pl-grand.json --midi 36
-    python tools/inspect_bank.py soundbanks/pl-grand.json --midi 36 --vel 0,7
+    python tools/inspect_bank.py soundbanks-additive/pl-grand.json
+    python tools/inspect_bank.py soundbanks-additive/pl-grand.json --midi 36
+    python tools/inspect_bank.py soundbanks-additive/pl-grand.json --midi 36 --vel 0,7
 """
 
 import json

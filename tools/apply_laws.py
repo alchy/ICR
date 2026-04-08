@@ -11,8 +11,8 @@ Three laws (from 27 good-scoring notes, fixed velocity):
   tau1(midi)     = exp(-0.038*midi + 1.27)                (R²=0.672)
 
 Usage:
-    python tools/apply_laws.py soundbanks/pl-grand-04072006.json \
-        --out soundbanks/pl-grand-laws.json
+    python tools/apply_laws.py soundbanks-additive/pl-grand-04072006.json \
+        --out soundbanks-additive/pl-grand-laws.json
 """
 
 import argparse

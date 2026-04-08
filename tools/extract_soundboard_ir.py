@@ -19,9 +19,9 @@ Architecture:
 Averaged across multiple notes to reduce note-specific artifacts.
 
 Usage:
-    python tools/extract_soundboard_ir.py soundbanks/pl-grand-04071611.json \
+    python tools/extract_soundboard_ir.py soundbanks-additive/pl-grand-04071611.json \
         --bank C:/SoundBanks/IthacaPlayer/pl-grand \
-        --out soundbanks/pl-grand-soundboard.wav
+        --out soundbanks-additive/pl-grand-soundboard.wav
 """
 
 import argparse
@@ -89,7 +89,7 @@ def main():
     parser.add_argument("soundbank", help="Path to soundbank JSON")
     parser.add_argument("--bank", required=True, help="WAV bank directory")
     parser.add_argument("--out", default=None,
-                        help="Output WAV path (default: soundbanks/{name}-soundboard.wav)")
+                        help="Output WAV path (default: soundbanks-additive/{name}-soundboard.wav)")
     parser.add_argument("--vel", type=int, default=4, help="Velocity index (default: 4)")
     parser.add_argument("--sr-tag", default="f48", help="SR suffix (default: f48)")
     parser.add_argument("--ir-length-ms", type=float, default=25.0,

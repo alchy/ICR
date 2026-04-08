@@ -10,11 +10,11 @@ knowledge, repeats until the user is satisfied.
 
 Usage:
     python tools/interactive_tuner.py --port "loopMIDI Port 1" \
-        --params soundbanks/pl-grand-laws.json \
+        --params soundbanks-additive/pl-grand-laws.json \
         --midi 55
 
     python tools/interactive_tuner.py --port "loopMIDI Port 1" \
-        --params soundbanks/pl-grand-laws.json \
+        --params soundbanks-additive/pl-grand-laws.json \
         --auto-bad   # automatically iterate on worst-scoring notes
 """
 

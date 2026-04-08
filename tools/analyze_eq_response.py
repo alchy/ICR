@@ -8,7 +8,7 @@ import sys
 import numpy as np
 import scipy.signal as sig
 
-BANK = "soundbanks/pl-grand.json"
+BANK = "soundbanks-additive/pl-grand.json"
 NOTES = ["m048_vel3", "m060_vel3", "m072_vel3", "m084_vel3", "m096_vel3"]
 
 def biquad_response(biquads, freqs_hz, sr):

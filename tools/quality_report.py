@@ -6,10 +6,10 @@ Compare synthesized output from a soundbank JSON against original WAV recordings
 Compute per-note metrics and correlate with manual listening scores.
 
 Usage:
-    python tools/quality_report.py soundbanks/pl-grand-04071523.json \
+    python tools/quality_report.py soundbanks-additive/pl-grand-04071523.json \
         --bank C:/SoundBanks/IthacaPlayer/pl-grand
 
-    python tools/quality_report.py soundbanks/pl-grand-04071523.json \
+    python tools/quality_report.py soundbanks-additive/pl-grand-04071523.json \
         --bank C:/SoundBanks/IthacaPlayer/pl-grand \
         --scores "88:0.98,92:0.99,55:0.21,77:0.30"
 """

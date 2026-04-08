@@ -26,7 +26,7 @@ Binaries: `build/bin/Release/icrgui.exe` (GUI), `build/bin/Release/icr.exe` (CLI
 
 ```bash
 # Additive piano (requires soundbank JSON from WAV analysis)
-icrgui.exe --core AdditiveSynthesisPianoCore --params soundbanks/pl-grand.json --ir soundbanks/pl-grand-soundboard.wav
+icrgui.exe --core AdditiveSynthesisPianoCore --params soundbanks-additive/pl-grand.json --ir soundbanks-additive/pl-grand-soundboard.wav
 
 # Physical modeling piano (playable without params -- uses physics defaults)
 icrgui.exe --core PhysicalModelingPianoCore
@@ -39,7 +39,7 @@ icr.exe --list-cores
 
 ```bash
 pip install numpy scipy soundfile
-python run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
+python run-extract-additive.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
 ```
 
 See [additive piano docs](docs/cores/additive-synthesis-piano/TRAIN_BUILD_RUN.md) for details.
@@ -55,7 +55,7 @@ cores/
 dsp/           Master bus DSP chain (convolver, BBE, limiter)
 gui/           Dear ImGui frontend (core-agnostic)
 training/      Python analysis/extraction pipeline (for additive core)
-soundbanks/    Parameter JSON + soundboard IR files
+soundbanks-additive/    Parameter JSON + soundboard IR files
 sound-editor/  3D web-based soundbank editor (Three.js + FastAPI)
 docs/          Documentation (see below)
 third_party/   Vendored deps (nlohmann/json, RtMidi)

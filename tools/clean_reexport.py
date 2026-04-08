@@ -13,7 +13,7 @@ Does NOT re-run extraction or LTASE (uses stored spectral_eq).
 
 Usage:
     python tools/clean_reexport.py [input.json] [output.json]
-    python tools/clean_reexport.py  # defaults: soundbanks/pl-grand.json -> soundbanks/pl-grand.json
+    python tools/clean_reexport.py  # defaults: soundbanks-additive/pl-grand.json -> soundbanks-additive/pl-grand.json
 """
 import json
 import sys
@@ -25,7 +25,7 @@ from training.modules.exporter import SoundbankExporter
 
 
 def main():
-    bank_in  = sys.argv[1] if len(sys.argv) > 1 else "soundbanks/pl-grand.json"
+    bank_in  = sys.argv[1] if len(sys.argv) > 1 else "soundbanks-additive/pl-grand.json"
     bank_out = sys.argv[2] if len(sys.argv) > 2 else bank_in
 
     print(f"Reading:  {bank_in}")

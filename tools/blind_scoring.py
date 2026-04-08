@@ -13,7 +13,7 @@ Prerequisites:
     - pip install mido python-rtmidi
 
 Usage:
-    python tools/blind_scoring.py --port "loopMIDI Port" --params soundbanks/pl-grand.json
+    python tools/blind_scoring.py --port "loopMIDI Port" --params soundbanks-additive/pl-grand.json
 
 The script:
     1. Selects ~44 notes (every 2nd MIDI from 21-108) in random order

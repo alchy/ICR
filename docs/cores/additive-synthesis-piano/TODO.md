@@ -20,7 +20,7 @@ iterations without full listening sessions.
 - [ ] Compute spectral distance vs original WAV (MRSTFT or log-spectral)
 - [ ] Compute envelope correlation (decay shape match)
 - [ ] Output: `quality_report.txt` with per-note scores and overall grade
-- [ ] Add `--validate` flag to `run-training.py analyze`
+- [ ] Add `--validate` flag to `run-extract-additive.py analyze`
 
 ### P2. Bass noise model (A_noise too low, centroid too uniform)
 
@@ -103,7 +103,7 @@ notes (MIDI 61, 62, 65).  These may be genuine fast-coupling notes
 |------|--------|------|
 | 2a | DONE | Bank inspector (`tools/inspect_bank.py`) |
 | 2b | **NEXT** | Post-export quality report (spectral distance vs WAV) |
-| 2c | TODO | `--validate` flag on run-training.py |
+| 2c | TODO | `--validate` flag on run-extract-additive.py |
 | 2d | TODO | Unit tests for dsp_math.h + additive_synthesis_piano_math.h |
 
 ### Phase 3 — Longitudinal string model (TODO)
@@ -277,4 +277,4 @@ Reduced bound-hit rate from 59% to 12% of middle register.
 - [x] stereo_width clamped to [0.2, 2.0] in EQ fitter extraction
 - [x] Bank inspector tool
 - [x] Timestamped soundbank output (MMDDHHmm suffix)
-- [x] Cleanup: removed 15 NN files, 5 docs, simplified run-training.py
+- [x] Cleanup: removed 15 NN files, 5 docs, simplified run-extract-additive.py

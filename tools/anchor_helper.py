@@ -3,8 +3,8 @@ anchor_helper.py - Text-mode helper for Instrument DNA anchor note selection.
 
 Usage:
     python tools/anchor_helper.py
-    python tools/anchor_helper.py --load soundbanks/my.json
-    python tools/anchor_helper.py --load soundbanks/my.json --anchors anchors/my.json
+    python tools/anchor_helper.py --load soundbanks-additive/my.json
+    python tools/anchor_helper.py --load soundbanks-additive/my.json --anchors anchors/my.json
 
 Commands (at the prompt):
     load <path>              Load a soundbank JSON

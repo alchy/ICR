@@ -41,7 +41,7 @@ def _default_icr_exe() -> str:
 ```
 
 Použít místo hardcoded stringu ve všech třech pipeline souborech
-a v `run-training.py` defaults.
+a v `run-extract-additive.py` defaults.
 
 Totéž v `_resolve_icr_exe()` v `pipeline_icr_eval.py`:
 
@@ -73,10 +73,10 @@ Potenciální problémy:
 - Metal backend (Apple Silicon) — GLFW standardně používá OpenGL přes
   Compatibility profile, mělo by fungovat
 
-### 3. run-training.py — default pro --icr-exe
+### 3. run-extract-additive.py — default pro --icr-exe
 
 ```python
-# Aktuálně v run-training.py:
+# Aktuálně v run-extract-additive.py:
 icr.add_argument("--icr-exe", default="build/bin/Release/ICR.exe", ...)
 
 # Změnit na:
@@ -118,7 +118,7 @@ Tréninková pipeline WAV soubory jen čte/zapisuje přes `soundfile`
 | `training/pipeline_icr_eval.py` | `_resolve_icr_exe()` + default |
 | `training/pipeline_smooth_icr_eval.py` | default `icr_exe` parametr |
 | `training/pipeline_full_spline_icr_eval.py` | default `icr_exe` parametr |
-| `run-training.py` | `--icr-exe` default pro 3 subcommands |
+| `run-extract-additive.py` | `--icr-exe` default pro 3 subcommands |
 | `CMakeLists.txt` | ověřit macOS build (OpenGL/Metal) |
 
 ---

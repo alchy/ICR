@@ -43,10 +43,10 @@ class SoundbankExporter:
 
     Usage:
         # Export only real extracted data
-        SoundbankExporter().from_params(params, "soundbanks/out.json")
+        SoundbankExporter().from_params(params, "soundbanks-additive/out.json")
 
         # Export hybrid: real data where available, NN prediction for gaps
-        SoundbankExporter().hybrid(model, params, "soundbanks/out.json")
+        SoundbankExporter().hybrid(model, params, "soundbanks-additive/out.json")
     """
 
     def from_params(

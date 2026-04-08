@@ -8,7 +8,7 @@ Logs everything for correlation analysis.
 
 Usage:
     python tools/param_explorer.py --port "loopMIDI Port 1" \
-        --params soundbanks/pl-grand-04072006.json \
+        --params soundbanks-additive/pl-grand-04072006.json \
         --midi 55,63,69,75
 """
 

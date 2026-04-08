@@ -157,7 +157,7 @@ static void glfwErrorCb(int /*err*/, const char* desc) {
 // ── Soundbank file discovery ──────────────────────────────────────────────
 static std::vector<std::string> discoverSoundbankJsonFiles() {
     std::vector<std::string> result;
-    const char* dir = "soundbanks";
+    const char* dir = "soundbanks-additive";
 #ifdef _WIN32
     std::string pattern = std::string(dir) + "\\*.json";
     WIN32_FIND_DATAA fd;
@@ -884,7 +884,7 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                             bool sel = (fname == gs.active_soundbank);
                             if (ImGui::Selectable(fname.c_str(), sel)) {
                                 if (fname != gs.active_soundbank) {
-                                    std::string path = "soundbanks/" + fname;
+                                    std::string path = "soundbanks-additive/" + fname;
                                     auto* core = dynamic_cast<AdditiveSynthesisPianoCore*>(engine.core());
                                     if (core) {
                                         std::ifstream f(path);

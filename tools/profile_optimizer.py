@@ -11,9 +11,9 @@ profile of their good neighbors, preserving genuine per-note variation
 while eliminating extraction artifacts.
 
 Usage:
-    python tools/profile_optimizer.py soundbanks/pl-grand.json \
+    python tools/profile_optimizer.py soundbanks-additive/pl-grand.json \
         --scores "21:0.9,26:0.9,38:0.9,41:0.83,62:0.98,84:0.87,88:0.98,91:0.99,95:0.99,98:0.99,25:0.3,50:0.34,57:0.30,74:0.30" \
-        --out soundbanks/pl-grand-optimized.json
+        --out soundbanks-additive/pl-grand-optimized.json
 """
 
 import argparse

@@ -1,12 +1,12 @@
 """
-run-training.py  —  ICR soundbank analysis pipeline
+run-extract-additive.py  —  ICR soundbank analysis pipeline
 ────────────────────────────────────────────────────
 Analyze a WAV soundbank and generate a JSON parameter file for ICR playback.
 
 Usage:
-    python run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
-    python run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand --out soundbanks/my-piano.json
-    python run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand --skip-eq --workers 8
+    python run-extract-additive.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
+    python run-extract-additive.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand --out soundbanks-additive/my-piano.json
+    python run-extract-additive.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand --skip-eq --workers 8
 
 Pipeline:  Extract partials → filter outliers → fit spectral EQ → export JSON
 
@@ -88,7 +88,7 @@ def _build_parser() -> argparse.ArgumentParser:
     analyze.add_argument("--bank",    required=True,
                          help="WAV bank directory (e.g. C:/SoundBanks/IthacaPlayer/pl-grand)")
     analyze.add_argument("--out",     default=None,
-                         help="Output JSON path (default: soundbanks/{bank_name}.json)")
+                         help="Output JSON path (default: soundbanks-additive/{bank_name}.json)")
     analyze.add_argument("--workers", type=int, default=None,
                          help="Parallel workers (default: CPU count)")
     analyze.add_argument("--skip-eq", action="store_true",

@@ -8,7 +8,7 @@ sub-fundamental gain clamping fix (clip boosts to 0 below f0*0.8), and
 recomputes eq_biquads + rms_gain.  Does NOT re-run extraction or LTASE.
 
 Usage:
-    python tools/reexport_eq.py soundbanks/pl-grand.json soundbanks/pl-grand.json
+    python tools/reexport_eq.py soundbanks-additive/pl-grand.json soundbanks-additive/pl-grand.json
 """
 
 import json

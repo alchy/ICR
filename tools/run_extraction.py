@@ -15,7 +15,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 def main():
     bank_dir = sys.argv[1] if len(sys.argv) > 1 else r"C:\SoundBanks\IthacaPlayer\pl-grand"
-    out_path = sys.argv[2] if len(sys.argv) > 2 else "soundbanks/pl-grand.json"
+    out_path = sys.argv[2] if len(sys.argv) > 2 else "soundbanks-additive/pl-grand.json"
     workers  = int(sys.argv[3]) if len(sys.argv) > 3 else 6
 
     from training.pipeline_simple import run

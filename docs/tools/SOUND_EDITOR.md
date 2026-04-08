@@ -282,7 +282,7 @@ The canvas shows `spectral_eq` (freq/gain) stored alongside `eq_biquads` in the 
 
 ## Workflow
 
-1. `python run-editor.py` — starts backend (:8000) + Vite (:5173), opens browser
+1. `python run-editor-additive.py` — starts backend (:8000) + Vite (:5173), opens browser
 2. Select soundbank from the dropdown (bottom bar) → **Load**
 3. Select a layer from the left panel (e.g. `A_noise`, `tau1_k1`)
 4. Spheres appear in 3D space — one per (MIDI, velocity) data point

@@ -17,19 +17,19 @@ spline treats ratios equally across the whole keyboard range.
 Usage examples:
 
   # Report only — see which layers have outliers
-  python tools/spline_fix.py --file-in soundbanks/params-vv-rhodes-icr-eval.json --report
+  python tools/spline_fix.py --file-in soundbanks-additive/params-vv-rhodes-icr-eval.json --report
 
   # Fix rms_gain outliers (main velocity-consistency problem)
-  python tools/spline_fix.py --file-in soundbanks/params-vv-rhodes-icr-eval.json \\
+  python tools/spline_fix.py --file-in soundbanks-additive/params-vv-rhodes-icr-eval.json \\
       --smooth-outliers 3.0 --layers rms_gain
 
   # Anchor good notes + smooth outliers across all layers
-  python tools/spline_fix.py --file-in soundbanks/params-vv-rhodes-icr-eval.json \\
+  python tools/spline_fix.py --file-in soundbanks-additive/params-vv-rhodes-icr-eval.json \\
       --anchor-midi 44 54 60 72 --smooth-outliers 3.0
 
   # Fill missing + smooth all
-  python tools/spline_fix.py --file-in soundbanks/params-vv-rhodes-icr-eval.json \\
-      --fill-missing --smooth-all --file-out soundbanks/fixed.json
+  python tools/spline_fix.py --file-in soundbanks-additive/params-vv-rhodes-icr-eval.json \\
+      --fill-missing --smooth-all --file-out soundbanks-additive/fixed.json
 """
 
 import argparse

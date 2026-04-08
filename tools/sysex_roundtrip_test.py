@@ -10,14 +10,14 @@ Usage
   python tools/sysex_roundtrip_test.py --list-ports
 
   # Run round-trip test (ICR.exe must be running and listening on the port)
-  python tools/sysex_roundtrip_test.py --port "loopMIDI Port 1" --bank soundbanks/params-vv-rhodes.json
+  python tools/sysex_roundtrip_test.py --port "loopMIDI Port 1" --bank soundbanks-additive/params-vv-rhodes.json
 
   # Skip sending SET_BANK (use bank already loaded in ICR)
-  python tools/sysex_roundtrip_test.py --port "loopMIDI Port 1" --bank soundbanks/params-vv-rhodes.json --skip-send
+  python tools/sysex_roundtrip_test.py --port "loopMIDI Port 1" --bank soundbanks-additive/params-vv-rhodes.json --skip-send
 
 ICR.exe startup reminder
 ────────────────────────
-  ICR.exe --core AdditiveSynthesisPianoCore --params soundbanks/params-vv-rhodes.json --port <midi_port_index>
+  ICR.exe --core AdditiveSynthesisPianoCore --params soundbanks-additive/params-vv-rhodes.json --port <midi_port_index>
 
 Fields compared (round-trip safe)
 ──────────────────────────────────

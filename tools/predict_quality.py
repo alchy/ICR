@@ -7,11 +7,11 @@ trained on blind listening test data.
 
 Usage:
     # Train model from scoring data + predict all notes
-    python tools/predict_quality.py soundbanks/pl-grand.json \
+    python tools/predict_quality.py soundbanks-additive/pl-grand.json \
         --scoring scoring-20260407-195301.json
 
     # Just predict (uses built-in coefficients from last training)
-    python tools/predict_quality.py soundbanks/pl-grand.json
+    python tools/predict_quality.py soundbanks-additive/pl-grand.json
 """
 
 import argparse
