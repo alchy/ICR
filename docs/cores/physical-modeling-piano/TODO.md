@@ -20,6 +20,11 @@
 - [x] Soundboard IR auto-load from `icr-config.json`
 - [x] Commuted synthesis (no internal soundboard modes, DspChain IR)
 - [x] JSON schema documentation
+- [x] C++ core rewritten from validated Python model (v0.3)
+- [x] Per-note params loaded from JSON bank in `load()`
+- [x] Dispersion delay compensation (correct tuning with allpass cascade)
+- [x] `sound-editor` renamed to `sound-editor-additive`
+- [x] `loadBankJson()` for SysEx SET_BANK support
 
 ### Findings from listening tests (R1-R8)
 - Triangle excitation → saw artifacts (sharp edges persist)
@@ -36,12 +41,13 @@
 
 ## Current iteration: single string in C++ core
 
-### P1. Port Python model to C++ PhysicalModelingPianoCore
-- [ ] Rewrite `initVoice()` with Fourier excitation from bank params
-- [ ] Rewrite `process()` with single-loop KS (no sign inversion)
-- [ ] Load per-note params from physical bank JSON in `load()`
-- [ ] Apply global GUI scalers to per-note bank values
-- [ ] Remove old dual-rail / hammer FD code
+### P1. Port Python model to C++ — DONE
+- [x] Rewrite `initVoice()` with Fourier excitation from bank params
+- [x] Rewrite `process()` with single-loop KS (no sign inversion)
+- [x] Load per-note params from physical bank JSON in `load()`
+- [x] GUI scalers: brightness, stiffness, sustain, odd_emphasis, gauge, spread
+- [x] Dispersion group delay compensation for correct tuning
+- [ ] Global scalers not yet applied at noteOn (stored but unused)
 
 ### P2. SysEx for physical bank
 - [ ] Define param IDs for core_id=0x02
