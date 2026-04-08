@@ -189,15 +189,10 @@ else()
         $<$<CONFIG:Release>:-O3 -DNDEBUG>)
 endif()
 
-# ── Copy soundbanks-additive/ next to each executable ──────────────────────────────────
+# ── Copy icr-config.json next to each executable ─────────────────────────────
+# Soundbanks are NOT copied — paths in icr-config.json point to the source tree.
 
 foreach(_target icr icrgui)
-    add_custom_command(TARGET ${_target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E copy_directory
-            ${CMAKE_SOURCE_DIR}/soundbanks-additive
-            $<TARGET_FILE_DIR:${_target}>/soundbanks-additive
-        COMMENT "Copying soundbanks-additive/ -> ${_target}/soundbanks-additive"
-    )
     add_custom_command(TARGET ${_target} POST_BUILD
         COMMAND ${CMAKE_COMMAND} -E copy_if_different
             ${CMAKE_SOURCE_DIR}/icr-config.json

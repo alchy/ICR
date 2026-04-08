@@ -113,6 +113,7 @@ struct GuiState {
     std::string active_core_name;
 
     // Soundbank selector (for AdditiveSynthesisPianoCore)
+    std::string soundbank_dir;                  // from engine config
     std::vector<std::string> soundbank_files;   // filenames (no path)
     std::string active_soundbank;               // currently loaded
 
@@ -155,9 +156,9 @@ static void glfwErrorCb(int /*err*/, const char* desc) {
 }
 
 // ── Soundbank file discovery ──────────────────────────────────────────────
-static std::vector<std::string> discoverSoundbankJsonFiles() {
+static std::vector<std::string> discoverSoundbankJsonFiles(const std::string& dir_path) {
     std::vector<std::string> result;
-    const char* dir = "soundbanks-additive";
+    const char* dir = dir_path.c_str();
 #ifdef _WIN32
     std::string pattern = std::string(dir) + "\\*.json";
     WIN32_FIND_DATAA fd;
@@ -756,7 +757,9 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         }
     }
     // Discover soundbank JSON files for AdditiveSynthesisPianoCore
-    gs.soundbank_files = discoverSoundbankJsonFiles();
+    gs.soundbank_dir = engine.coreConfigValue("AdditiveSynthesisPianoCore", "soundbank_dir");
+    if (gs.soundbank_dir.empty()) gs.soundbank_dir = "soundbanks-additive";
+    gs.soundbank_files = discoverSoundbankJsonFiles(gs.soundbank_dir);
 
     // Sync convolver state from engine (--ir may have loaded it)
     if (DspChain* dsp = engine.getDspChain()) {
@@ -884,7 +887,7 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                             bool sel = (fname == gs.active_soundbank);
                             if (ImGui::Selectable(fname.c_str(), sel)) {
                                 if (fname != gs.active_soundbank) {
-                                    std::string path = "soundbanks-additive/" + fname;
+                                    std::string path = gs.soundbank_dir + "/" + fname;
                                     auto* core = dynamic_cast<AdditiveSynthesisPianoCore*>(engine.core());
                                     if (core) {
                                         std::ifstream f(path);

@@ -7,7 +7,7 @@
     },
     "AdditiveSynthesisPianoCore": {
       "params_path": "",
-      "soundbank_dir": "soundbanks-additive"
+      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive"
     },
     "PhysicalModelingPianoCore": {
       "params_path": ""
