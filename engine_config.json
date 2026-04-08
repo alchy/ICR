@@ -1,0 +1,18 @@
+{
+  "default_core": "SamplerCore",
+  "cores": {
+    "SamplerCore": {
+      "params_path": "C:/SoundBanks/IthacaPlayer"
+    },
+    "AdditiveSynthesisPianoCore": {
+      "params_path": "",
+      "soundbank_dir": "soundbanks"
+    },
+    "PhysicalModelingPianoCore": {
+      "params_path": ""
+    },
+    "SineCore": {
+      "params_path": ""
+    }
+  }
+}

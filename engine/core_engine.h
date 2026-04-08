@@ -45,15 +45,27 @@ public:
 
     // ── Initialization ────────────────────────────────────────────────────────
 
+    // Load engine config JSON (per-core paths, default_core, etc).
+    // Call before initialize().  If not called, hardcoded fallbacks are used.
+    bool loadEngineConfig(const std::string& config_path, Logger& logger);
+
     // Phase 1: instantiate core by name, load params, apply optional config JSON.
     // midi_from / midi_to: optional MIDI note range filter (inclusive).
     // Notes outside [midi_from, midi_to] are not loaded into the core.
+    // If params_path is empty, uses the path from engine config (if loaded).
     bool initialize(const std::string& core_name,
                     const std::string& params_path,
                     const std::string& config_json_path,
                     Logger&            logger,
                     int                midi_from = 0,
                     int                midi_to   = 127);
+
+    /// Get engine config value for a core.  Returns empty string if not found.
+    std::string coreConfigValue(const std::string& core_name,
+                                const std::string& key) const;
+
+    /// Get default core name from engine config (empty if no config loaded).
+    const std::string& defaultCoreName() const { return default_core_name_; }
 
     // Switch the active core at runtime.  MIDI events are routed to the active
     // core only, but ALL instantiated cores continue to processBlock (for dozvuk).
@@ -157,6 +169,12 @@ private:
 
     DspChain                    dsp_;
     Logger                      logger_;
+
+    // Engine config (loaded from JSON, per-core settings)
+    std::string default_core_name_;
+    // core_name -> {key -> value} from engine_config.json
+    std::unordered_map<std::string,
+        std::unordered_map<std::string, std::string>> core_config_;
 
     // Master mix — atomic so GUI thread writes are safe vs RT reads
     std::atomic<float> master_gain_{1.f};

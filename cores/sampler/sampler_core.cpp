@@ -25,17 +25,16 @@
 REGISTER_SYNTH_CORE("SamplerCore", SamplerCore)
 
 // Default base directory for sample banks.
-// Can be overridden at build time via CMake: -DICR_SAMPLE_DIR="..."
-#ifndef ICR_SAMPLE_DIR
-#  ifdef _WIN32
-#    define ICR_SAMPLE_DIR "C:\\SoundBanks\\IthacaPlayer"
-#  elif defined(__APPLE__)
-#    define ICR_SAMPLE_DIR "/Users/Shared/SoundBanks/IthacaPlayer"
-#  else
-#    define ICR_SAMPLE_DIR "/opt/SoundBanks/IthacaPlayer"
-#  endif
+// Normally provided by engine_config.json via CoreEngine.
+// OS-specific fallback if no config is available.
+static const char* DEFAULT_SAMPLE_DIR =
+#ifdef _WIN32
+    "C:\\SoundBanks\\IthacaPlayer";
+#elif defined(__APPLE__)
+    "/Users/Shared/SoundBanks/IthacaPlayer";
+#else
+    "/opt/SoundBanks/IthacaPlayer";
 #endif
-static const char* DEFAULT_SAMPLE_DIR = ICR_SAMPLE_DIR;
 
 // -- Directory scanning helpers -----------------------------------------------
 

@@ -23,8 +23,10 @@
 #include "synth_core_registry.h"
 #include "midi_input.h"
 #include "../third_party/json.hpp"
+using json = nlohmann::json;
 
 #include <cstring>
+#include <fstream>
 #include <cmath>
 #include <cstdio>
 #include <stdexcept>
@@ -100,6 +102,61 @@ static void applyConfigJson(const std::string& path, ISynthCore* core,
                " (" + std::to_string(applied) + " params applied)");
 }
 
+// ── loadEngineConfig ──────────────────────────────────────────────────────────
+
+bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger) {
+    std::ifstream f(config_path);
+    if (!f.is_open()) {
+        logger.log("CoreEngine", LogSeverity::Warning,
+                   "Cannot open engine config: " + config_path);
+        return false;
+    }
+
+    json root;
+    try { f >> root; }
+    catch (const std::exception& e) {
+        logger.log("CoreEngine", LogSeverity::Error,
+                   std::string("Engine config parse error: ") + e.what());
+        return false;
+    }
+
+    if (root.contains("default_core") && root["default_core"].is_string())
+        default_core_name_ = root["default_core"].get<std::string>();
+
+    if (root.contains("cores") && root["cores"].is_object()) {
+        json cores_j = root["cores"];
+        for (json::iterator it = cores_j.begin(); it != cores_j.end(); ++it) {
+            std::string cn = it.key();
+            json cval = it.value();
+            if (!cval.is_object()) continue;
+            std::unordered_map<std::string, std::string> cfg;
+            for (json::iterator jt = cval.begin(); jt != cval.end(); ++jt) {
+                std::string pk = jt.key();
+                json pval = jt.value();
+                if (pval.is_string())
+                    cfg[pk] = pval.get<std::string>();
+                else if (pval.is_number())
+                    cfg[pk] = std::to_string(pval.get<double>());
+            }
+            core_config_[cn] = std::move(cfg);
+        }
+    }
+
+    logger.log("CoreEngine", LogSeverity::Info,
+               "Engine config loaded: " + config_path
+               + " (default_core=" + default_core_name_
+               + ", " + std::to_string(core_config_.size()) + " core configs)");
+    return true;
+}
+
+std::string CoreEngine::coreConfigValue(const std::string& core_name,
+                                         const std::string& key) const {
+    auto it = core_config_.find(core_name);
+    if (it == core_config_.end()) return "";
+    auto jt = it->second.find(key);
+    return (jt != it->second.end()) ? jt->second : "";
+}
+
 // ── initialize ────────────────────────────────────────────────────────────────
 
 bool CoreEngine::initialize(const std::string& core_name,
@@ -109,8 +166,14 @@ bool CoreEngine::initialize(const std::string& core_name,
                              int                midi_from,
                              int                midi_to) {
     logger_ = logger;
+    // Resolve params_path: CLI override > engine config > empty
+    std::string resolved_params = params_path;
+    if (resolved_params.empty())
+        resolved_params = coreConfigValue(core_name, "params_path");
+
     logger_.log("CoreEngine", LogSeverity::Info,
-                "Initializing core: " + core_name);
+                "Initializing core: " + core_name
+                + (resolved_params.empty() ? "" : " params=" + resolved_params));
 
     auto core = SynthCoreRegistry::instance().create(core_name);
     if (!core) {
@@ -121,7 +184,7 @@ bool CoreEngine::initialize(const std::string& core_name,
         return false;
     }
 
-    if (!core->load(params_path, (float)sample_rate_, logger_, midi_from, midi_to)) {
+    if (!core->load(resolved_params, (float)sample_rate_, logger_, midi_from, midi_to)) {
         logger_.log("CoreEngine", LogSeverity::Error, "Core load failed");
         return false;
     }
@@ -132,7 +195,7 @@ bool CoreEngine::initialize(const std::string& core_name,
     active_core_name_ = core_name;
     active_core_      = core.get();
     cores_[core_name] = std::move(core);
-    core_params_paths_[core_name] = params_path;
+    core_params_paths_[core_name] = resolved_params;
 
     delete[] buf_l_;
     delete[] buf_r_;
@@ -158,8 +221,14 @@ bool CoreEngine::switchCore(const std::string& core_name,
 
     // Lazy-instantiate: create core only on first use
     if (cores_.find(core_name) == cores_.end()) {
+        // Resolve params: CLI arg > engine config > empty
+        std::string resolved = params_path;
+        if (resolved.empty())
+            resolved = coreConfigValue(core_name, "params_path");
+
         logger_.log("CoreEngine", LogSeverity::Info,
-                    "Instantiating core: " + core_name);
+                    "Instantiating core: " + core_name
+                    + (resolved.empty() ? "" : " params=" + resolved));
 
         auto new_core = SynthCoreRegistry::instance().create(core_name);
         if (!new_core) {
@@ -168,14 +237,14 @@ bool CoreEngine::switchCore(const std::string& core_name,
             return false;
         }
 
-        if (!new_core->load(params_path, (float)sample_rate_, logger_)) {
+        if (!new_core->load(resolved, (float)sample_rate_, logger_)) {
             logger_.log("CoreEngine", LogSeverity::Error,
                         "Core load failed for " + core_name);
             return false;
         }
 
         cores_[core_name] = std::move(new_core);
-        core_params_paths_[core_name] = params_path;
+        core_params_paths_[core_name] = resolved;
     }
 
     // Switch active — no audio interruption. Old core's voices dozvuk naturally.

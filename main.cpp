@@ -104,7 +104,8 @@ int main(int argc, char* argv[]) {
     ICR_ENABLE_FTZ();  // prevent denormal stalls in biquad / IIR filters
     setvbuf(stdout, nullptr, _IONBF, 0);
 
-    std::string core_name    = "SineCore";
+    std::string engine_config;
+    std::string core_name;
     std::string params_json;
     std::string ir_path;
     std::string config_json;
@@ -127,6 +128,8 @@ int main(int argc, char* argv[]) {
             for (const auto& c : cores)
                 std::fprintf(stdout, "  %s\n", c.c_str());
             return 0;
+        } else if (a == "--engine-config" && i + 1 < argc) {
+            engine_config = argv[++i];
         } else if (a == "--core" && i + 1 < argc) {
             core_name = argv[++i];
         } else if (a == "--params" && i + 1 < argc) {
@@ -167,10 +170,20 @@ int main(int argc, char* argv[]) {
     }
 
     Logger logger(stdout, stdout);
-    logger.log("main", LogSeverity::Info, "IthacaCoreResonator — " + core_name);
 
     try {
         auto engine = std::make_unique<CoreEngine>();
+
+        if (!engine_config.empty())
+            engine->loadEngineConfig(engine_config, logger);
+
+        if (core_name.empty())
+            core_name = engine->defaultCoreName();
+        if (core_name.empty())
+            core_name = "SineCore";
+
+        logger.log("main", LogSeverity::Info, "IthacaCoreResonator — " + core_name);
+
         if (!engine->initialize(core_name, params_json, config_json, logger, midi_from, midi_to))
             return 1;
 
