@@ -4,7 +4,7 @@
     "version": 1,
     "sr": 48000,
     "model": "PhysicalModelingPianoCore",
-    "created": "2026-04-08T13:05:48",
+    "created": "2026-04-08T13:10:57",
     "description": "Default physical piano bank from listening test optimization (R1-R8)"
   },
   "notes": {
@@ -887,7 +887,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.29,
-      "n_disp_stages": 2,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m070": {
@@ -905,7 +905,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.26,
-      "n_disp_stages": 2,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m071": {
@@ -923,7 +923,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.24,
-      "n_disp_stages": 2,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m072": {
@@ -941,7 +941,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.21,
-      "n_disp_stages": 1,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m073": {
@@ -959,7 +959,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.19,
-      "n_disp_stages": 1,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m074": {
@@ -977,7 +977,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.16,
-      "n_disp_stages": 1,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m075": {
@@ -995,7 +995,7 @@
       "n_harmonics": 80,
       "n_strings": 3,
       "detune_cents": 1.13,
-      "n_disp_stages": 1,
+      "n_disp_stages": 0,
       "disp_coeff": -0.15
     },
     "m076": {

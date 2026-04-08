@@ -99,7 +99,9 @@ def generate_note_params(midi):
     # Number of allpass stages: proportional to B * N^2
     N_total = 48000.0 / f0
     beta = B * N_total * N_total
-    n_disp_stages = max(0, min(16, int(beta * 0.5)))
+    n_raw = int(beta * 0.5)
+    # Minimum 3 stages or 0 — single/dual allpass creates buzz artifacts
+    n_disp_stages = 0 if n_raw < 3 else min(n_raw, 16)
     disp_coeff = -0.15
 
     return {
