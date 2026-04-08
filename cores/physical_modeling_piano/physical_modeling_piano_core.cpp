@@ -339,10 +339,10 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
     // string tension / wave speed).  This replaces the incorrect F*dt*0.5.
     v.injection_scale = 1.f / std::max(2.f * np.f0_hz, 1.f);
 
-    // Output scale: bridge transmission k_t is very small (0.002-0.04),
-    // so the raw output from the waveguide is ~40-50 dB below unity.
-    // Compensate to reach audible levels (~0.3-0.7 peak for ff).
-    v.output_scale = 1.f / std::max(np.impedance_ratio * 2.f, 0.001f);
+    // Output scale: normalize waveguide output to audible range.
+    // Empirical: waveguide bridge output peaks around 0.01-0.1;
+    // scale to reach ~0.3-0.5 peak for mid-velocity.
+    v.output_scale = 0.5f;
 
     // -- Setup strings --------------------------------------------------------
 
@@ -365,24 +365,24 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
         float filter_delay = physics::loss_filter_delay(s.loss)
                            + physics::dispersion_delay(s.dispersion);
 
-        // Delay lines -- split total delay equally between right and left
+        // Single-loop delay: total round-trip = sr/f0 - filter_delay.
+        // We use delay_r as the main loop and delay_l as a minimal 2-sample
+        // buffer for the bridge reflection path.  This avoids the tuning
+        // error from splitting the delay into two equal halves.
         auto tuning = physics::compute_delay_tuning(f0, sr, filter_delay);
-        int half_len = std::max(2, tuning.len / 2);
 
-        // Right-going: nut -> bridge
-        physics::DelayTuning tr = { half_len, tuning.ap_a };
-        physics::delay_reset(s.delay_r, tr);
+        // Main loop delay (nut -> bridge -> nut)
+        physics::delay_reset(s.delay_r, tuning);
 
-        // Left-going: bridge -> nut (remainder of delay)
-        int left_len = std::max(2, tuning.len - half_len);
-        physics::DelayTuning tl = { left_len, tuning.ap_a };
+        // Bridge reflection path (minimal, just for topology)
+        physics::DelayTuning tl = { 2, 0.f };
         physics::delay_reset(s.delay_l, tl);
 
         // Bridge junction
         s.junction = physics::compute_junction(np.impedance_ratio);
 
         // Hammer strike position (as tap in delay_r)
-        s.strike_tap = std::max(1, (int)(half_len * np.x0_ratio));
+        s.strike_tap = (std::max)(1, (int)(tuning.len * np.x0_ratio));
         s.u_at_hammer = 0.f;
     }
 
@@ -442,9 +442,7 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples,
         if (hammer.in_contact) {
             for (int si = 0; si < n_strings; si++) {
                 PhysicsString& s = strings[si];
-                float u = physics::delay_read(s.delay_r, s.strike_tap)
-                        + physics::delay_read(s.delay_l,
-                              std::max(0, s.delay_l.len - 1 - s.strike_tap));
+                float u = physics::delay_read(s.delay_r, s.strike_tap);
                 s.u_at_hammer = u;
                 u_avg += u;
             }
@@ -457,47 +455,41 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples,
         //   injection = F / n_strings / (2*Z)  ≈  F / n_strings * injection_scale
         float injection_per_string = hammer_force * injection_scale;
 
-        // Step 3: Process each string waveguide
-        float bridge_force_total = 0.f;
+        // Step 3: Process each string — single-loop Karplus-Strong topology
+        //
+        //   delay_r is the full round-trip delay line (sr/f0 samples).
+        //   Signal path per sample:
+        //     1. Read oldest sample from delay (= string output at bridge)
+        //     2. Apply loss filter (frequency-dependent damping)
+        //     3. Apply dispersion (inharmonicity allpass)
+        //     4. Negate (rigid nut reflection, bridge reflection combined)
+        //     5. Add hammer injection
+        //     6. Write back into delay
+        //     7. Output = bridge sample (pre-filter)
+        //
+        float bridge_out_total = 0.f;
 
         for (int si = 0; si < n_strings; si++) {
             PhysicsString& s = strings[si];
 
-            // Read the wave arriving at the bridge (end of delay_r)
-            float wave_at_bridge = physics::delay_read_allpass(
-                s.delay_r, s.delay_r.len - 1);
+            // Read oldest sample (full round-trip delay = len samples)
+            float bridge_sample = physics::delay_read(s.delay_r, s.delay_r.len - 1);
 
-            // Bridge junction: reflection + transmission
-            float reflected = s.junction.k_r * wave_at_bridge;
-            float transmitted = s.junction.k_t * wave_at_bridge;
-            bridge_force_total += transmitted;
+            // Output: bridge radiation (before filtering)
+            bridge_out_total += bridge_sample;
 
-            // Read wave arriving at nut (end of delay_l)
-            float wave_at_nut = physics::delay_read_allpass(
-                s.delay_l, s.delay_l.len - 1);
+            // Karplus-Strong loop: low-pass filter + dispersion + inject
+            // No sign inversion — single delay line means the wave period
+            // equals len (not 2*len as with dual-rail + inversion).
+            float looped = physics::loss_filter_tick(bridge_sample, s.loss);
+            looped = physics::dispersion_tick(looped, s.dispersion);
+            looped += injection_per_string;
 
-            // Nut reflection: rigid termination -> invert
-            float from_nut = -wave_at_nut;
-
-            // Apply loss filter (frequency-dependent damping)
-            from_nut = physics::loss_filter_tick(from_nut, s.loss);
-
-            // Apply dispersion (inharmonicity)
-            from_nut = physics::dispersion_tick(from_nut, s.dispersion);
-
-            // Write into delay lines:
-            //   delay_r input = from_nut + hammer injection
-            //   delay_l input = reflected from bridge
-            physics::delay_write(s.delay_r, from_nut + injection_per_string);
-            physics::delay_write(s.delay_l, reflected);
+            physics::delay_write(s.delay_r, looped);
         }
 
         // -- Output: direct string radiation via bridge ───────────────────
-        // Soundboard coloring comes from the DspChain convolver (real
-        // soundboard IR) rather than the simplified mode bank.
-        // This is the "commuted synthesis" approach: waveguide produces
-        // a dry string signal, external IR adds body + room.
-        float total = bridge_force_total * string_mix * output_scale;
+        float total = bridge_out_total * string_mix * output_scale;
 
         // Apply gain and gates
         total *= gain * env_gate;
