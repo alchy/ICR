@@ -11,6 +11,7 @@ import { SplineEditor }   from "./editor/SplineEditor.js";
 import { LayerBrowser }   from "./editor/LayerBrowser.js";
 import { VelSelector }    from "./editor/VelSelector.js";
 import { NoteInspector }  from "./editor/NoteInspector.js";
+import { NoteCompare }    from "./editor/NoteCompare.js";
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -25,6 +26,7 @@ const browser     = new LayerBrowser(
 );
 const editor      = new SplineEditor(space, browser, velSelector);
 const inspector   = new NoteInspector(document.getElementById("note-inspector-container"));
+const noteCompare = new NoteCompare(document.getElementById("note-compare-container"));
 
 // Expose to inline HTML handlers
 window.app = {

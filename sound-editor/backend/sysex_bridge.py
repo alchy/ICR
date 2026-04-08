@@ -192,6 +192,20 @@ class SysExBridge:
         self._send_raw(CMD_PING, [])  # PING has no core_id
         return True
 
+    def note_on(self, midi: int, velocity: int = 80):
+        """Send MIDI noteOn via the open port (for audition)."""
+        if not self._port:
+            raise RuntimeError("MIDI port not open")
+        msg = mido.Message("note_on", note=midi, velocity=velocity)
+        self._port.send(msg)
+
+    def note_off(self, midi: int):
+        """Send MIDI noteOff via the open port."""
+        if not self._port:
+            raise RuntimeError("MIDI port not open")
+        msg = mido.Message("note_off", note=midi, velocity=0)
+        self._port.send(msg)
+
     def export_bank(self, path: str):
         """
         Ask ICR to export its current in-memory bank to *path* (absolute path

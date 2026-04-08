@@ -12,7 +12,10 @@ Run:
 from __future__ import annotations
 
 import json
+import math
 import os
+import threading
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -99,6 +102,25 @@ class SysExPartialRequest(BaseModel):
 class SysExMasterRequest(BaseModel):
     param_key: str
     value:     float
+
+class AuditionRequest(BaseModel):
+    midi:     int
+    velocity: int   = 80
+    duration_ms: int = 500   # 0 = noteOn only (manual noteOff)
+
+class CompareRequest(BaseModel):
+    src_midi: int
+    src_vel:  int
+    dst_midi: int
+    dst_vel:  int
+
+class CorrectRequest(BaseModel):
+    src_midi:    int
+    src_vel:     int
+    dst_midi:    int
+    dst_vel:     int
+    corrections: dict[str, float]   # param_key -> correction_pct (0=base, +5=5% above)
+    copy_missing_partials: bool = False
 
 class EqUpdateRequest(BaseModel):
     freqs_hz:  list[float]
@@ -563,6 +585,196 @@ def sysex_ping():
         raise HTTPException(400, "MIDI port not connected")
     bridge.ping()
     return {"ping": True}
+
+
+# ── MIDI Audition ─────────────────────────────────────────────────────────────
+
+@app.post("/midi/audition")
+def midi_audition(req: AuditionRequest):
+    """Send noteOn, optionally wait duration_ms then noteOff.
+
+    duration_ms=0 sends noteOn only (caller must send /midi/audition/off later).
+    """
+    if not bridge.is_open():
+        raise HTTPException(400, "MIDI port not connected")
+    bridge.note_on(req.midi, req.velocity)
+    if req.duration_ms > 0:
+        def _off():
+            time.sleep(req.duration_ms / 1000.0)
+            try:
+                bridge.note_off(req.midi)
+            except Exception:
+                pass
+        threading.Thread(target=_off, daemon=True).start()
+    return {"sent": True, "midi": req.midi, "velocity": req.velocity}
+
+@app.post("/midi/audition/off")
+def midi_audition_off(midi: int = 60):
+    """Send noteOff for a specific MIDI note."""
+    if not bridge.is_open():
+        raise HTTPException(400, "MIDI port not connected")
+    bridge.note_off(midi)
+    return {"sent": True, "midi": midi}
+
+
+# ── Note Compare & Correct ───────────────────────────────────────────────────
+
+def _compare_notes(src: dict, dst: dict) -> list[dict]:
+    """Compute per-parameter base + deviation between source and destination.
+
+    Base = expected destination value if it followed source's proportional
+    relationships to f0.  Deviation = % difference from base.
+    """
+    src_f0 = src.get("f0_hz", 440.0)
+    dst_f0 = dst.get("f0_hz", 440.0)
+    f0_ratio = dst_f0 / src_f0 if src_f0 > 0 else 1.0
+
+    results = []
+
+    # Scalar params — some scale with f0, some don't
+    scale_with_f0 = {"f0_hz", "noise_centroid_hz"}
+    no_scale = {"B", "A_noise", "attack_tau", "rms_gain", "phi_diff",
+                "stereo_width", "rise_tau"}
+
+    for key in list(scale_with_f0) + sorted(no_scale):
+        if key not in src and key not in dst:
+            continue
+        src_val = src.get(key, 0.0)
+        dst_val = dst.get(key, 0.0)
+        base = src_val * f0_ratio if key in scale_with_f0 else src_val
+        dev_pct = ((dst_val / base) - 1.0) * 100.0 if abs(base) > 1e-12 else 0.0
+        results.append({
+            "key": key, "level": "note",
+            "src": src_val, "dst": dst_val, "base": base,
+            "deviation_pct": round(dev_pct, 2),
+        })
+
+    # Partial params
+    src_partials = src.get("partials", [])
+    dst_partials = dst.get("partials", [])
+    dst_k_map = {p.get("k", i+1): i for i, p in enumerate(dst_partials)}
+
+    freq_scale = {"f_hz"}   # scales with f0
+    amp_keep = {"A0", "a1", "phi", "beat_hz"}  # no f0 scaling
+    time_keep = {"tau1", "tau2"}  # no scaling
+
+    for si, sp in enumerate(src_partials):
+        k = sp.get("k", si + 1)
+        di = dst_k_map.get(k)
+        missing = (di is None)
+
+        for pkey in ["f_hz", "A0", "tau1", "tau2", "a1", "beat_hz"]:
+            src_pval = sp.get(pkey, 0.0)
+            if missing:
+                base = src_pval * f0_ratio if pkey in freq_scale else src_pval
+                results.append({
+                    "key": pkey, "level": "partial", "k": k,
+                    "src": src_pval, "dst": None, "base": base,
+                    "deviation_pct": None, "missing": True,
+                })
+            else:
+                dp = dst_partials[di]
+                dst_pval = dp.get(pkey, 0.0)
+                base = src_pval * f0_ratio if pkey in freq_scale else src_pval
+                dev = ((dst_pval / base) - 1.0) * 100.0 if abs(base) > 1e-12 else 0.0
+                results.append({
+                    "key": pkey, "level": "partial", "k": k,
+                    "src": src_pval, "dst": dst_pval, "base": base,
+                    "deviation_pct": round(dev, 2), "missing": False,
+                })
+
+    return results
+
+
+@app.post("/editor/compare")
+def editor_compare(req: CompareRequest):
+    """Compare source and destination notes.
+
+    Returns per-parameter table with base values and deviations.
+    """
+    src = store.get_note(req.src_midi, req.src_vel)
+    dst = store.get_note(req.dst_midi, req.dst_vel)
+    if not src:
+        raise HTTPException(404, f"Source note m{req.src_midi:03d}_vel{req.src_vel} not found")
+    if not dst:
+        raise HTTPException(404, f"Destination note m{req.dst_midi:03d}_vel{req.dst_vel} not found")
+
+    return {
+        "src": {"midi": req.src_midi, "vel": req.src_vel, "f0_hz": src.get("f0_hz")},
+        "dst": {"midi": req.dst_midi, "vel": req.dst_vel, "f0_hz": dst.get("f0_hz")},
+        "f0_ratio": dst.get("f0_hz", 440) / src.get("f0_hz", 440),
+        "params": _compare_notes(src, dst),
+    }
+
+
+@app.post("/editor/correct")
+def editor_correct(req: CorrectRequest):
+    """Apply proportional corrections to destination note.
+
+    corrections: { "A0_k3": 0.0, "tau1_k1": 5.0 }
+      key format: "param" for note-level, "param_kN" for partial-level
+      value: 0.0 = set to base (100% correction), +5.0 = 5% above base, etc.
+
+    copy_missing_partials: if True, partials present in source but not in
+    destination are created with f0-proportional frequency.
+    """
+    src = store.get_note(req.src_midi, req.src_vel)
+    dst = store.get_note(req.dst_midi, req.dst_vel)
+    if not src or not dst:
+        raise HTTPException(404, "Source or destination note not found")
+
+    src_f0 = src.get("f0_hz", 440.0)
+    dst_f0 = dst.get("f0_hz", 440.0)
+    f0_ratio = dst_f0 / src_f0 if src_f0 > 0 else 1.0
+
+    freq_keys = {"f_hz", "f0_hz", "noise_centroid_hz"}
+    applied = 0
+
+    for corr_key, pct in req.corrections.items():
+        # Parse key: "tau1_k3" -> partial key "tau1", k=3
+        # or "rms_gain" -> note-level
+        if "_k" in corr_key:
+            parts = corr_key.rsplit("_k", 1)
+            pkey = parts[0]
+            k = int(parts[1])
+            # Find source partial
+            src_p = next((p for p in src.get("partials", [])
+                          if p.get("k") == k), None)
+            if not src_p:
+                continue
+            src_val = src_p.get(pkey, 0.0)
+            base = src_val * f0_ratio if pkey in freq_keys else src_val
+            corrected = base * (1.0 + pct / 100.0)
+            # Write to destination partial
+            dst_partials = dst.get("partials", [])
+            dst_p = next((p for p in dst_partials if p.get("k") == k), None)
+            if dst_p:
+                dst_p[pkey] = corrected
+                applied += 1
+        else:
+            pkey = corr_key
+            src_val = src.get(pkey, 0.0)
+            base = src_val * f0_ratio if pkey in freq_keys else src_val
+            corrected = base * (1.0 + pct / 100.0)
+            dst[pkey] = corrected
+            applied += 1
+
+    # Copy missing partials
+    copied = 0
+    if req.copy_missing_partials:
+        dst_partials = dst.setdefault("partials", [])
+        dst_ks = {p.get("k") for p in dst_partials}
+        for sp in src.get("partials", []):
+            k = sp.get("k")
+            if k and k not in dst_ks:
+                new_p = dict(sp)  # copy all fields
+                new_p["f_hz"] = sp.get("f_hz", 0.0) * f0_ratio
+                dst_partials.append(new_p)
+                copied += 1
+        # Sort by k
+        dst_partials.sort(key=lambda p: p.get("k", 0))
+
+    return {"applied": applied, "copied_partials": copied}
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

@@ -81,4 +81,25 @@ export default {
     getEq:           (midi, vel)                      => get(`/eq/${midi}/${vel}`),
     updateEq:        (midi, vel, freqs_hz, gains_db)  =>
         post(`/eq/${midi}/${vel}`, { freqs_hz, gains_db }),
+
+    // ── MIDI Audition ────────────────────────────────────────────────────────
+    audition:        (midi, velocity = 80, duration_ms = 500) =>
+        post("/midi/audition", { midi, velocity, duration_ms }),
+    auditionOff:     (midi) =>
+        post(`/midi/audition/off?midi=${midi}`),
+
+    // ── Note Compare & Correct ───────────────────────────────────────────────
+    compareNotes:    (srcMidi, srcVel, dstMidi, dstVel) =>
+        post("/editor/compare", {
+            src_midi: srcMidi, src_vel: srcVel,
+            dst_midi: dstMidi, dst_vel: dstVel
+        }),
+    correctNote:     (srcMidi, srcVel, dstMidi, dstVel, corrections,
+                      copyMissing = false) =>
+        post("/editor/correct", {
+            src_midi: srcMidi, src_vel: srcVel,
+            dst_midi: dstMidi, dst_vel: dstVel,
+            corrections,
+            copy_missing_partials: copyMissing
+        }),
 };
