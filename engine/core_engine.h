@@ -156,6 +156,8 @@ private:
     std::atomic<int> midi_r_{0};
     void pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcept;
 
+    void loadIrFromConfig(const std::string& core_name);
+
     static void audioCallback(ma_device* device, void* output,
                                const void* input, uint32_t frame_count);
     void processBlock(float* out_l, float* out_r, int n_samples) noexcept;

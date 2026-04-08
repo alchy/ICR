@@ -225,11 +225,26 @@ bool CoreEngine::initialize(const std::string& core_name,
     float bps = (float)sample_rate_ / (float)block_size_;
     peak_decay_coeff_ = std::pow(10.f, -1.f / bps);  // -20 dB/s
 
+    // Auto-load soundboard IR from config (if not already loaded via --ir)
+    loadIrFromConfig(core_name);
+
     logger_.log("CoreEngine", LogSeverity::Info,
         std::string("Ready. Core=") + active_core_->coreName() +
         " SR=" + std::to_string(sample_rate_) +
         " block=" + std::to_string(block_size_));
     return true;
+}
+
+void CoreEngine::loadIrFromConfig(const std::string& core_name) {
+    std::string ir = coreConfigValue(core_name, "ir_path");
+    if (ir.empty()) return;
+    // Don't reload if same IR is already loaded
+    if (dsp_.isConvolverLoaded() && dsp_.convolver().isEnabled()) return;
+    if (dsp_.loadConvolverIR(ir, 0)) {
+        dsp_.setConvolverEnabled(true);
+        logger_.log("CoreEngine", LogSeverity::Info,
+                    "Auto-loaded IR from config: " + ir);
+    }
 }
 
 // ── switchCore ────────────────────────────────────────────────────────────────
@@ -269,6 +284,9 @@ bool CoreEngine::switchCore(const std::string& core_name,
     // Switch active — no audio interruption. Old core's voices dozvuk naturally.
     active_core_name_ = core_name;
     active_core_      = cores_[core_name].get();
+
+    // Load IR for the new active core (if configured and not already loaded)
+    loadIrFromConfig(core_name);
 
     logger_.log("CoreEngine", LogSeverity::Info,
         std::string("Active core: ") + active_core_->coreName()
