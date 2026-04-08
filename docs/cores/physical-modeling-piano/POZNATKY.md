@@ -334,10 +334,144 @@ half-sine nemůže reprodukovat.
 ```bash
 # v1 (half-sine hammer):
 python tools-physical/generate_teng.py \
-    --bank soundbanks-physical/physical-piano-04081305.json
+    --bank soundbanks-physical/teng-v2-default.json
 
-# v2 (Chaigne-Askenfelt hammer):
+# v2 (Chaigne-Askenfelt hammer, s bankou nebo bez):
 python tools-physical/generate_teng_v2.py \
-    --bank soundbanks-physical/physical-piano-04081305.json \
     --midi 60 64 72 --vel 0.3 0.6 0.9
 ```
+
+---
+
+## Multi-string: beating, two-stage decay, stereo
+
+### Jak to řeší Teng
+
+Teng vždy spouští **3 paralelní waveguidy** na jednu notu. Liší se pouze
+tuning allpass koeficientem:
+
+```matlab
+C = (1-P)/(1+P);                        % base tuning
+Hfd1 = (C + z⁻¹) / (1 + C*z⁻¹);        % struna 1: přesné ladění
+Hfd2 = (C*(1+offtune) + z⁻¹) / ...      % struna 2: mírně vyšší
+Hfd3 = (C*(1-offtune) + z⁻¹) / ...      % struna 3: mírně nižší
+```
+
+Všechno ostatní je sdílené — stejný delay line, loss filter, dispersion
+cascade, hammer force. Výstupy se prostě sečtou (mono):
+
+```matlab
+output = output1 + output2 + output3;
+```
+
+Parametr `offtune` závisí na registru:
+
+| Rozsah    | offtune | Beating       |
+|-----------|---------|---------------|
+| > 3000 Hz | 0.01    | minimální     |
+| > 261 Hz  | 0.06    | mírný         |
+| > 120 Hz  | 0.18    | výrazný       |
+| < 120 Hz  | 0.25    | silný (bas)   |
+
+### Co Teng nedělá
+
+- **Žádná vazba mezi strunami** — žádný feedback ze sumy zpět do waveguidů.
+  Zmíní to jako možné vylepšení (Bank 2000), ale neimplementuje.
+- **Vždy 3 struny** — nerozlišuje 1/2/3 podle registru.
+- **Stejná inharmonicita** — všechny 3 struny sdílejí identickou dispersion
+  cascade (reálně by se B mírně lišilo).
+- **Mono** — prostý součet, žádné stereo.
+
+### Naše řešení (v2)
+
+V `render_note()` se spouští `_dual_rail_string()` N-krát:
+
+```python
+for si in range(n_strings):          # 1, 2 nebo 3
+    f0_str = f0 * 2^(offset/1200)    # ±detune_cents
+    pan = 0.5 + spread * norm         # stereo L/C/R
+    mono = _dual_rail_string(f0_str, hammer, ...)
+    output_L += cos(pan) * mono
+    output_R += sin(pan) * mono
+```
+
+| Aspekt            | Teng              | Naše v2                      |
+|-------------------|-------------------|------------------------------|
+| Počet strun       | vždy 3            | 1/2/3 podle registru         |
+| Detuning metoda   | tuning AP coeff   | přímo f0 ±cents              |
+| Detuning jednotky | bezrozměrný coeff | centy (hudebně intuitivní)   |
+| Coupling          | žádný             | žádný                        |
+| Disperze / struna | sdílená           | sdílená (stejné B)           |
+| Výstup            | mono sum          | stereo panning L/C/R         |
+| Hammer            | sdílený (1 force) | sdílený (1 Chaigne force)    |
+
+### Proč Teng mění tuning AP a ne f0?
+
+Teng mění jen **frakční delay** (tuning allpass koeficient `C`), ne
+celočíselnou délku delay line. To znamená:
+- Detuning je velmi malý (zlomek půltónu)
+- Delay line `M` je stejná pro všechny 3 struny
+- V Matlabu elegantní — celý waveguide je jedna transfer function
+
+My měníme přímo f0 → jiná M → každá struna má vlastní delay line.
+Výsledek je ekvivalentní, ale flexibilnější (detuning v centech).
+
+### Two-stage decay — proč multi-string funguje
+
+Beating 3 rozladěných strun přirozeně vytváří dvoustupňový decay:
+
+```
+Amplitude
+  │╲
+  │ ╲         ← fáze 1: struny ve fázi, konstruktivní
+  │  ╲           interference → hlasitý attack
+  │   ╲╲
+  │    ╲ ╲    ← přechod: drift z fáze → rychlý pokles
+  │     ╲  ╲
+  │      ╲   ────────────  ← fáze 2: struny nezávisle,
+  │       ╲                   pomalý dozvuk
+  └─────────────────────── time
+    0    0.5s    1s    2s
+```
+
+1. **Začátek**: struny ve fázi → konstruktivní interference → hlasitý zvuk
+2. **Po ~200-500ms**: drift z fáze → destruktivní interference → rychlý pokles
+3. **Potom**: struny kmitají nezávisle → pomalý tail ze zbývající energie
+
+To napodobuje reálný efekt vertikální/horizontální polarizace (Bridge
+přenáší vertikální vibrace efektivněji → rychlý decay; horizontální
+zůstávají a doznívají pomaleji). Fyzikální mechanismus je jiný, ale
+výsledný zvukový efekt je velmi podobný.
+
+### Stereo z multi-string
+
+Reálné piano má 3 struny fyzicky vedle sebe na bridge → každá budí
+soundboard na mírně jiném místě → mírný stereo efekt. My to modelujeme
+panováním strun:
+
+- Struna 0: pan = 0.5 - spread/2 (mírně vlevo)
+- Struna 1: pan = 0.5 (střed)
+- Struna 2: pan = 0.5 + spread/2 (mírně vpravo)
+
+S `stereo_spread=0.3` (default): subtle stereo šíře. S `1.0`: plný L/R.
+
+---
+
+## TODO: další kroky (po 2026-04-08 session)
+
+### Hotové komponenty, čekají na propojení
+
+- **Soundboard IR konvoluce** — `tools/extract_soundboard_ir.py` existuje.
+  Teng konvolvuje výstup waveguidu s nahraným IR těla piana: "warmer and
+  less metallic, with realistic attack transient". Stačí propojit s v2
+  renderem: `output = convolve(output, ir)`.
+
+### Další vylepšení (seřazeno podle dopadu)
+
+1. **Soundboard IR** — quick win, velký dopad na warmth a body
+2. **Velocity-dependent hammer hardness** — K a p z Chaigne tabulky se
+   mění s velocity, ne jen v0. Forte = tvrdší plsť = ostřejší spektrum.
+3. **String coupling** — feedback ze sumy zpět do waveguidů (Bank 2000).
+   Lepší two-stage decay než jen z detuningu.
+4. **Damper modeling** — sympathetic resonance při sustain pedálu.
+5. **C++ implementace** — přepis dual-rail + Chaigne hammer do C++ core.
