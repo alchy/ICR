@@ -342,7 +342,7 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
     // Output scale: normalize waveguide output to audible range.
     // Empirical: waveguide bridge output peaks around 0.01-0.1;
     // scale to reach ~0.3-0.5 peak for mid-velocity.
-    v.output_scale = 3.f;
+    v.output_scale = 1.5f;
 
     // -- Setup strings --------------------------------------------------------
 
@@ -420,11 +420,11 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
             }
 
             // Component 2: noise burst (broadband attack texture)
-            // Exponentially decaying noise, ~1ms duration
-            int noise_len = (std::max)(10, (int)(0.001f * sr));
+            // Longer duration (~3ms) and stronger for percussive "thwack"
+            int noise_len = (std::max)(20, (int)(0.003f * sr));
             std::mt19937 exc_rng((unsigned)(midi * 1000 + si * 137 + velocity));
             std::normal_distribution<float> ndist(0.f, 1.f);
-            float noise_amp = amp * 0.3f;  // noise is quieter than impulse
+            float noise_amp = amp * 0.7f;  // substantial noise for attack character
             for (int i = 0; i < noise_len; i++) {
                 float env = std::exp(-5.f * (float)i / (float)noise_len);
                 int idx = (s.delay_r.write_ix + strike + i) % s.delay_r.len;
@@ -444,9 +444,9 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
     // Decay tau: bass ~8 ms, treble ~3 ms (short percussive burst).
     {
         float vel_norm = (float)velocity / 127.f;
-        v.noise_amp   = 0.15f * vel_norm * vel_norm;  // quadratic velocity curve
+        v.noise_amp   = 0.6f * vel_norm * vel_norm;   // strong hammer noise
         v.noise_env   = 1.f;
-        float noise_tau_ms = 8.f - (float)(midi - 21) / 87.f * 5.f;  // 8→3 ms
+        float noise_tau_ms = 15.f - (float)(midi - 21) / 87.f * 10.f;  // 15→5 ms (longer)
         v.noise_decay = dsp::decay_coeff(noise_tau_ms * 0.001f, sr);
         // Bandpass centroid: 1.5 kHz (bass) to 5 kHz (treble)
         float centroid = 1500.f + (float)(midi - 21) / 87.f * 3500.f;

@@ -510,10 +510,11 @@ inline int default_n_strings(int midi) {
     return (midi <= 27) ? 1 : (midi <= 48) ? 2 : 3;
 }
 
-/// Detuning in cents: larger for bass (1-2 cents), smaller for treble (~0.1).
+/// Detuning in cents: larger for audible beating.
+///   Bass: ~3 cents (slow beating), Treble: ~0.5 cents (fast shimmer)
 inline float default_detune_cents(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 1.5f - t * 1.4f;  // 1.5 -> 0.1 cents
+    return 3.f - t * 2.5f;  // 3 -> 0.5 cents
 }
 
 /// Impedance ratio Z_s/Z_b: governs sustain length and coupling.
@@ -526,20 +527,21 @@ inline float default_impedance_ratio(int midi) {
     return 0.0002f + t * 0.0018f;
 }
 
-/// T60 of fundamental (s): bass ~15s, middle ~5s, treble ~1.5s.
-/// These are -60dB decay times (time to drop 60 dB).
+/// T60 of fundamental (s): bass ~18s, middle ~8s, treble ~2s.
+/// Longer than real piano — soundboard IR provides additional damping.
 inline float default_tau_fund(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 15.f - t * 13.5f;  // 15 -> 1.5
+    return 18.f - t * 16.f;  // 18 -> 2
 }
 
-/// T60 at Nyquist (s): how fast the brightest partials decay.
-/// Must be short enough to create spectral tilt (piano warmth) but
-/// not so short that the tone has no brightness at all.
-///   Bass: ~0.08s, treble: ~0.03s
+/// T60 at Nyquist (s): much gentler than before — the waveguide should
+/// produce a bright, harmonically rich tone. Soundboard IR provides
+/// the warm piano character.
+///   Bass: ~0.25s, treble: ~0.08s
+/// Targets ~20 dB spectral tilt between fundamental and k=15 after 1s.
 inline float default_tau_high(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 0.08f - t * 0.05f;  // 80ms -> 30ms
+    return 0.25f - t * 0.17f;  // 250ms -> 80ms
 }
 
 /// Inharmonicity B: bass ~5e-4, treble ~5e-5.
