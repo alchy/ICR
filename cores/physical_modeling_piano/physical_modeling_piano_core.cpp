@@ -342,7 +342,7 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
     // Output scale: normalize waveguide output to audible range.
     // Empirical: waveguide bridge output peaks around 0.01-0.1;
     // scale to reach ~0.3-0.5 peak for mid-velocity.
-    v.output_scale = 0.5f;
+    v.output_scale = 3.f;
 
     // -- Setup strings --------------------------------------------------------
 
@@ -393,29 +393,45 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
         s.u_at_hammer = 0.f;
     }
 
-    // -- Excitation: raised-cosine pulse written into delay line ─────────────
-    // Replaces per-sample hammer model. The raised-cosine simulates the
-    // felt hammer's low-pass character: wider pulse = softer hammer = darker.
-    //   Width: bass ~15 samples (~0.3 ms), treble ~3 samples (~0.06 ms)
-    //   Position: 1/8 of string length (suppresses k=8,16,24 harmonics)
-    //   Amplitude: scaled by hammer velocity (from MIDI velocity)
+    // -- Excitation: hammer impulse + noise burst ────────────────────────────
+    // Two components written into each string's delay line:
+    //   1) Sharp impulse at strike position — provides the initial transient
+    //      and harmonic content. Shaped by a short raised-cosine whose width
+    //      models felt softness (wider = darker).
+    //   2) Filtered noise burst — adds the "thwack" texture and broadband
+    //      energy that makes the attack feel percussive.
+    // Each string gets slightly different noise (random phase) for natural
+    // beating between unison strings.
     {
         float hammer_vel = physics::midi_to_hammer_velocity(velocity);
-        float amp = hammer_vel * 0.15f;  // scale to reasonable level
+        float amp = hammer_vel * 0.25f;
+        float t_midi = (float)(midi - 21) / 87.f;  // 0..1 across keyboard
 
         for (int si = 0; si < np.n_strings; si++) {
             PhysicsString& s = v.strings[si];
-            int width = (std::max)(3, (int)(0.0003f * sr * (1.f + (float)midi / 127.f)));
             int strike = (std::max)(1, (int)(s.delay_r.len * np.x0_ratio));
 
-            for (int i = 0; i < width; i++) {
+            // Component 1: short impulse (2-5 samples)
+            int imp_width = (std::max)(2, (int)(5.f - t_midi * 3.f));
+            for (int i = 0; i < imp_width; i++) {
                 int idx = (s.delay_r.write_ix + strike + i) % s.delay_r.len;
-                float pulse = 0.5f * (1.f - std::cos(dsp::TAU * (float)i / (float)width));
+                float pulse = 0.5f * (1.f - std::cos(dsp::TAU * (float)i / (float)imp_width));
                 s.delay_r.buf[idx] += amp * pulse;
+            }
+
+            // Component 2: noise burst (broadband attack texture)
+            // Exponentially decaying noise, ~1ms duration
+            int noise_len = (std::max)(10, (int)(0.001f * sr));
+            std::mt19937 exc_rng((unsigned)(midi * 1000 + si * 137 + velocity));
+            std::normal_distribution<float> ndist(0.f, 1.f);
+            float noise_amp = amp * 0.3f;  // noise is quieter than impulse
+            for (int i = 0; i < noise_len; i++) {
+                float env = std::exp(-5.f * (float)i / (float)noise_len);
+                int idx = (s.delay_r.write_ix + strike + i) % s.delay_r.len;
+                s.delay_r.buf[idx] += noise_amp * env * ndist(exc_rng);
             }
         }
 
-        // Disable per-sample hammer (excitation is already in the delay line)
         v.hammer.in_contact = false;
     }
 
