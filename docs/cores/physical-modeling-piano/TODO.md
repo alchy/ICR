@@ -1,41 +1,89 @@
 # PhysicalModelingPianoCore -- TODO
 
-## Known Issues (v0.1)
+## Done (v3)
 
-- Sound is noticeably synthetic compared to real piano
-- Hollow timbre lacking spectral richness
-- Decay character doesn't fully match real piano bi-exponential shape
-- No velocity-dependent timbral variation beyond hammer velocity
+### String model
+- [x] Single-loop Karplus-Strong waveguide (full-period delay, no sign inversion)
+- [x] Bipolar Fourier excitation (DC-removed, all harmonics)
+- [x] Two-stage spectral rolloff (knee_k + knee_slope)
+- [x] Odd harmonic boost (metallic character)
+- [x] String gauge (thickness → excitation shaping + HF damping)
+- [x] One-pole loss filter from T60 (Smith/Bank design)
+- [x] Allpass dispersion cascade (3-16 stages, buzz-free)
+- [x] Fractional delay allpass (tuning)
+- [x] 8 rounds of listening tests → optimized parameters
 
-## Roadmap
+### Infrastructure
+- [x] Physical soundbank JSON format (15 per-note params)
+- [x] Bank generator (`tools/generate_physical_bank.py`)
+- [x] Python test renderer (`tests/test_string.py`)
+- [x] Soundboard IR auto-load from `icr-config.json`
+- [x] Commuted synthesis (no internal soundboard modes, DspChain IR)
+- [x] JSON schema documentation
 
-### P1. Improve loss filter (higher order)
-Current one-pole provides flat/Nyquist control only.  A 3-pole or biquad loss
-filter would give finer frequency-dependent damping control, closer to the
-measured `R + eta*f^2` Chabassier damping model.
+### Findings from listening tests (R1-R8)
+- Triangle excitation → saw artifacts (sharp edges persist)
+- Fourier series excitation → clean from sample 0
+- exc_rolloff 2.0 = nylon, 0.1 = steel
+- odd_boost 1.5-2.0 = metallic character (physically correct)
+- Loss filter pole 0.03 = too weak (sine), 0.4 = OK, 0.9 = too aggressive
+- T60_nyq 40ms = too aggressive, 300ms = too gentle, 80-250ms = sweet spot
+- Dispersion: single allpass → buzz, cascade of 3+ stages → clean
+- gauge 2-3 for bass, 1.5 for mid = hutnejsi sound
+- knee_k=10, knee_slope=3-4 = smooth waveform with rich body
 
-### P2. More soundboard modes
-24 modes is better than 8 but still coarse.  Target: 48-64 modes, possibly
-with note-dependent mode selection (modes near f0 get higher coupling).
+---
 
-### P3. Physical damper model
-Replace linear release fadeout with actual damper simulation: increase loss
-filter coefficients when key is released, letting the string decay naturally.
+## Current iteration: single string in C++ core
 
-### P4. Cross-string coupling at bridge
-Currently strings are independent -- each sees only its own bridge reflection.
-In reality, bridge force from all strings feeds back into each string.
+### P1. Port Python model to C++ PhysicalModelingPianoCore
+- [ ] Rewrite `initVoice()` with Fourier excitation from bank params
+- [ ] Rewrite `process()` with single-loop KS (no sign inversion)
+- [ ] Load per-note params from physical bank JSON in `load()`
+- [ ] Apply global GUI scalers to per-note bank values
+- [ ] Remove old dual-rail / hammer FD code
 
-### P5. Sympathetic resonance
-Open (undamped) strings should resonate sympathetically when excited by
-nearby notes.  Requires monitoring active string energy and coupling it
-into matching harmonics of open strings.
+### P2. SysEx for physical bank
+- [ ] Define param IDs for core_id=0x02
+- [ ] Implement `setNoteParam()` in C++
+- [ ] Implement `loadBankJson()` for physical bank format
+- [ ] Document in SYSEX_PARAMS.md
 
-### P6. Longitudinal string modes
-Bass strings produce a metallic "ping" precursor from longitudinal vibration
-(c_long = 14x c_transverse).  Could be added as a separate short delay line
-or as injected partials at onset.
+### P3. Physical bank editor
+- [ ] `sound-editor-physical/` — standalone app
+- [ ] Piano keyboard note selector
+- [ ] Per-note parameter sliders (15 params)
+- [ ] Global scalers (gauge, brightness, stiffness, sustain, detune)
+- [ ] SysEx live preview
+- [ ] MIDI audition
+- [ ] Bank load/save
+- [ ] `run-editor-physical.py` launcher
 
-### P7. JSON parameter loading
-Support a dedicated PhysicalModelingPianoCore JSON format with per-note
-physical parameters (K_H, p, M_H, tau_fund, tau_high, impedance_ratio).
+---
+
+## Future iterations
+
+### Multi-string beating
+- [ ] 2-3 parallel waveguides per voice (from `n_strings`)
+- [ ] Per-string detuning (from `detune_cents`)
+- [ ] Independent noise per string
+- [ ] Bridge coupling (optional: cross-string feedback)
+
+### Hammer model
+- [ ] Pre-computed hammer force signal (Chaigne/Askenfelt FD model)
+- [ ] Velocity-dependent spectral shape (harder hit = brighter)
+- [ ] Replace Fourier excitation with hammer output for more physical onset
+- [ ] Hammer noise burst at attack
+
+### Advanced physics
+- [ ] Multi-pole loss filter (order 4-8 IIR from measured decay times)
+- [ ] Physical damper model (increase loss on release, not linear fadeout)
+- [ ] Sympathetic resonance (open strings vibrate when neighbors play)
+- [ ] Longitudinal string modes (metallic "ping" in bass)
+- [ ] Duplex scaling (string segments beyond bridge)
+
+### Calibration from recordings
+- [ ] Use additive extraction data (tau1/tau2, B, beat_hz) to calibrate
+  physical bank parameters per note
+- [ ] Spectral EQ post-waveguide from extracted eq_biquads
+- [ ] Output level calibration from rms_gain

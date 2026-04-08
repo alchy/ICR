@@ -22,8 +22,8 @@ import shutil
 from pathlib import Path
 
 REPO_ROOT    = Path(__file__).parent.resolve()
-BACKEND_DIR  = REPO_ROOT / "sound-editor" / "backend"
-FRONTEND_DIR = REPO_ROOT / "sound-editor" / "frontend"
+BACKEND_DIR  = REPO_ROOT / "sound-editor-additive" / "backend"
+FRONTEND_DIR = REPO_ROOT / "sound-editor-additive" / "frontend"
 
 # ── Preflight checks ──────────────────────────────────────────────────────────
 

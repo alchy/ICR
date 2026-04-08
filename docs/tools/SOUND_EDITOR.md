@@ -10,7 +10,7 @@ the synthesizer via SysEx.
 ## Architecture
 
 ```
-sound-editor/
+sound-editor-additive/
 ├── backend/              Python 3.10+ FastAPI server  (port 8000)
 │   ├── main.py           REST API — all endpoints
 │   ├── params_store.py   In-memory soundbank store
@@ -44,7 +44,7 @@ sound-editor/
 # Z rootu projektu (jednorázově):
 pip install -r requirements.txt
 
-cd sound-editor/backend
+cd sound-editor-additive/backend
 uvicorn main:app --reload --port 8000
 ```
 
@@ -53,7 +53,7 @@ Requires Python ≥ 3.10, scipy, mido, python-rtmidi.
 ### Frontend
 
 ```bash
-cd sound-editor/frontend
+cd sound-editor-additive/frontend
 npm install
 npm run dev        # → http://localhost:5173
 ```

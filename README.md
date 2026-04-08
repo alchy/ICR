@@ -56,7 +56,7 @@ dsp/           Master bus DSP chain (convolver, BBE, limiter)
 gui/           Dear ImGui frontend (core-agnostic)
 training/      Python analysis/extraction pipeline (for additive core)
 soundbanks-additive/    Parameter JSON + soundboard IR files
-sound-editor/  3D web-based soundbank editor (Three.js + FastAPI)
+sound-editor-additive/  3D web-based soundbank editor (Three.js + FastAPI)
 docs/          Documentation (see below)
 third_party/   Vendored deps (nlohmann/json, RtMidi)
 ```
