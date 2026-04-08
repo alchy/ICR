@@ -1,8 +1,8 @@
 #pragma once
 /*
- * synth-core/piano/piano_core.h
- * ──────────────────────────────
- * PianoCore — additive piano synthesis engine.
+ * cores/additive_synthesis_piano/additive_synthesis_piano_core.h
+ * ──────────────────────────────────────────────────────────────
+ * AdditiveSynthesisPianoCore — additive piano synthesis engine.
  *
  * Synthesis algorithm (per-MIDI string model):
  *  - MIDI ≤ 27 (bass):   1-string   partial = A0·env·cos(2π·f·t + φ)
@@ -262,11 +262,11 @@ private:
     std::atomic<int>  last_vel_idx_  {0};
 };
 
-// ── PianoCore — top-level ISynthCore implementation ──────────────────────────
+// ── AdditiveSynthesisPianoCore — top-level ISynthCore implementation ─────────
 
-class PianoCore final : public ISynthCore {
+class AdditiveSynthesisPianoCore final : public ISynthCore {
 public:
-    PianoCore();
+    AdditiveSynthesisPianoCore();
 
     bool load(const std::string& params_path, float sr, Logger& logger,
               int midi_from = 0, int midi_to = 127) override;
@@ -292,7 +292,7 @@ public:
 
     CoreVizState getVizState() const override;
 
-    std::string coreName()    const override { return "PianoCore"; }
+    std::string coreName()    const override { return "AdditiveSynthesisPianoCore"; }
     std::string coreVersion() const override { return "1.0"; }
     bool        isLoaded()    const override { return loaded_; }
 

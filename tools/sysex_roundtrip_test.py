@@ -17,7 +17,7 @@ Usage
 
 ICR.exe startup reminder
 ────────────────────────
-  ICR.exe --core PianoCore --params soundbanks/params-vv-rhodes.json --port <midi_port_index>
+  ICR.exe --core AdditiveSynthesisPianoCore --params soundbanks/params-vv-rhodes.json --port <midi_port_index>
 
 Fields compared (round-trip safe)
 ──────────────────────────────────

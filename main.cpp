@@ -22,7 +22,7 @@
  *
  * Cores and their parameter files:
  *   SineCore   No params file needed
- *   PianoCore  --params analysis/params-piano-ks-grand.json
+ *   AdditiveSynthesisPianoCore  --params analysis/params-piano-ks-grand.json
  *              (generate with: python analysis/export_piano_params.py)
  */
 
@@ -42,7 +42,8 @@
 // Pull in core registrations by including headers.
 // REGISTER_SYNTH_CORE() fires at static-init time in the corresponding .cpp.
 #include "cores/sine/sine_core.h"
-#include "cores/piano/piano_core.h"
+#include "cores/additive_synthesis_piano/additive_synthesis_piano_core.h"
+#include "cores/physical_modeling_piano/physical_modeling_piano_core.h"
 
 #include <string>
 #include <vector>

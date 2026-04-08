@@ -1,5 +1,5 @@
 /*
- * synth-core/piano/piano_core.cpp
+ * cores/additive_synthesis_piano/additive_synthesis_piano_core.cpp
  * ─────────────────────────────────
  * C++ port of analysis/torch_synth.py (2-string bi-exponential piano synth).
  *
@@ -13,8 +13,8 @@
  * Envelope uses a multiplicative decay factor (avoids per-sample exp()):
  *   decay = exp(-1 / (tau * sr))  →  env[n] = env[n-1] * decay
  */
-#include "piano_core.h"
-#include "piano_math.h"
+#include "additive_synthesis_piano_core.h"
+#include "additive_synthesis_piano_math.h"
 #include "engine/synth_core_registry.h"
 #include "third_party/json.hpp"
 
@@ -25,30 +25,30 @@
 using json = nlohmann::json;
 
 // Self-register
-REGISTER_SYNTH_CORE("PianoCore", PianoCore)
+REGISTER_SYNTH_CORE("AdditiveSynthesisPianoCore", AdditiveSynthesisPianoCore)
 
 static constexpr float TAU = dsp::TAU;
 
 // ── Constructor ───────────────────────────────────────────────────────────────
 
-PianoCore::PianoCore() {}
+AdditiveSynthesisPianoCore::AdditiveSynthesisPianoCore() {}
 
 // ── JSON loading ──────────────────────────────────────────────────────────────
 
-bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
+bool AdditiveSynthesisPianoCore::load(const std::string& params_path, float sr, Logger& logger,
                      int midi_from, int midi_to) {
     sample_rate_ = sr;
     inv_sr_      = 1.f / sr;
 
     if (params_path.empty()) {
-        logger.log("PianoCore", LogSeverity::Error,
+        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Error,
                    "params_path is required (export with analysis/export_piano_params.py)");
         return false;
     }
 
     std::ifstream f(params_path);
     if (!f.is_open()) {
-        logger.log("PianoCore", LogSeverity::Error,
+        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Error,
                    "Cannot open params: " + params_path);
         return false;
     }
@@ -57,13 +57,13 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
     try {
         f >> root;
     } catch (const std::exception& e) {
-        logger.log("PianoCore", LogSeverity::Error,
+        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Error,
                    std::string("JSON parse error: ") + e.what());
         return false;
     }
 
     if (!root.contains("notes")) {
-        logger.log("PianoCore", LogSeverity::Error, "JSON missing 'notes' key");
+        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Error, "JSON missing 'notes' key");
         return false;
     }
 
@@ -138,20 +138,20 @@ bool PianoCore::load(const std::string& params_path, float sr, Logger& logger,
 
     loaded_ = (loaded_count > 0);
     if (!loaded_) {
-        logger.log("PianoCore", LogSeverity::Error, "No valid notes in params file");
+        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Error, "No valid notes in params file");
         return false;
     }
 
     std::string range_info = (midi_from > 0 || midi_to < 127)
         ? ("  MIDI filter: " + std::to_string(midi_from) + "-" + std::to_string(midi_to))
         : "";
-    logger.log("PianoCore", LogSeverity::Info,
+    logger.log("AdditiveSynthesisPianoCore", LogSeverity::Info,
                "Loaded " + std::to_string(loaded_count) + " notes from " + params_path
                + "  SR=" + std::to_string((int)sr) + range_info);
     return true;
 }
 
-void PianoCore::setSampleRate(float sr) {
+void AdditiveSynthesisPianoCore::setSampleRate(float sr) {
     sample_rate_ = sr;
     inv_sr_      = 1.f / sr;
     // Active voices will drift after SR change; not worth re-computing mid-note.
@@ -159,7 +159,7 @@ void PianoCore::setSampleRate(float sr) {
 
 // ── MIDI (RT thread) — delegates to PatchManager ────────────────────────────
 
-void PianoCore::noteOn(uint8_t midi, uint8_t velocity) {
+void AdditiveSynthesisPianoCore::noteOn(uint8_t midi, uint8_t velocity) {
     if (midi >= PIANO_MAX_VOICES) return;
     if (velocity == 0) { noteOff(midi); return; }
     patch_mgr_.noteOn(midi, velocity, note_params_, voice_mgr_,
@@ -174,16 +174,16 @@ void PianoCore::noteOn(uint8_t midi, uint8_t velocity) {
                       bank_mutex_);
 }
 
-void PianoCore::noteOff(uint8_t midi) {
+void AdditiveSynthesisPianoCore::noteOff(uint8_t midi) {
     if (midi >= PIANO_MAX_VOICES) return;
     patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_);
 }
 
-void PianoCore::sustainPedal(bool down) {
+void AdditiveSynthesisPianoCore::sustainPedal(bool down) {
     patch_mgr_.sustainPedal(down, voice_mgr_, sample_rate_);
 }
 
-void PianoCore::allNotesOff() {
+void AdditiveSynthesisPianoCore::allNotesOff() {
     patch_mgr_.allNotesOff(voice_mgr_, sample_rate_);
 }
 
@@ -571,13 +571,13 @@ bool PianoVoice::process(float* out_l, float* out_r, int n_samples,
 
 // ── Audio (RT thread) — delegates to per-voice process ──────────────────────
 
-bool PianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept {
+bool AdditiveSynthesisPianoCore::processBlock(float* out_l, float* out_r, int n_samples) noexcept {
     return voice_mgr_.processBlock(out_l, out_r, n_samples, inv_sr_);
 }
 
 // ── Parameters (GUI thread) ───────────────────────────────────────────────────
 
-bool PianoCore::setParam(const std::string& key, float value) {
+bool AdditiveSynthesisPianoCore::setParam(const std::string& key, float value) {
     if (key == "beat_scale") {
         beat_scale_.store(std::max(0.f, std::min(4.f, value)),
                           std::memory_order_relaxed);
@@ -615,7 +615,7 @@ bool PianoCore::setParam(const std::string& key, float value) {
     return false;
 }
 
-bool PianoCore::getParam(const std::string& key, float& out) const {
+bool AdditiveSynthesisPianoCore::getParam(const std::string& key, float& out) const {
     if (key == "beat_scale")   { out = beat_scale_   .load(std::memory_order_relaxed); return true; }
     if (key == "noise_level")  { out = noise_level_  .load(std::memory_order_relaxed); return true; }
     if (key == "rng_seed")     { out = (float)rng_seed_.load(std::memory_order_relaxed); return true; }
@@ -626,7 +626,7 @@ bool PianoCore::getParam(const std::string& key, float& out) const {
     return false;
 }
 
-std::vector<CoreParamDesc> PianoCore::describeParams() const {
+std::vector<CoreParamDesc> AdditiveSynthesisPianoCore::describeParams() const {
     return {
         { "beat_scale",   "Beat Scale",    "Timbre",  "×",   beat_scale_   .load(), 0.f,    4.f,     false },
         { "noise_level",  "Noise Level",   "Timbre",  "×",   noise_level_  .load(), 0.f,    4.f,     false },
@@ -640,7 +640,7 @@ std::vector<CoreParamDesc> PianoCore::describeParams() const {
 
 // ── Per-note SysEx updates (MIDI callback thread) ─────────────────────────────
 
-bool PianoCore::setNoteParam(int midi, int vel,
+bool AdditiveSynthesisPianoCore::setNoteParam(int midi, int vel,
                               const std::string& key, float value) {
     if (midi < 0 || midi > 127 || vel < 0 || vel > 7) return false;
     PianoNoteParam& np = note_params_[midi][vel];
@@ -669,7 +669,7 @@ bool PianoCore::setNoteParam(int midi, int vel,
     return false;
 }
 
-bool PianoCore::setNotePartialParam(int midi, int vel, int k,
+bool AdditiveSynthesisPianoCore::setNotePartialParam(int midi, int vel, int k,
                                      const std::string& key, float value) {
     if (midi < 0 || midi > 127 || vel < 0 || vel > 7) return false;
     PianoNoteParam& np = note_params_[midi][vel];
@@ -685,7 +685,7 @@ bool PianoCore::setNotePartialParam(int midi, int vel, int k,
     return false;
 }
 
-bool PianoCore::loadBankJson(const std::string& json_str) {
+bool AdditiveSynthesisPianoCore::loadBankJson(const std::string& json_str) {
     json root;
     try {
         root = json::parse(json_str);
@@ -764,7 +764,7 @@ bool PianoCore::loadBankJson(const std::string& json_str) {
     return true;
 }
 
-bool PianoCore::exportBankJson(const std::string& path) {
+bool AdditiveSynthesisPianoCore::exportBankJson(const std::string& path) {
     json notes = json::array();
 
     std::lock_guard<std::mutex> lk(bank_mutex_);
@@ -830,7 +830,7 @@ bool PianoCore::exportBankJson(const std::string& path) {
 
 // ── Visualization (GUI thread) ────────────────────────────────────────────────
 
-CoreVizState PianoCore::getVizState() const {
+CoreVizState AdditiveSynthesisPianoCore::getVizState() const {
     CoreVizState vs;
     vs.sustain_active = false;  // TODO: expose from patch_mgr_
 

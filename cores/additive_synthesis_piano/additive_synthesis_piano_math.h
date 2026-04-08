@@ -1,12 +1,12 @@
 #pragma once
 /*
- * cores/piano/piano_math.h
+ * cores/additive_synthesis_piano/additive_synthesis_piano_math.h
  * ────────────────────────
  * Pure DSP mathematics for piano additive synthesis — stateless, inline,
  * header-only.  Every function takes inputs and returns outputs with no
  * side-effects, making the math independently testable.
  *
- * Used by: PianoCore::processBlock() and PianoCore::initVoice().
+ * Used by: AdditiveSynthesisPianoCore::processBlock() and AdditiveSynthesisPianoCore::initVoice().
  */
 
 #include "dsp/dsp_math.h"

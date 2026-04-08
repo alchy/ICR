@@ -9,7 +9,7 @@
  * model cannot produce — soundboard resonances, room character, and
  * string-bridge coupling effects.
  *
- * Signal chain:  PianoCore → [EQ] → Convolver → BBE → Limiter → output
+ * Signal chain:  AdditiveSynthesisPianoCore → [EQ] → Convolver → BBE → Limiter → output
  */
 
 #include <vector>

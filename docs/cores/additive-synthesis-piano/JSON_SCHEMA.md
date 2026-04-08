@@ -1,7 +1,7 @@
 # ICR — JSON Soundbank Schema
 
-Referenční přehled všech klíčů v PianoCore soundbank JSON.
-Generováno exporterem (`training/modules/exporter.py`), načítáno `piano_core.cpp::loadBankJson()`.
+Referenční přehled všech klíčů v AdditiveSynthesisPianoCore soundbank JSON.
+Generováno exporterem (`training/modules/exporter.py`), načítáno `additive_synthesis_piano_core.cpp::loadBankJson()`.
 
 ---
 

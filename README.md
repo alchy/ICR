@@ -28,7 +28,7 @@ Binaries: `build/bin/Release/ICRGUI.exe` (GUI), `build/bin/Release/ICR.exe` (CLI
 ### Run
 
 ```bat
-build\bin\Release\ICRGUI.exe --core PianoCore --params soundbanks\params-piano-soundbank.json
+build\bin\Release\ICRGUI.exe --core AdditiveSynthesisPianoCore --params soundbanks\params-piano-soundbank.json
 ```
 
 A bundled soundbank (`soundbanks/params-piano-soundbank.json`) is included in the repository.
@@ -52,7 +52,7 @@ See `docs/TRAIN_BUILD_RUN.md` for the complete guide.
 
 ```
 engine/        C++ real-time engine (CoreEngine, ISynthCore, MIDI, miniaudio)
-cores/         Pluggable synth cores (PianoCore, SineCore)
+cores/         Pluggable synth cores (AdditiveSynthesisPianoCore, SineCore)
 dsp/           DSP chain (limiter, BBE)
 gui/           Dear ImGui frontend
 third_party/   Vendored deps (nlohmann/json, RtMidi)
@@ -68,7 +68,10 @@ docs/          Documentation
 
 ## Documentation
 
-- [`docs/TRAIN_BUILD_RUN.md`](docs/TRAIN_BUILD_RUN.md) — training pipeline, build, and run guide
-- [`docs/TRAINING_MODULES.md`](docs/TRAINING_MODULES.md) — Python modules reference + code examples
-- [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — C++ engine architecture
-- [`docs/ANALYSIS.md`](docs/ANALYSIS.md) — acoustic physics reference (papers)
+See [`docs/README.md`](docs/README.md) for the full documentation index.
+
+- [`docs/engine/ARCHITECTURE.md`](docs/engine/ARCHITECTURE.md) -- engine architecture, 3-layer Ithaca Core pattern
+- [`docs/engine/BUILD.md`](docs/engine/BUILD.md) -- build instructions, CLI options
+- [`docs/cores/additive-synthesis-piano/`](docs/cores/additive-synthesis-piano/OVERVIEW.md) -- additive piano: training pipeline, JSON schema, SysEx params
+- [`docs/cores/physical-modeling-piano/`](docs/cores/physical-modeling-piano/OVERVIEW.md) -- waveguide piano: v0.1 status, TODO
+- [`docs/tools/SOUND_EDITOR.md`](docs/tools/SOUND_EDITOR.md) -- 3D soundbank editor

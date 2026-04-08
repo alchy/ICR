@@ -104,7 +104,7 @@ notes (MIDI 61, 62, 65).  These may be genuine fast-coupling notes
 | 2a | DONE | Bank inspector (`tools/inspect_bank.py`) |
 | 2b | **NEXT** | Post-export quality report (spectral distance vs WAV) |
 | 2c | TODO | `--validate` flag on run-training.py |
-| 2d | TODO | Unit tests for dsp_math.h + piano_math.h |
+| 2d | TODO | Unit tests for dsp_math.h + additive_synthesis_piano_math.h |
 
 ### Phase 3 — Longitudinal string model (TODO)
 
@@ -261,7 +261,7 @@ Reduced bound-hit rate from 59% to 12% of middle register.
 
 ## Recently Completed
 
-- [x] DSP math refactor (`dsp_math.h` + `piano_math.h`)
+- [x] DSP math refactor (`dsp_math.h` + `additive_synthesis_piano_math.h`)
 - [x] Allpass sign fix (reverted incorrect "fix" — `+g*y[n-1]` is correct)
 - [x] GUI: velocity fallback display, PaddedPanel, fit_quality columns
 - [x] Onset STFT frame scaling for bass

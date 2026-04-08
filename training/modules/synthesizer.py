@@ -137,7 +137,7 @@ class DifferentiableRenderer:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _n_strings(midi: int) -> int:
-    """Acoustic string count — mirrors C++ piano_core.cpp model:
+    """Acoustic string count — mirrors C++ additive_synthesis_piano_core.cpp model:
       MIDI ≤ 27: 1 string (bass)
       MIDI 28-48: 2 strings (tenor)
       MIDI > 48: 3 strings symmetric (treble)"""
@@ -297,7 +297,7 @@ def _synthesize_note(
                 else np.exp(-t/tau1))
         beat = (p.get("beat_hz", 0.0) or 0.0)*beat_scale
 
-        # String model matching C++ piano_core.cpp:
+        # String model matching C++ additive_synthesis_piano_core.cpp:
         #   1-string (MIDI≤27): single oscillator at f
         #   2-string (28–48):   s1=cos((f+beat/2)t), s2=cos((f-beat/2)t)
         #   3-string (MIDI>48): symmetric — s1=cos((f-beat)t), s2=cos(ft), s3=cos((f+beat)t)

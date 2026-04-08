@@ -1,7 +1,7 @@
 """
 training/modules/exporter.py
 ──────────────────────────────
-Export PianoCore-ready JSON soundbanks.
+Export AdditiveSynthesisPianoCore-ready JSON soundbanks.
 
 Public API:
     exporter = SoundbankExporter()
@@ -21,7 +21,7 @@ from training.modules.eq_fitter import _eq_to_biquads
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Constants (match piano_core.cpp expectations)
+# Constants (match additive_synthesis_piano_core.cpp expectations)
 # ─────────────────────────────────────────────────────────────────────────────
 
 PIANO_MAX_PARTIALS = 60
@@ -565,7 +565,7 @@ class SoundbankExporter:
         target_rms: float,
         rng_seed:   int,
     ) -> dict:
-        """Convert one sample entry into a piano_core_v2 note dict."""
+        """Convert one sample entry into a additive_synthesis_piano_core_v2 note dict."""
         seed   = rng_seed + midi*256 + vel_idx
         rng    = np.random.default_rng(seed)
 
@@ -697,7 +697,7 @@ class SoundbankExporter:
         """Calibrate rms_gain so rendered note hits target_rms * vel_gain.
 
         Renders partials + noise (with centroid IIR filter) + EQ biquads,
-        matching the C++ piano_core.cpp signal path exactly (1/2/3-string model
+        matching the C++ additive_synthesis_piano_core.cpp signal path exactly (1/2/3-string model
         depending on MIDI), so that rms_gain produces correct output level.
         """
         vel_gain  = ((vel_idx+1)/8.0)**VEL_GAMMA
@@ -746,7 +746,7 @@ class SoundbankExporter:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RMS calibration helper (replica of piano_core render for gain computation)
+# RMS calibration helper (replica of additive_synthesis_piano_core render for gain computation)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _render_note_rms_ref(
@@ -761,7 +761,7 @@ def _render_note_rms_ref(
     duration:    float,
 ) -> np.ndarray:
     """
-    Render one note (rms_gain=1) matching the piano_core.cpp signal path:
+    Render one note (rms_gain=1) matching the additive_synthesis_piano_core.cpp signal path:
       1. Partials — 1/2/3-string model depending on MIDI, bi-exp envelope
       2. Attack noise — biquad bandpass at centroid_hz Q=1.5 (matches C++ exactly)
       3. Spectral EQ — biquad cascade (Direct Form II, same coeffs as C++)

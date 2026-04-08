@@ -165,7 +165,7 @@ def main() -> int:
             print(f"Soundboard IR: {ir_path}")
         print(f"\nRun with:")
         ir_arg = f' --ir {ir_path}' if ir_path else ''
-        print(f"  icrgui.exe --core PianoCore --params {out}{ir_arg}")
+        print(f"  icrgui.exe --core AdditiveSynthesisPianoCore --params {out}{ir_arg}")
 
     finally:
         tee.close()

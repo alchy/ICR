@@ -4,7 +4,7 @@
  * ──────────────
  * Shared DSP primitives — stateless, inline, header-only.
  *
- * Used by: BBE, Limiter, PianoCore EQ, and any future DSP module.
+ * Used by: BBE, Limiter, AdditiveSynthesisPianoCore EQ, and any future DSP module.
  * All functions are pure: no side-effects, no allocation, RT-safe.
  */
 
@@ -75,7 +75,7 @@ inline float biquad_tick(float x, const BiquadCoeffs& c, BiquadState& s) {
 /// Process one sample through a biquad using Direct Form II (w-state).
 ///
 /// This form stores intermediate w[n] values rather than transposed states.
-/// Used by PianoCore EQ cascade (matches original implementation exactly).
+/// Used by AdditiveSynthesisPianoCore EQ cascade (matches original implementation exactly).
 ///
 /// w[0],w[1] are the two delay elements (caller owns the array).
 inline float biquad_df2_tick(float x, const BiquadCoeffs& c,

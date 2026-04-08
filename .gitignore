@@ -25,7 +25,7 @@ soundbanks/*.json
 exports/
 
 # Local notes
-PianoCore.txt
+AdditiveSynthesisPianoCore.txt
 
 # Editor / OS
 .vscode/

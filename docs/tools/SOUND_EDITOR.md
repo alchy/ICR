@@ -89,7 +89,7 @@ A **layer** is one parameter across all (MIDI, velocity) slots.
 
 ### Scalar layers (whole note)
 
-Definice klíčů, závislosti a původ → [JSON_SCHEMA.md](JSON_SCHEMA.md#2a-identifikace-a-fyzika-skalary).
+Definice klíčů, závislosti a původ → [JSON_SCHEMA.md](../cores/additive-synthesis-piano/JSON_SCHEMA.md#2a-identifikace-a-fyzika-skalary).
 
 | Layer ID    | Label              | Range           |
 |-------------|--------------------|-----------------|
@@ -103,7 +103,7 @@ Definice klíčů, závislosti a původ → [JSON_SCHEMA.md](JSON_SCHEMA.md#2a-i
 ### Per-partial layers (expanded for k = 1..60)
 
 Each template is instantiated 60 times, giving layer IDs like `tau1_k1`, `tau1_k2`, …
-Definice klíčů → [JSON_SCHEMA.md](JSON_SCHEMA.md#3-partial-level-klíče-v-poli-partials).
+Definice klíčů → [JSON_SCHEMA.md](../cores/additive-synthesis-piano/JSON_SCHEMA.md#3-partial-level-klíče-v-poli-partials).
 
 | Template key | Label        | Range         |
 |-------------|--------------|---------------|

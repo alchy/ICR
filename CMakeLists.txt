@@ -42,7 +42,8 @@ set(ENGINE_SOURCES
 
 set(CORE_SOURCES
     cores/sine/sine_core.cpp
-    cores/piano/piano_core.cpp
+    cores/additive_synthesis_piano/additive_synthesis_piano_core.cpp
+    cores/physical_modeling_piano/physical_modeling_piano_core.cpp
 )
 
 # ── DSP chain ─────────────────────────────────────────────────────────────────

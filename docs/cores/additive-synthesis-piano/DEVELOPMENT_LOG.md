@@ -2,6 +2,7 @@
 
 Chronological record of findings, fixes, and physics references.
 For current priorities see [TODO.md](TODO.md).
+For engine architecture see [ARCHITECTURE.md](../../engine/ARCHITECTURE.md).
 
 ---
 
