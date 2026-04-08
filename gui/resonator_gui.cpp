@@ -182,7 +182,7 @@ static std::vector<std::string> discoverSoundbankJsonFiles(const std::string& di
         closedir(d);
     }
 #endif
-    std::sort(result.begin(), result.end());
+    std::sort(result.begin(), result.end(), std::greater<std::string>());
     return result;
 }
 
