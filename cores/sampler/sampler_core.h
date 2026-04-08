@@ -21,6 +21,7 @@
 #include <cstdint>
 #include <mutex>
 #include <string>
+#include <thread>
 #include <vector>
 
 // -- Constants ----------------------------------------------------------------
@@ -65,8 +66,10 @@ public:
     int      midi        = -1;
     uint8_t  velocity    = 0;
 
-    // Sample playback
-    const SampleBuffer* sample = nullptr;
+    // Sample playback — two layers for velocity crossfade
+    const SampleBuffer* sample_lo = nullptr;  // lower velocity layer
+    const SampleBuffer* sample_hi = nullptr;  // higher velocity layer (can == lo)
+    float    vel_blend   = 0.f;   // 0.0 = all lo, 1.0 = all hi
     int      position    = 0;     // current frame position in sample
 
     // Envelope
@@ -95,7 +98,9 @@ public:
                       float sample_rate) noexcept;
 
     void initVoice(int midi, uint8_t velocity,
-                   const SampleBuffer* sample,
+                   const SampleBuffer* sample_lo,
+                   const SampleBuffer* sample_hi,
+                   float vel_blend,
                    float sample_rate,
                    float keyboard_spread) noexcept;
 
@@ -144,6 +149,7 @@ private:
 class SamplerCore final : public ISynthCore {
 public:
     SamplerCore();
+    ~SamplerCore();
 
     bool load(const std::string& params_path, float sr, Logger& logger,
               int midi_from = 0, int midi_to = 127) override;
@@ -171,8 +177,11 @@ public:
     const std::vector<std::string>& bankNames() const { return bank_names_; }
     /// Get currently active bank name.
     const std::string& activeBankName() const { return active_bank_name_; }
-    /// Switch to a different bank by name.  Loads from disk if not yet loaded.
+    /// Switch to a different bank by name.  Loads asynchronously if not yet loaded.
+    /// Returns true if switch was initiated (loading may still be in progress).
     bool selectBank(const std::string& name, Logger& logger);
+    /// True while a bank is being loaded in the background.
+    bool isBankLoading() const { return bank_loading_.load(std::memory_order_relaxed); }
 
 private:
     /// Scan base directory for sample banks.
@@ -199,4 +208,9 @@ private:
     std::atomic<float> release_time_    {1.0f};   // release multiplier
 
     mutable std::mutex bank_mutex_;
+
+    // Async bank loading
+    std::atomic<bool> bank_loading_{false};
+    std::thread       load_thread_;
+    Logger            load_logger_;   // copy for background thread
 };

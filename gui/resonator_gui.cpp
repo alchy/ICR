@@ -801,6 +801,8 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                     ImGui::SetNextItemWidth(180.f);
                     const char* bank_preview = sc->activeBankName().empty()
                                              ? "(none)" : sc->activeBankName().c_str();
+                    bool loading = sc->isBankLoading();
+                    if (loading) ImGui::BeginDisabled();
                     if (ImGui::BeginCombo("##bank", bank_preview)) {
                         for (const auto& bname : banks) {
                             bool sel = (bname == sc->activeBankName());
@@ -813,7 +815,12 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                         }
                         ImGui::EndCombo();
                     }
-                    ImGui::SameLine(0, 20.f);
+                    if (loading) ImGui::EndDisabled();
+                    ImGui::SameLine(0, 8.f);
+                    if (loading) {
+                        ImGui::TextColored({1.f, 0.8f, 0.2f, 1.f}, "Loading...");
+                        ImGui::SameLine(0, 20.f);
+                    }
                 }
             }
 

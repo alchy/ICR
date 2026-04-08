@@ -24,13 +24,18 @@
 
 REGISTER_SYNTH_CORE("SamplerCore", SamplerCore)
 
-// Default base directory for sample banks
-static const char* DEFAULT_SAMPLE_DIR =
-#ifdef _WIN32
-    "C:\\SoundBanks\\IthacaPlayer";
-#else
-    "/opt/SoundBanks/IthacaPlayer";
+// Default base directory for sample banks.
+// Can be overridden at build time via CMake: -DICR_SAMPLE_DIR="..."
+#ifndef ICR_SAMPLE_DIR
+#  ifdef _WIN32
+#    define ICR_SAMPLE_DIR "C:\\SoundBanks\\IthacaPlayer"
+#  elif defined(__APPLE__)
+#    define ICR_SAMPLE_DIR "/Users/Shared/SoundBanks/IthacaPlayer"
+#  else
+#    define ICR_SAMPLE_DIR "/opt/SoundBanks/IthacaPlayer"
+#  endif
 #endif
+static const char* DEFAULT_SAMPLE_DIR = ICR_SAMPLE_DIR;
 
 // -- Directory scanning helpers -----------------------------------------------
 
@@ -109,6 +114,10 @@ static const char PATH_SEP = '/';
 // -- Constructor --------------------------------------------------------------
 
 SamplerCore::SamplerCore() {}
+
+SamplerCore::~SamplerCore() {
+    if (load_thread_.joinable()) load_thread_.join();
+}
 
 // -- Bank discovery -----------------------------------------------------------
 
@@ -192,16 +201,45 @@ bool SamplerCore::loadBank(SampleBank& bank, float sr, Logger& logger) {
 
 bool SamplerCore::selectBank(const std::string& name, Logger& logger) {
     for (int i = 0; i < (int)banks_.size(); i++) {
-        if (banks_[i].name == name) {
-            if (!banks_[i].loaded) {
-                if (!loadBank(banks_[i], sample_rate_, logger))
-                    return false;
-            }
+        if (banks_[i].name != name) continue;
+
+        if (banks_[i].loaded) {
+            // Already loaded — switch immediately
             std::lock_guard<std::mutex> lk(bank_mutex_);
             active_bank_idx_  = i;
             active_bank_name_ = name;
             return true;
         }
+
+        // Not yet loaded — launch async load
+        if (bank_loading_.load(std::memory_order_relaxed)) {
+            logger.log("SamplerCore", LogSeverity::Warning,
+                       "Bank load already in progress, ignoring");
+            return false;
+        }
+
+        // Join any previous load thread
+        if (load_thread_.joinable()) load_thread_.join();
+
+        load_logger_ = logger;
+        bank_loading_.store(true, std::memory_order_relaxed);
+
+        int idx = i;
+        float sr = sample_rate_;
+        load_thread_ = std::thread([this, idx, sr]() {
+            bool ok = loadBank(banks_[idx], sr, load_logger_);
+            if (ok) {
+                std::lock_guard<std::mutex> lk(bank_mutex_);
+                active_bank_idx_  = idx;
+                active_bank_name_ = banks_[idx].name;
+            }
+            bank_loading_.store(false, std::memory_order_relaxed);
+            load_logger_.log("SamplerCore", LogSeverity::Info,
+                ok ? ("Bank ready: " + banks_[idx].name)
+                   : ("Bank load failed: " + banks_[idx].name));
+        });
+
+        return true;
     }
     return false;
 }
@@ -279,26 +317,33 @@ void SamplerPatchManager::noteOn(
     std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
     if (!lk.owns_lock()) return;
 
-    // Find best velocity layer
+    // Velocity -> continuous float position 0.0-7.0 across layers
     int n_layers = bank.vel_layers_available[midi];
-    if (n_layers == 0) return;  // no samples for this note
+    if (n_layers == 0) return;
 
-    int vel_idx = velToLayer(velocity);
-    // Clamp to available layers, fall back to nearest
-    if (vel_idx >= n_layers) vel_idx = n_layers - 1;
-    // Find loaded sample (search down then up)
-    const SampleBuffer* sample = nullptr;
-    for (int v = vel_idx; v >= 0; v--) {
-        if (bank.samples[midi][v].loaded) { sample = &bank.samples[midi][v]; break; }
-    }
-    if (!sample) {
-        for (int v = vel_idx + 1; v < SAMPLER_VEL_LAYERS; v++) {
-            if (bank.samples[midi][v].loaded) { sample = &bank.samples[midi][v]; break; }
-        }
-    }
-    if (!sample) return;
+    float vel_float = (std::min)(7.f, (float)(velocity - 1) / 16.f);
+    int lo_idx = (int)vel_float;
+    int hi_idx = (std::min)(lo_idx + 1, n_layers - 1);
+    float blend = vel_float - (float)lo_idx;
 
-    vm.initVoice(midi, velocity, sample, sample_rate, keyboard_spread);
+    // Find loaded samples for lo and hi layers (with fallback)
+    const SampleBuffer* lo = nullptr;
+    const SampleBuffer* hi = nullptr;
+
+    // Search for lo: down from lo_idx, then up
+    for (int v = (std::min)(lo_idx, n_layers - 1); v >= 0; v--)
+        if (bank.samples[midi][v].loaded) { lo = &bank.samples[midi][v]; break; }
+    if (!lo)
+        for (int v = lo_idx + 1; v < SAMPLER_VEL_LAYERS; v++)
+            if (bank.samples[midi][v].loaded) { lo = &bank.samples[midi][v]; break; }
+    if (!lo) return;
+
+    // Search for hi: up from hi_idx, then down
+    for (int v = (std::min)(hi_idx, n_layers - 1); v < SAMPLER_VEL_LAYERS; v++)
+        if (bank.samples[midi][v].loaded) { hi = &bank.samples[midi][v]; break; }
+    if (!hi) hi = lo;  // same layer if only one available
+
+    vm.initVoice(midi, velocity, lo, hi, blend, sample_rate, keyboard_spread);
 
     last_midi_.store(midi,     std::memory_order_relaxed);
     last_vel_ .store(velocity, std::memory_order_relaxed);
@@ -346,16 +391,18 @@ bool SamplerVoiceManager::processBlock(float* out_l, float* out_r,
 }
 
 void SamplerVoiceManager::initVoice(int midi, uint8_t velocity,
-                                     const SampleBuffer* sample,
+                                     const SampleBuffer* lo,
+                                     const SampleBuffer* hi,
+                                     float vel_blend,
                                      float sr, float keyboard_spread) noexcept {
     SamplerVoice& v = voices_[midi];
 
     // If voice is active, capture damping buffer for click-free retrigger
-    if (v.active && v.sample && v.position < v.sample->frames) {
+    if (v.active && v.sample_lo && v.position < v.sample_lo->frames) {
         int damp_frames = (std::min)((int)(SAMPLER_DAMPING_MS * 0.001f * sr), 2048);
-        int avail = (std::min)(damp_frames, v.sample->frames - v.position);
+        int avail = (std::min)(damp_frames, v.sample_lo->frames - v.position);
         if (avail > 0) {
-            const float* src = v.sample->data.data() + v.position * 2;
+            const float* src = v.sample_lo->data.data() + v.position * 2;
             // Apply current envelope to damping buffer
             float env = v.vel_gain;
             if (v.releasing) env *= v.rel_gain;
@@ -376,12 +423,15 @@ void SamplerVoiceManager::initVoice(int midi, uint8_t velocity,
     v.in_onset  = true;
     v.midi      = midi;
     v.velocity  = velocity;
-    v.sample    = sample;
+    v.sample_lo = lo;
+    v.sample_hi = hi;
+    v.vel_blend = vel_blend;
     v.position  = 0;
 
-    // Velocity gain: logarithmic curve for natural response
+    // Velocity gain: power curve for natural dynamic response
+    // Combines layer crossfade (timbral) + continuous gain (dynamic)
     float vel_norm = (float)velocity / 127.f;
-    v.vel_gain = vel_norm * vel_norm;  // quadratic approximation
+    v.vel_gain = vel_norm * vel_norm;  // quadratic gain curve
 
     // Onset ramp
     v.onset_gain = 0.f;
@@ -413,7 +463,13 @@ void SamplerVoiceManager::releaseAll(float sr) noexcept {
 
 bool SamplerVoice::process(float* out_l, float* out_r, int n_samples,
                             float sample_rate) noexcept {
-    if (!sample || !sample->loaded) { active = false; return false; }
+    if (!sample_lo || !sample_lo->loaded) { active = false; return false; }
+
+    // Precompute blend weights
+    const float w_lo = 1.f - vel_blend;
+    const float w_hi = vel_blend;
+    const bool  do_blend = (sample_hi && sample_hi != sample_lo
+                            && sample_hi->loaded && w_hi > 0.001f);
 
     for (int i = 0; i < n_samples; i++) {
         // Damping buffer (retrigger crossfade from previous note)
@@ -424,15 +480,22 @@ bool SamplerVoice::process(float* out_l, float* out_r, int n_samples,
             if (damp_pos >= damp_len) damping = false;
         }
 
-        // End of sample
-        if (position >= sample->frames) {
+        // End of sample (use shorter of the two layers)
+        int max_frames = sample_lo->frames;
+        if (do_blend && sample_hi->frames < max_frames)
+            max_frames = sample_hi->frames;
+        if (position >= max_frames) {
             active = false;
             break;
         }
 
-        // Read stereo sample
-        float sL = sample->data[position * 2];
-        float sR = sample->data[position * 2 + 1];
+        // Read + crossfade stereo samples between velocity layers
+        float sL = sample_lo->data[position * 2]     * w_lo;
+        float sR = sample_lo->data[position * 2 + 1] * w_lo;
+        if (do_blend) {
+            sL += sample_hi->data[position * 2]     * w_hi;
+            sR += sample_hi->data[position * 2 + 1] * w_hi;
+        }
         position++;
 
         // Onset ramp
