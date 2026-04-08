@@ -45,12 +45,13 @@ The architecture follows the **Ithaca Core 3-layer pattern**
 ```cpp
 // CoreEngine audio callback -- called by miniaudio per block (256 samples)
 engine.processBlock():
-    1. Drain MIDI queue -> core->noteOn/Off/sustainPedal
-    2. core->processBlock(L, R, n)        // ISynthCore -> VoiceManager -> Voice
-    3. applyMasterAndLfo(L, R, n)         // gain, pan, LFO modulation
-    4. dsp_.process(L, R, n)              // Convolver -> BBE -> Limiter
-    5. Update peak meter
-    6. Interleave L+R -> audio device
+    1. Drain MIDI queue -> active_core->noteOn/Off/sustainPedal
+    2. for each core: core->processBlock(L, R, n)  // all cores, additive
+    3. agc_process(L, R, n)               // progressive voice gain (dsp/agc.h)
+    4. applyMasterAndLfo(L, R, n)         // gain, pan, LFO modulation
+    5. dsp_.process(L, R, n)              // Convolver -> BBE -> Limiter
+    6. Update peak meter
+    7. Interleave L+R -> audio device
 ```
 
 ## High-Level Diagram
@@ -208,6 +209,7 @@ engine/
     synth_core_registry.h  Factory pattern for pluggable cores
     midi_input.h/cpp       RtMidi wrapper
 dsp/
+    agc.h                  Progressive voice gain (header-only, portable)
     dsp_math.h             Shared DSP primitives (biquad, RBJ, decay_coeff)
     dsp_chain.h/cpp        Master bus orchestrator
     limiter/               Peak limiter

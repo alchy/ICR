@@ -359,6 +359,91 @@ Create `docs/cores/my-core/OVERVIEW.md` with:
 
 ---
 
+## Progressive Voice Gain (AGC)
+
+Header: `dsp/agc.h` — standalone, header-only, no STL, RT-safe.
+Portable to ARM MCUs and DSP chips.
+
+### Problem
+
+Voices sum additively.  With N active voices at full amplitude, peak
+output = N x (voice amplitude).  20 voices can produce 20.0 peak — the
+limiter would crush this to 1.0 causing massive pumping and distortion.
+
+### Solution
+
+AGC measures per-block RMS after all cores sum their output, then smoothly
+adjusts gain to keep the signal near a target level.  It only attenuates
+(never amplifies), preventing clipping without audible artifacts.
+
+### Signal chain position
+
+```
+Cores sum -> AGC -> Master gain/LFO -> DspChain (convolver -> BBE -> limiter)
+```
+
+AGC runs **before** master gain, so the user's volume control is not affected.
+The limiter remains as a last-resort safety net.
+
+### Parameters
+
+| Parameter | Default | Description |
+|-----------|---------|-------------|
+| `target_rms` | 0.15 (~-16 dB) | Desired output RMS level |
+| `attack_ms` | 5 ms | Gain reduction speed (fast, catches transients) |
+| `release_ms` | 200 ms | Gain recovery speed (slow, avoids pumping) |
+| `gain_floor` | 0.05 | Minimum gain (prevents silence during very loud passages) |
+
+### API (`dsp/agc.h`)
+
+```cpp
+#include "dsp/agc.h"
+
+dsp::AgcState agc;
+dsp::agc_init(agc, sample_rate);              // once at init
+dsp::agc_process(agc, out_l, out_r, n);       // per block, in-place
+dsp::agc_reset(agc);                          // reset to unity gain
+```
+
+`AgcState` is a plain struct (no vtable, no pointers) — can be memcpy'd,
+serialized, or placed in shared memory for multi-core HW architectures.
+
+### Per-core vs master bus
+
+Currently one AGC instance runs on the **master bus** (in CoreEngine).
+For per-core AGC (e.g. when distributing cores to separate HW), each core
+can include `dsp/agc.h` and maintain its own `AgcState`:
+
+```cpp
+// In your core's processBlock:
+dsp::agc_process(my_agc_, out_l, out_r, n_samples);
+```
+
+---
+
+## Velocity Mapping
+
+Each core maps MIDI velocity (1-127) to amplitude differently.
+The mapping should provide natural piano-like dynamic response.
+
+| Core | Velocity curve | Description |
+|------|---------------|-------------|
+| SineCore | Linear `v/127` | Simple, direct |
+| SamplerCore | Quadratic `(v/127)^2` + layer crossfade | Natural feel, two layers blended |
+| AdditiveSynthesisPianoCore | Layer interpolation (8 layers, each with own `rms_gain`) | Velocity selects timbre AND amplitude via `lerpNoteParams` |
+| PhysicalModelingPianoCore | Physics: `hammer_vel = 0.5 + 4.0 * (v/127)^1.5` m/s | Chabassier model, affects spectrum + energy |
+
+### Guidelines for new cores
+
+- Never use raw linear velocity — it sounds unnatural
+- Quadratic `(v/127)^2` is a good minimum for dynamic response
+- For piano-like instruments, velocity should affect **timbre** (spectral
+  content, attack brightness) not just amplitude
+- The AGC handles polyphonic level management — individual voices don't
+  need to worry about total output level
+
+---
+
 ## Threading Summary
 
 | Thread | Who calls | What it does |
