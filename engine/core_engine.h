@@ -196,6 +196,16 @@ private:
     float* buf_l_ = nullptr;
     float* buf_r_ = nullptr;
 
+    // Progressive voice gain (AGC) — smooth auto-gain based on signal energy.
+    // Replaces hard limiting as primary dynamic control.
+    // Target: keep RMS around agc_target_ regardless of voice count.
+    float agc_gain_      = 1.f;    // current smoothed gain (RT thread only)
+    float agc_target_    = 0.15f;  // target RMS level
+    float agc_attack_    = 0.f;    // per-sample smoothing (computed in start())
+    float agc_release_   = 0.f;
+
+    void applyProgressiveGain(float* out_l, float* out_r, int n) noexcept;
+
     // Peak metering (audio → GUI, relaxed atomic)
     std::atomic<float> output_peak_lin_{0.f};
     float              peak_decay_coeff_ = 0.9878f;
