@@ -198,6 +198,12 @@ foreach(_target icr icrgui)
             $<TARGET_FILE_DIR:${_target}>/soundbanks
         COMMENT "Copying soundbanks/ -> ${_target}/soundbanks"
     )
+    add_custom_command(TARGET ${_target} POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${CMAKE_SOURCE_DIR}/icr-config.json
+            $<TARGET_FILE_DIR:${_target}>/icr-config.json
+        COMMENT "Copying icr-config.json -> ${_target}/"
+    )
 endforeach()
 
 # ── Custom targets ────────────────────────────────────────────────────────────

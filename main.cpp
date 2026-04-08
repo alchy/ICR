@@ -174,8 +174,10 @@ int main(int argc, char* argv[]) {
     try {
         auto engine = std::make_unique<CoreEngine>();
 
-        if (!engine_config.empty())
-            engine->loadEngineConfig(engine_config, logger);
+        // Auto-detect icr-config.json next to exe if not specified
+        if (engine_config.empty())
+            engine_config = "icr-config.json";
+        engine->loadEngineConfig(engine_config, logger);
 
         if (core_name.empty())
             core_name = engine->defaultCoreName();
