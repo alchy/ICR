@@ -1,77 +1,80 @@
-# ICR — Ithaca Core Resonator
+# ICR -- Ithaca Core Resonator
 
-Physics-based real-time piano synthesizer. Replaces WAV sample playback with parametric additive synthesis driven by parameters extracted from real piano recordings and refined via a neural network training pipeline.
+Real-time piano synthesizer with pluggable synthesis cores.  Supports both
+analysis-resynthesis (additive) and physical modelling (waveguide) approaches.
 
-## How it works
+## Synthesis Cores
 
-```
-WAV recordings  →  extract physical params  →  NN training + fine-tuning
-                →  export ICR JSON params   →  real-time synthesis (C++)
-```
-
-- **Synthesis**: 2-string bi-exponential additive synth per partial (60 partials × 128 voices)
-- **Parameters**: per-note, per-velocity-layer (88 × 8 = 704 entries), fitted from real KS Grand recordings
-- **Spectral EQ**: min-phase IIR biquad cascade (5 sections) fitted from LTASE measurements
-- **Stereo**: constant-power pan + per-partial independent phase offset + Schroeder all-pass decorrelation
+| Core | Approach | Description |
+|------|----------|-------------|
+| **AdditiveSynthesisPianoCore** | Additive | 60-partial resynthesis from WAV analysis, bi-exp envelopes, spectral EQ, 1/2/3-string beating |
+| **PhysicalModelingPianoCore** | Waveguide | Digital waveguide with nonlinear hammer, loss filter, dispersion, 24 soundboard modes |
+| **SineCore** | Reference | Single sine oscillator per voice, validates 3-layer architecture |
 
 ## Quick start
 
 ### Build
 
-```bat
-cmake -B build -G "Visual Studio 17 2022" -A x64
+```bash
+cmake -B build
 cmake --build build --config Release
 ```
 
-Binaries: `build/bin/Release/ICRGUI.exe` (GUI), `build/bin/Release/ICR.exe` (CLI)
+Binaries: `build/bin/Release/icrgui.exe` (GUI), `build/bin/Release/icr.exe` (CLI)
 
 ### Run
 
-```bat
-build\bin\Release\ICRGUI.exe --core AdditiveSynthesisPianoCore --params soundbanks\params-piano-soundbank.json
+```bash
+# Additive piano (requires soundbank JSON from WAV analysis)
+icrgui.exe --core AdditiveSynthesisPianoCore --params soundbanks/pl-grand.json --ir soundbanks/pl-grand-soundboard.wav
+
+# Physical modeling piano (playable without params -- uses physics defaults)
+icrgui.exe --core PhysicalModelingPianoCore
+
+# List available cores
+icr.exe --list-cores
 ```
 
-A bundled soundbank (`soundbanks/params-piano-soundbank.json`) is included in the repository.
-It was fitted from KS Grand recordings and includes per-note spectral EQ.
-
-### Train
+### Analyze WAV bank (additive pipeline)
 
 ```bash
-pip install -r training/requirements.txt
-
-# Simple (no NN, ~15 min)
-python run-training.py simple --bank "C:/SoundBanks/IthacaPlayer/ks-grand"
-
-# Full (NN + finetune, ~60 min)
-python run-training.py full --bank "C:/SoundBanks/IthacaPlayer/ks-grand"
+pip install numpy scipy soundfile
+python run-training.py analyze --bank C:/SoundBanks/IthacaPlayer/pl-grand
 ```
 
-See `docs/TRAIN_BUILD_RUN.md` for the complete guide.
+See [additive piano docs](docs/cores/additive-synthesis-piano/TRAIN_BUILD_RUN.md) for details.
 
 ## Repository structure
 
 ```
 engine/        C++ real-time engine (CoreEngine, ISynthCore, MIDI, miniaudio)
-cores/         Pluggable synth cores (AdditiveSynthesisPianoCore, SineCore)
-dsp/           DSP chain (limiter, BBE)
-gui/           Dear ImGui frontend
+cores/
+  additive_synthesis_piano/   Additive resynthesis piano core
+  physical_modeling_piano/    Digital waveguide piano core
+  sine/                       Reference sine oscillator
+dsp/           Master bus DSP chain (convolver, BBE, limiter)
+gui/           Dear ImGui frontend (core-agnostic)
+training/      Python analysis/extraction pipeline (for additive core)
+soundbanks/    Parameter JSON + soundboard IR files
+sound-editor/  3D web-based soundbank editor (Three.js + FastAPI)
+docs/          Documentation (see below)
 third_party/   Vendored deps (nlohmann/json, RtMidi)
-training/      Python training pipeline
-soundbanks/    Parameter JSON files (not in git — generate or copy manually)
-docs/          Documentation
 ```
 
 ## Requirements
 
-**C++ build:** Visual Studio 2022 + CMake ≥ 3.16 (Windows); GCC/Clang on Linux/macOS  
-**Python training:** Python 3.10+, PyTorch, see `training/requirements.txt`
+**C++ build:** CMake >= 3.16, C++17 (VS 2022 on Windows; GCC/Clang on Linux/macOS)
+**Python (additive pipeline only):** Python 3.12, numpy, scipy, soundfile
 
 ## Documentation
 
-See [`docs/README.md`](docs/README.md) for the full documentation index.
+Full index: [`docs/README.md`](docs/README.md)
 
-- [`docs/engine/ARCHITECTURE.md`](docs/engine/ARCHITECTURE.md) -- engine architecture, 3-layer Ithaca Core pattern
-- [`docs/engine/BUILD.md`](docs/engine/BUILD.md) -- build instructions, CLI options
-- [`docs/cores/additive-synthesis-piano/`](docs/cores/additive-synthesis-piano/OVERVIEW.md) -- additive piano: training pipeline, JSON schema, SysEx params
-- [`docs/cores/physical-modeling-piano/`](docs/cores/physical-modeling-piano/OVERVIEW.md) -- waveguide piano: v0.1 status, TODO
-- [`docs/tools/SOUND_EDITOR.md`](docs/tools/SOUND_EDITOR.md) -- 3D soundbank editor
+| Section | Content |
+|---------|---------|
+| [Engine architecture](docs/engine/ARCHITECTURE.md) | CoreEngine, ISynthCore, 3-layer Ithaca Core pattern, threading |
+| [Build & run](docs/engine/BUILD.md) | cmake, CLI options, troubleshooting |
+| [SysEx protocol](docs/engine/SYSEX_PROTOCOL.md) | MIDI SysEx for live parameter editing |
+| [Additive piano](docs/cores/additive-synthesis-piano/OVERVIEW.md) | Signal chain, WAV pipeline, JSON schema, training modules |
+| [Physical modeling piano](docs/cores/physical-modeling-piano/OVERVIEW.md) | Waveguide model, physics defaults, v0.1 status |
+| [Sound editor](docs/tools/SOUND_EDITOR.md) | 3D soundbank editor with spline fitting |
