@@ -275,7 +275,16 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     // -- Delay line -----------------------------------------------------------
     float N_total = sr / np.f0_hz;
     float filter_delay = v.loss.b / (std::max)(1.f - v.loss.b * v.loss.b, 0.01f);
-    float full_N = N_total - filter_delay;
+    // Dispersion cascade delay compensation: each allpass stage adds
+    // group delay ≈ (1-a^2) / (1+a^2+2a*cos(w)) samples at fundamental.
+    float disp_delay = 0.f;
+    if (np.n_disp_stages > 0) {
+        float w = dsp::TAU * np.f0_hz / sr;
+        float a = np.disp_coeff;
+        float per_stage = (1.f - a * a) / (1.f + a * a + 2.f * a * std::cos(w));
+        disp_delay = per_stage * (float)np.n_disp_stages;
+    }
+    float full_N = N_total - filter_delay - disp_delay;
     int N_int = (std::max)(4, (int)full_N);
     float frac = full_N - (float)N_int;
     if (frac < 0.1f) { N_int -= 1; frac += 1.f; }
@@ -285,6 +294,8 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     // Reset delay line
     physics::DelayTuning dt = { N_int, v.ap_frac_a };
     physics::delay_reset(v.delay, dt);
+
+
 
     // -- Dispersion cascade ---------------------------------------------------
     v.n_disp     = np.n_disp_stages;
