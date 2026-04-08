@@ -112,8 +112,8 @@ bool CoreEngine::initialize(const std::string& core_name,
     logger_.log("CoreEngine", LogSeverity::Info,
                 "Initializing core: " + core_name);
 
-    core_ = SynthCoreRegistry::instance().create(core_name);
-    if (!core_) {
+    auto core = SynthCoreRegistry::instance().create(core_name);
+    if (!core) {
         logger_.log("CoreEngine", LogSeverity::Error,
                     "Unknown core: '" + core_name + "'. Available:");
         for (const auto& n : SynthCoreRegistry::instance().availableCores())
@@ -121,12 +121,17 @@ bool CoreEngine::initialize(const std::string& core_name,
         return false;
     }
 
-    if (!core_->load(params_path, (float)sample_rate_, logger_, midi_from, midi_to)) {
+    if (!core->load(params_path, (float)sample_rate_, logger_, midi_from, midi_to)) {
         logger_.log("CoreEngine", LogSeverity::Error, "Core load failed");
         return false;
     }
 
-    applyConfigJson(config_json_path, core_.get(), logger_);
+    applyConfigJson(config_json_path, core.get(), logger_);
+
+    // Store in multi-core map and set as active
+    active_core_name_ = core_name;
+    active_core_      = core.get();
+    cores_[core_name] = std::move(core);
 
     delete[] buf_l_;
     delete[] buf_r_;
@@ -138,9 +143,46 @@ bool CoreEngine::initialize(const std::string& core_name,
     peak_decay_coeff_ = std::pow(10.f, -1.f / bps);  // -20 dB/s
 
     logger_.log("CoreEngine", LogSeverity::Info,
-        std::string("Ready. Core=") + core_->coreName() +
+        std::string("Ready. Core=") + active_core_->coreName() +
         " SR=" + std::to_string(sample_rate_) +
         " block=" + std::to_string(block_size_));
+    return true;
+}
+
+// ── switchCore ────────────────────────────────────────────────────────────────
+
+bool CoreEngine::switchCore(const std::string& core_name,
+                             const std::string& params_path) {
+    if (core_name == active_core_name_) return true;  // already active
+
+    // Lazy-instantiate: create core only on first use
+    if (cores_.find(core_name) == cores_.end()) {
+        logger_.log("CoreEngine", LogSeverity::Info,
+                    "Instantiating core: " + core_name);
+
+        auto new_core = SynthCoreRegistry::instance().create(core_name);
+        if (!new_core) {
+            logger_.log("CoreEngine", LogSeverity::Error,
+                        "Unknown core: '" + core_name + "'");
+            return false;
+        }
+
+        if (!new_core->load(params_path, (float)sample_rate_, logger_)) {
+            logger_.log("CoreEngine", LogSeverity::Error,
+                        "Core load failed for " + core_name);
+            return false;
+        }
+
+        cores_[core_name] = std::move(new_core);
+    }
+
+    // Switch active — no audio interruption. Old core's voices dozvuk naturally.
+    active_core_name_ = core_name;
+    active_core_      = cores_[core_name].get();
+
+    logger_.log("CoreEngine", LogSeverity::Info,
+        std::string("Active core: ") + active_core_->coreName()
+        + " (" + std::to_string(cores_.size()) + " cores loaded)");
     return true;
 }
 
@@ -169,27 +211,32 @@ void CoreEngine::audioCallback(ma_device*  device,
 }
 
 void CoreEngine::processBlock(float* out_l, float* out_r, int n) noexcept {
-    // Drain MIDI queue
-    int r = midi_r_.load(std::memory_order_acquire);
-    int w = midi_w_.load(std::memory_order_relaxed);
-    while (r != w) {
-        const MidiEvt& ev = midi_q_[r];
-        switch (ev.type) {
-            case MidiEvt::NOTE_ON:       core_->noteOn(ev.midi, ev.value);    break;
-            case MidiEvt::NOTE_OFF:      core_->noteOff(ev.midi);             break;
-            case MidiEvt::SUSTAIN:       core_->sustainPedal(ev.value >= 64); break;
-            case MidiEvt::ALL_NOTES_OFF: core_->allNotesOff();                break;
+    // Drain MIDI queue — route events to ACTIVE core only
+    if (active_core_) {
+        int r = midi_r_.load(std::memory_order_acquire);
+        int w = midi_w_.load(std::memory_order_relaxed);
+        while (r != w) {
+            const MidiEvt& ev = midi_q_[r];
+            switch (ev.type) {
+                case MidiEvt::NOTE_ON:       active_core_->noteOn(ev.midi, ev.value);    break;
+                case MidiEvt::NOTE_OFF:      active_core_->noteOff(ev.midi);             break;
+                case MidiEvt::SUSTAIN:       active_core_->sustainPedal(ev.value >= 64); break;
+                case MidiEvt::ALL_NOTES_OFF: active_core_->allNotesOff();                break;
+            }
+            r = (r + 1) % MIDI_Q_SIZE;
         }
-        r = (r + 1) % MIDI_Q_SIZE;
+        midi_r_.store(r, std::memory_order_release);
     }
-    midi_r_.store(r, std::memory_order_release);
 
     // Zero buffers (core output is additive)
     std::memset(out_l, 0, n * sizeof(float));
     std::memset(out_r, 0, n * sizeof(float));
 
-    // Core synthesis
-    if (core_) core_->processBlock(out_l, out_r, n);
+    // Process ALL instantiated cores — voices in non-active cores
+    // continue to produce audio (dozvuk / release tails).
+    for (auto& [name, core] : cores_) {
+        core->processBlock(out_l, out_r, n);
+    }
 
     // Master gain / LFO pan / DSP
     applyMasterAndLfo(out_l, out_r, n);
@@ -335,8 +382,8 @@ void CoreEngine::setBBEBassBoost    (uint8_t v) noexcept { dsp_.setBBEBassBoost(
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
 int CoreEngine::activeVoices() const {
-    if (!core_) return 0;
-    return core_->getVizState().active_voice_count;
+    if (!active_core_) return 0;
+    return active_core_->getVizState().active_voice_count;
 }
 
 // ── SysEx handling (MIDI callback thread) ────────────────────────────────────
@@ -402,30 +449,30 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
     switch (cmd) {
 
     case 0x01: {  // SET_NOTE_PARAM — midi vel param_id value(5)
-        if (payloadLen < 8 || !core_) break;
+        if (payloadLen < 8 || !active_core_) break;
         int         midi  = payload[0];
         int         vel   = payload[1];
         uint8_t     pid   = payload[2];
         float       value = decodeSysExFloat(payload + 3);
         const char* key   = noteParamKey(pid);
-        if (key) core_->setNoteParam(midi, vel, key, value);
+        if (key) active_core_->setNoteParam(midi, vel, key, value);
         break;
     }
 
     case 0x02: {  // SET_NOTE_PARTIAL — midi vel k param_id value(5)
-        if (payloadLen < 9 || !core_) break;
+        if (payloadLen < 9 || !active_core_) break;
         int         midi  = payload[0];
         int         vel   = payload[1];
         int         k     = payload[2];
         uint8_t     pid   = payload[3];
         float       value = decodeSysExFloat(payload + 4);
         const char* key   = partialParamKey(pid);
-        if (key) core_->setNotePartialParam(midi, vel, k, key, value);
+        if (key) active_core_->setNotePartialParam(midi, vel, k, key, value);
         break;
     }
 
     case 0x03: {  // SET_BANK — 3-byte 7-bit chunk_idx + 3-byte 7-bit total_chunks + data
-        if (payloadLen < 6 || !core_) break;
+        if (payloadLen < 6 || !active_core_) break;
         int chunk_idx    = ((int)payload[0] << 14) | ((int)payload[1] << 7) | payload[2];
         int total_chunks = ((int)payload[3] << 14) | ((int)payload[4] << 7) | payload[5];
         const uint8_t* chunk_data = payload + 6;
@@ -442,7 +489,7 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
         ++bank_chunk_recv_;
 
         if (bank_chunk_recv_ >= bank_chunk_total_) {
-            if (core_->loadBankJson(bank_chunk_buf_))
+            if (active_core_->loadBankJson(bank_chunk_buf_))
                 logger_.log("CoreEngine", LogSeverity::Info,
                             "SET_BANK: bank applied ("
                             + std::to_string(bank_chunk_buf_.size()) + " bytes)");
@@ -464,7 +511,7 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
         if (pid <= 0x07) {
             // ISynthCore global params (beat_scale, noise_level, …)
             const char* key = masterCoreParamKey(pid);
-            if (key && core_) core_->setParam(key, value);
+            if (key && active_core_) active_core_->setParam(key, value);
 
         } else if (pid >= 0x10 && pid <= 0x13) {
             // CoreEngine mix params — write directly to atomics
@@ -507,10 +554,10 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
         return { 0xF0, 0x7D, 0x01, 0x71, 0xF7 };
 
     case 0x72: {  // EXPORT_BANK — path as ASCII bytes in payload
-        if (payloadLen < 1 || !core_) break;
+        if (payloadLen < 1 || !active_core_) break;
         std::string export_path(reinterpret_cast<const char*>(payload),
                                 (size_t)payloadLen);
-        if (core_->exportBankJson(export_path))
+        if (active_core_->exportBankJson(export_path))
             logger_.log("CoreEngine", LogSeverity::Info,
                         "EXPORT_BANK: wrote " + export_path);
         else
@@ -594,7 +641,7 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
                              const std::string& out_dir,
                              int sr)
 {
-    if (!core_ || !core_->isLoaded()) {
+    if (!active_core_ || !active_core_->isLoaded()) {
         logger_.log("ICR", LogSeverity::Error, "renderBatch: core not loaded");
         return 0;
     }
@@ -628,7 +675,7 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
 
     // Set SR on core (only if different from default — avoids needless recompute)
     sample_rate_ = sr;
-    core_->setSampleRate((float)sr);
+    active_core_->setSampleRate((float)sr);
 
     std::vector<float> buf_l(BLOCK), buf_r(BLOCK);
 
@@ -655,28 +702,28 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
         std::vector<float> mono;
         mono.reserve((size_t)total_samples);
 
-        core_->allNotesOff();
-        core_->noteOn(midi_u, vel_u);
+        active_core_->allNotesOff();
+        active_core_->noteOn(midi_u, vel_u);
 
         // Render sustain
         for (int s = 0; s < sustain_samples; ) {
             int n = (std::min)(BLOCK, sustain_samples - s);
             std::fill(buf_l.begin(), buf_l.begin() + n, 0.f);
             std::fill(buf_r.begin(), buf_r.begin() + n, 0.f);
-            core_->processBlock(buf_l.data(), buf_r.data(), n);
+            active_core_->processBlock(buf_l.data(), buf_r.data(), n);
             for (int j = 0; j < n; j++)
                 mono.push_back((buf_l[j] + buf_r[j]) * 0.5f);
             s += n;
         }
 
-        core_->noteOff(midi_u);
+        active_core_->noteOff(midi_u);
 
         // Render release tail
         for (int s = 0; s < tail_samples; ) {
             int n = (std::min)(BLOCK, tail_samples - s);
             std::fill(buf_l.begin(), buf_l.begin() + n, 0.f);
             std::fill(buf_r.begin(), buf_r.begin() + n, 0.f);
-            core_->processBlock(buf_l.data(), buf_r.data(), n);
+            active_core_->processBlock(buf_l.data(), buf_r.data(), n);
             for (int j = 0; j < n; j++)
                 mono.push_back((buf_l[j] + buf_r[j]) * 0.5f);
             s += n;

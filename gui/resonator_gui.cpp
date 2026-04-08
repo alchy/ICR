@@ -15,6 +15,8 @@
 
 #include "resonator_gui.h"
 #include "../engine/midi_input.h"
+#include "../engine/synth_core_registry.h"
+#include "../cores/sampler/sampler_core.h"
 #include "../dsp/dsp_chain.h"
 
 #include "imgui.h"
@@ -96,6 +98,11 @@ static const char* noteName(int midi) {
 
 // ── GUI state ─────────────────────────────────────────────────────────────────
 struct GuiState {
+    // Core selector
+    std::vector<std::string> core_names;
+    int  selected_core   = 0;
+    std::string active_core_name;
+
     std::vector<std::string> ports;
     int  selected_port   = 0;
     bool midi_connected  = false;
@@ -695,6 +702,15 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
     ImGui_ImplOpenGL3_Init("#version 330");
 
     GuiState gs;
+    // Populate core list from registry
+    gs.core_names = SynthCoreRegistry::instance().availableCores();
+    gs.active_core_name = engine.core() ? engine.core()->coreName() : "SineCore";
+    for (int i = 0; i < (int)gs.core_names.size(); i++) {
+        if (gs.core_names[i] == gs.active_core_name) {
+            gs.selected_core = i;
+            break;
+        }
+    }
     // Sync convolver state from engine (--ir may have loaded it)
     if (DspChain* dsp = engine.getDspChain()) {
         if (dsp->isConvolverLoaded()) {
@@ -741,9 +757,67 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             ImGuiWindowFlags_NoMove     | ImGuiWindowFlags_NoScrollbar);
 
         // ═══════════════════════════════════════════════════════════════════════
-        // ROW 0: Top bar — MIDI port, status, LEDs, level
+        // ROW 0: Top bar — Core selector, MIDI port, status, LEDs, level
         // ═══════════════════════════════════════════════════════════════════════
         {
+            // ── Core selector ────────────────────────────────────────────────
+            ImGui::Text("Core:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(260.f);
+            const char* core_preview = gs.core_names.empty() ? "(none)"
+                                     : gs.core_names[gs.selected_core].c_str();
+            if (ImGui::BeginCombo("##core", core_preview)) {
+                for (int i = 0; i < (int)gs.core_names.size(); i++) {
+                    bool sel = (i == gs.selected_core);
+                    if (ImGui::Selectable(gs.core_names[i].c_str(), sel)) {
+                        if (i != gs.selected_core) {
+                            gs.selected_core = i;
+                            const std::string& name = gs.core_names[i];
+                            if (engine.switchCore(name, "")) {
+                                gs.active_core_name = name;
+                            } else {
+                                // revert selection on failure
+                                for (int j = 0; j < (int)gs.core_names.size(); j++) {
+                                    if (gs.core_names[j] == gs.active_core_name) {
+                                        gs.selected_core = j;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::SameLine(0, 20.f);
+
+            // ── Bank selector (SamplerCore only) ─────────────────────────────
+            if (auto* sc = dynamic_cast<SamplerCore*>(engine.core())) {
+                const auto& banks = sc->bankNames();
+                if (!banks.empty()) {
+                    ImGui::Text("Bank:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(180.f);
+                    const char* bank_preview = sc->activeBankName().empty()
+                                             ? "(none)" : sc->activeBankName().c_str();
+                    if (ImGui::BeginCombo("##bank", bank_preview)) {
+                        for (const auto& bname : banks) {
+                            bool sel = (bname == sc->activeBankName());
+                            if (ImGui::Selectable(bname.c_str(), sel)) {
+                                if (bname != sc->activeBankName()) {
+                                    sc->selectBank(bname, engine.getLogger());
+                                }
+                            }
+                            if (sel) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SameLine(0, 20.f);
+                }
+            }
+
+            // ── MIDI port ────────────────────────────────────────────────────
             ImGui::Text("MIDI Port:");
             ImGui::SameLine();
             ImGui::SetNextItemWidth(280.f);

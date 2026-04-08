@@ -29,6 +29,7 @@
 #include <memory>
 #include <string>
 #include <vector>
+#include <unordered_map>
 #include <atomic>
 #include <cstdint>
 
@@ -54,6 +55,13 @@ public:
                     int                midi_from = 0,
                     int                midi_to   = 127);
 
+    // Switch the active core at runtime.  MIDI events are routed to the active
+    // core only, but ALL instantiated cores continue to processBlock (for dozvuk).
+    // Cores are lazy-instantiated on first selection and kept alive in memory.
+    // No audio interruption — the old core's voices decay naturally.
+    bool switchCore(const std::string& core_name,
+                    const std::string& params_path);
+
     // Phase 2: open audio device and start RT callback.
     bool start();
 
@@ -61,7 +69,7 @@ public:
     void stop();
 
     bool isRunning()     const { return running_.load(); }
-    bool isInitialized() const { return core_ && core_->isLoaded(); }
+    bool isInitialized() const { return active_core_ && active_core_->isLoaded(); }
 
     // ── Thread-safe MIDI ──────────────────────────────────────────────────────
     void noteOn      (uint8_t midi, uint8_t velocity);
@@ -102,9 +110,16 @@ public:
                     int                sr = 48000);
 
     // ── Accessors ─────────────────────────────────────────────────────────────
-    ISynthCore*  core()        noexcept { return core_.get();  }
+    ISynthCore*  core()        noexcept { return active_core_;  }
+    const std::string& activeCoreName() const noexcept { return active_core_name_; }
     DspChain*    getDspChain() noexcept { return &dsp_;        }
     Logger&      getLogger()   noexcept { return logger_;      }
+
+    // Access a specific instantiated core by name (nullptr if not yet created).
+    ISynthCore* coreByName(const std::string& name) noexcept {
+        auto it = cores_.find(name);
+        return (it != cores_.end()) ? it->second.get() : nullptr;
+    }
 
     int   activeVoices()     const;   // GUI thread only; allocates via getVizState
     float getOutputPeakLin() const noexcept { return output_peak_lin_.load(std::memory_order_relaxed); }
@@ -133,7 +148,12 @@ private:
     void processBlock(float* out_l, float* out_r, int n_samples) noexcept;
     void applyMasterAndLfo(float* out_l, float* out_r, int n_samples) noexcept;
 
-    std::unique_ptr<ISynthCore> core_;
+    // Multi-core: all instantiated cores live here. MIDI goes to active_core_,
+    // but processBlock iterates ALL cores (so releasing voices dozvuk naturally).
+    std::unordered_map<std::string, std::unique_ptr<ISynthCore>> cores_;
+    ISynthCore*  active_core_      = nullptr;   // RT fast-path (never null after init)
+    std::string  active_core_name_;
+
     DspChain                    dsp_;
     Logger                      logger_;
 

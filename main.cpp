@@ -44,6 +44,7 @@
 #include "cores/sine/sine_core.h"
 #include "cores/additive_synthesis_piano/additive_synthesis_piano_core.h"
 #include "cores/physical_modeling_piano/physical_modeling_piano_core.h"
+#include "cores/sampler/sampler_core.h"
 
 #include <string>
 #include <vector>

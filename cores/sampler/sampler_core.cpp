@@ -1,0 +1,536 @@
+/*
+ * cores/sampler/sampler_core.cpp
+ * ------------------------------
+ * WAV sample playback engine.  Discovers banks from a base directory,
+ * loads WAV files on demand, plays back with envelope and velocity layers.
+ */
+
+#include "sampler_core.h"
+#include "wav_loader.h"
+#include "engine/synth_core_registry.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <cmath>
+#include <regex>
+
+#ifdef _WIN32
+#  include <windows.h>
+#else
+#  include <dirent.h>
+#  include <sys/stat.h>
+#endif
+
+REGISTER_SYNTH_CORE("SamplerCore", SamplerCore)
+
+// Default base directory for sample banks
+static const char* DEFAULT_SAMPLE_DIR =
+#ifdef _WIN32
+    "C:\\SoundBanks\\IthacaPlayer";
+#else
+    "/opt/SoundBanks/IthacaPlayer";
+#endif
+
+// -- Directory scanning helpers -----------------------------------------------
+
+#ifdef _WIN32
+static std::vector<std::string> listSubdirectories(const std::string& dir) {
+    std::vector<std::string> result;
+    std::string pattern = dir + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return result;
+    do {
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
+            fd.cFileName[0] != '.') {
+            result.push_back(fd.cFileName);
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+static std::vector<std::string> listFiles(const std::string& dir) {
+    std::vector<std::string> result;
+    std::string pattern = dir + "\\*";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h == INVALID_HANDLE_VALUE) return result;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
+            result.push_back(fd.cFileName);
+        }
+    } while (FindNextFileA(h, &fd));
+    FindClose(h);
+    return result;
+}
+#else
+static std::vector<std::string> listSubdirectories(const std::string& dir) {
+    std::vector<std::string> result;
+    DIR* d = opendir(dir.c_str());
+    if (!d) return result;
+    struct dirent* ent;
+    while ((ent = readdir(d))) {
+        if (ent->d_name[0] == '.') continue;
+        std::string full = dir + "/" + ent->d_name;
+        struct stat st;
+        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
+            result.push_back(ent->d_name);
+    }
+    closedir(d);
+    std::sort(result.begin(), result.end());
+    return result;
+}
+
+static std::vector<std::string> listFiles(const std::string& dir) {
+    std::vector<std::string> result;
+    DIR* d = opendir(dir.c_str());
+    if (!d) return result;
+    struct dirent* ent;
+    while ((ent = readdir(d))) {
+        if (ent->d_type == DT_REG || ent->d_type == DT_UNKNOWN)
+            result.push_back(ent->d_name);
+    }
+    closedir(d);
+    return result;
+}
+#endif
+
+// -- Path separator -----------------------------------------------------------
+
+#ifdef _WIN32
+static const char PATH_SEP = '\\';
+#else
+static const char PATH_SEP = '/';
+#endif
+
+// -- Constructor --------------------------------------------------------------
+
+SamplerCore::SamplerCore() {}
+
+// -- Bank discovery -----------------------------------------------------------
+
+void SamplerCore::discoverBanks(const std::string& base_dir) {
+    banks_.clear();
+    bank_names_.clear();
+
+    auto subdirs = listSubdirectories(base_dir);
+    // WAV name pattern: mXXX-velY-fZZ.wav
+    std::regex wav_pat(R"(m\d{3}-vel\d-f\d+\.wav)", std::regex::icase);
+
+    for (const auto& name : subdirs) {
+        std::string full = base_dir + PATH_SEP + name;
+        auto files = listFiles(full);
+
+        bool has_wav = false;
+        for (const auto& fname : files) {
+            if (std::regex_match(fname, wav_pat)) {
+                has_wav = true;
+                break;
+            }
+        }
+
+        if (has_wav) {
+            SampleBank bank;
+            bank.name = name;
+            bank.path = full;
+            banks_.push_back(std::move(bank));
+            bank_names_.push_back(name);
+        }
+    }
+}
+
+// -- Bank loading -------------------------------------------------------------
+
+bool SamplerCore::loadBank(SampleBank& bank, float sr, Logger& logger) {
+    if (bank.loaded) return true;
+
+    logger.log("SamplerCore", LogSeverity::Info,
+               "Loading bank: " + bank.name + " from " + bank.path);
+
+    auto files = listFiles(bank.path);
+    std::regex wav_pat(R"(m(\d{3})-vel(\d)-f(\d+)\.wav)", std::regex::icase);
+
+    int count = 0;
+    for (const auto& fname : files) {
+        std::smatch match;
+        if (!std::regex_match(fname, match, wav_pat)) continue;
+
+        int midi = std::stoi(match[1].str());
+        int vel  = std::stoi(match[2].str());
+        if (midi < 0 || midi > 127 || vel < 0 || vel >= SAMPLER_VEL_LAYERS) continue;
+
+        std::string full_path = bank.path + PATH_SEP + fname;
+        wav::WavData w = wav::load(full_path);
+        if (!w.valid) {
+            logger.log("SamplerCore", LogSeverity::Warning,
+                       "Failed to load: " + fname);
+            continue;
+        }
+
+        SampleBuffer& sb = bank.samples[midi][vel];
+        sb.data        = std::move(w.samples);
+        sb.frames      = w.frames;
+        sb.sample_rate = w.sample_rate;
+        sb.loaded      = true;
+
+        if (vel >= bank.vel_layers_available[midi])
+            bank.vel_layers_available[midi] = vel + 1;
+
+        count++;
+    }
+
+    bank.loaded = (count > 0);
+    if (bank.loaded) {
+        logger.log("SamplerCore", LogSeverity::Info,
+                   "Loaded " + std::to_string(count) + " samples from " + bank.name);
+    }
+    return bank.loaded;
+}
+
+bool SamplerCore::selectBank(const std::string& name, Logger& logger) {
+    for (int i = 0; i < (int)banks_.size(); i++) {
+        if (banks_[i].name == name) {
+            if (!banks_[i].loaded) {
+                if (!loadBank(banks_[i], sample_rate_, logger))
+                    return false;
+            }
+            std::lock_guard<std::mutex> lk(bank_mutex_);
+            active_bank_idx_  = i;
+            active_bank_name_ = name;
+            return true;
+        }
+    }
+    return false;
+}
+
+// -- ISynthCore implementation ------------------------------------------------
+
+bool SamplerCore::load(const std::string& params_path, float sr,
+                        Logger& logger, int midi_from, int midi_to) {
+    sample_rate_ = sr;
+
+    // params_path for SamplerCore = base directory (or use default)
+    std::string base_dir = params_path.empty() ? DEFAULT_SAMPLE_DIR : params_path;
+    discoverBanks(base_dir);
+
+    if (banks_.empty()) {
+        logger.log("SamplerCore", LogSeverity::Warning,
+                   "No sample banks found in " + base_dir);
+        // Still "loaded" -- works with no sound until a bank is selected
+        loaded_ = true;
+        return true;
+    }
+
+    logger.log("SamplerCore", LogSeverity::Info,
+               "Found " + std::to_string(banks_.size()) + " banks in " + base_dir);
+
+    // Auto-load first bank
+    if (selectBank(banks_[0].name, logger)) {
+        logger.log("SamplerCore", LogSeverity::Info,
+                   "Default bank: " + banks_[0].name);
+    }
+
+    loaded_ = true;
+    return true;
+}
+
+void SamplerCore::setSampleRate(float sr) {
+    sample_rate_ = sr;
+}
+
+// -- MIDI ---------------------------------------------------------------------
+
+void SamplerCore::noteOn(uint8_t midi, uint8_t velocity) {
+    if (midi >= SAMPLER_MAX_VOICES) return;
+    if (velocity == 0) { noteOff(midi); return; }
+    if (active_bank_idx_ < 0) return;
+
+    patch_mgr_.noteOn(midi, velocity, banks_[active_bank_idx_],
+                      voice_mgr_, sample_rate_,
+                      keyboard_spread_.load(std::memory_order_relaxed),
+                      bank_mutex_);
+}
+
+void SamplerCore::noteOff(uint8_t midi) {
+    if (midi >= SAMPLER_MAX_VOICES) return;
+    patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_);
+}
+
+void SamplerCore::sustainPedal(bool down) {
+    patch_mgr_.sustainPedal(down, voice_mgr_, sample_rate_);
+}
+
+void SamplerCore::allNotesOff() {
+    patch_mgr_.allNotesOff(voice_mgr_, sample_rate_);
+}
+
+// -- PatchManager -------------------------------------------------------------
+
+void SamplerPatchManager::noteOn(
+        uint8_t midi, uint8_t velocity,
+        SampleBank& bank,
+        SamplerVoiceManager& vm,
+        float sample_rate,
+        float keyboard_spread,
+        std::mutex& bank_mutex) noexcept {
+    std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
+    if (!lk.owns_lock()) return;
+
+    // Find best velocity layer
+    int n_layers = bank.vel_layers_available[midi];
+    if (n_layers == 0) return;  // no samples for this note
+
+    int vel_idx = velToLayer(velocity);
+    // Clamp to available layers, fall back to nearest
+    if (vel_idx >= n_layers) vel_idx = n_layers - 1;
+    // Find loaded sample (search down then up)
+    const SampleBuffer* sample = nullptr;
+    for (int v = vel_idx; v >= 0; v--) {
+        if (bank.samples[midi][v].loaded) { sample = &bank.samples[midi][v]; break; }
+    }
+    if (!sample) {
+        for (int v = vel_idx + 1; v < SAMPLER_VEL_LAYERS; v++) {
+            if (bank.samples[midi][v].loaded) { sample = &bank.samples[midi][v]; break; }
+        }
+    }
+    if (!sample) return;
+
+    vm.initVoice(midi, velocity, sample, sample_rate, keyboard_spread);
+
+    last_midi_.store(midi,     std::memory_order_relaxed);
+    last_vel_ .store(velocity, std::memory_order_relaxed);
+}
+
+void SamplerPatchManager::noteOff(uint8_t midi, SamplerVoiceManager& vm,
+                                   float sr) noexcept {
+    if (sustain_.load(std::memory_order_relaxed))
+        delayed_offs_[midi].store(true, std::memory_order_relaxed);
+    else
+        vm.releaseVoice(midi, sr);
+}
+
+void SamplerPatchManager::sustainPedal(bool down, SamplerVoiceManager& vm,
+                                        float sr) noexcept {
+    sustain_.store(down, std::memory_order_relaxed);
+    if (!down) {
+        for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
+            if (delayed_offs_[m].load(std::memory_order_relaxed)) {
+                vm.releaseVoice(m, sr);
+                delayed_offs_[m].store(false, std::memory_order_relaxed);
+            }
+        }
+    }
+}
+
+void SamplerPatchManager::allNotesOff(SamplerVoiceManager& vm, float sr) noexcept {
+    vm.releaseAll(sr);
+    for (int m = 0; m < SAMPLER_MAX_VOICES; m++)
+        delayed_offs_[m].store(false, std::memory_order_relaxed);
+    sustain_.store(false, std::memory_order_relaxed);
+}
+
+// -- VoiceManager -------------------------------------------------------------
+
+bool SamplerVoiceManager::processBlock(float* out_l, float* out_r,
+                                        int n_samples, float sr) noexcept {
+    bool any = false;
+    for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
+        if (!voices_[m].active) continue;
+        voices_[m].process(out_l, out_r, n_samples, sr);
+        any = true;
+    }
+    return any;
+}
+
+void SamplerVoiceManager::initVoice(int midi, uint8_t velocity,
+                                     const SampleBuffer* sample,
+                                     float sr, float keyboard_spread) noexcept {
+    SamplerVoice& v = voices_[midi];
+
+    // If voice is active, capture damping buffer for click-free retrigger
+    if (v.active && v.sample && v.position < v.sample->frames) {
+        int damp_frames = (std::min)((int)(SAMPLER_DAMPING_MS * 0.001f * sr), 2048);
+        int avail = (std::min)(damp_frames, v.sample->frames - v.position);
+        if (avail > 0) {
+            const float* src = v.sample->data.data() + v.position * 2;
+            // Apply current envelope to damping buffer
+            float env = v.vel_gain;
+            if (v.releasing) env *= v.rel_gain;
+            float fade_step = 1.f / (float)avail;
+            for (int i = 0; i < avail; i++) {
+                float fade = 1.f - (float)i * fade_step;  // linear fadeout
+                v.damp_buf[i * 2]     = src[i * 2]     * env * fade * v.pan_l;
+                v.damp_buf[i * 2 + 1] = src[i * 2 + 1] * env * fade * v.pan_r;
+            }
+            v.damp_len = avail;
+            v.damp_pos = 0;
+            v.damping  = true;
+        }
+    }
+
+    v.active    = true;
+    v.releasing = false;
+    v.in_onset  = true;
+    v.midi      = midi;
+    v.velocity  = velocity;
+    v.sample    = sample;
+    v.position  = 0;
+
+    // Velocity gain: logarithmic curve for natural response
+    float vel_norm = (float)velocity / 127.f;
+    v.vel_gain = vel_norm * vel_norm;  // quadratic approximation
+
+    // Onset ramp
+    v.onset_gain = 0.f;
+    v.onset_step = 1.f / (SAMPLER_ATTACK_MS * 0.001f * sr);
+    v.rel_gain   = 1.f;
+    v.rel_step   = 0.f;
+
+    // Panning
+    float angle = (dsp::PI / 4.f)
+                + ((float)midi - 64.5f) / 87.0f * keyboard_spread * 0.5f;
+    v.pan_l = std::cos(angle);
+    v.pan_r = std::sin(angle);
+}
+
+void SamplerVoiceManager::releaseVoice(int midi, float sr) noexcept {
+    SamplerVoice& v = voices_[midi];
+    if (!v.active) return;
+    v.releasing = true;
+    v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
+    v.rel_step  = -v.rel_gain / (SAMPLER_RELEASE_MS * 0.001f * sr);
+}
+
+void SamplerVoiceManager::releaseAll(float sr) noexcept {
+    for (int m = 0; m < SAMPLER_MAX_VOICES; m++)
+        if (voices_[m].active) releaseVoice(m, sr);
+}
+
+// -- Voice::process -----------------------------------------------------------
+
+bool SamplerVoice::process(float* out_l, float* out_r, int n_samples,
+                            float sample_rate) noexcept {
+    if (!sample || !sample->loaded) { active = false; return false; }
+
+    for (int i = 0; i < n_samples; i++) {
+        // Damping buffer (retrigger crossfade from previous note)
+        if (damping && damp_pos < damp_len) {
+            out_l[i] += damp_buf[damp_pos * 2];
+            out_r[i] += damp_buf[damp_pos * 2 + 1];
+            damp_pos++;
+            if (damp_pos >= damp_len) damping = false;
+        }
+
+        // End of sample
+        if (position >= sample->frames) {
+            active = false;
+            break;
+        }
+
+        // Read stereo sample
+        float sL = sample->data[position * 2];
+        float sR = sample->data[position * 2 + 1];
+        position++;
+
+        // Onset ramp
+        float env = 1.f;
+        if (in_onset) {
+            onset_gain += onset_step;
+            if (onset_gain >= 1.f) { onset_gain = 1.f; in_onset = false; }
+            env = onset_gain;
+        }
+
+        // Release ramp
+        if (releasing) {
+            env *= rel_gain;
+            rel_gain += rel_step;
+            if (rel_gain <= 0.f) {
+                rel_gain = 0.f;
+                active = false;
+            }
+        }
+
+        // Output with velocity gain and pan
+        float g = vel_gain * env;
+        out_l[i] += sL * g * pan_l;
+        out_r[i] += sR * g * pan_r;
+
+        if (!active) break;
+    }
+    return active;
+}
+
+// -- processBlock (RT) --------------------------------------------------------
+
+bool SamplerCore::processBlock(float* out_l, float* out_r,
+                                int n_samples) noexcept {
+    return voice_mgr_.processBlock(out_l, out_r, n_samples, sample_rate_);
+}
+
+// -- Parameters ---------------------------------------------------------------
+
+bool SamplerCore::setParam(const std::string& key, float value) {
+    if (key == "gain") {
+        gain_.store((std::max)(0.f, (std::min)(2.f, value)),
+                    std::memory_order_relaxed);
+        return true;
+    }
+    if (key == "keyboard_spread") {
+        keyboard_spread_.store((std::max)(0.f, (std::min)(3.14159f, value)),
+                               std::memory_order_relaxed);
+        return true;
+    }
+    if (key == "release_time") {
+        release_time_.store((std::max)(0.1f, (std::min)(4.f, value)),
+                            std::memory_order_relaxed);
+        return true;
+    }
+    return false;
+}
+
+bool SamplerCore::getParam(const std::string& key, float& out) const {
+    if (key == "gain")            { out = gain_.load(std::memory_order_relaxed);            return true; }
+    if (key == "keyboard_spread") { out = keyboard_spread_.load(std::memory_order_relaxed); return true; }
+    if (key == "release_time")    { out = release_time_.load(std::memory_order_relaxed);    return true; }
+    return false;
+}
+
+std::vector<CoreParamDesc> SamplerCore::describeParams() const {
+    return {
+        { "gain",            "Gain",            "Output",  "",
+          gain_.load(),            0.f, 2.f, false },
+        { "keyboard_spread", "Keyboard Spread", "Stereo",  "rad",
+          keyboard_spread_.load(), 0.f, 3.14159f, false },
+        { "release_time",    "Release Time",    "Envelope", "",
+          release_time_.load(),    0.1f, 4.f, false },
+    };
+}
+
+// -- Visualization ------------------------------------------------------------
+
+CoreVizState SamplerCore::getVizState() const {
+    CoreVizState vs;
+
+    for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
+        if (voice_mgr_.voice(m).active) {
+            vs.active_midi_notes.push_back(m);
+            vs.active_voice_count++;
+        }
+    }
+
+    int last_midi = patch_mgr_.lastMidi();
+    int last_vel  = patch_mgr_.lastVel();
+    if (last_midi >= 0 && last_midi < 128) {
+        CoreVoiceViz vv;
+        vv.midi = last_midi;
+        vv.vel  = last_vel;
+        vv.f0_hz = 440.f * std::pow(2.f, (float)(last_midi - 69) / 12.f);
+        vs.last_note       = std::move(vv);
+        vs.last_note_valid = true;
+    }
+
+    return vs;
+}
