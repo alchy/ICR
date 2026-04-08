@@ -77,6 +77,27 @@ export default {
         post("/sysex/master", { param_key: paramKey, value }),
     sysexPing:       ()           => post("/sysex/ping"),
 
+    // ── Catalog ──────────────────────────────────────────────────────────────
+    getCatalog:      ()                              => get("/catalog"),
+    catalogAdd:      (midi, vel, rating, bankFile, bankPath) =>
+        post("/catalog/add", { midi, vel, rating, bank_file: bankFile, bank_path: bankPath }),
+    catalogRemove:   (entryId)                       => del(`/catalog/${entryId}`),
+    catalogClear:    ()                              => del("/catalog"),
+    catalogFind:     (midi, vel)                     =>
+        get(`/catalog/find/${midi}${vel !== undefined ? `?vel=${vel}` : ""}`),
+
+    // ── Bank Assembler ──────────────────────────────────────────────────────
+    assemblerInit:   (bankPath)                      => post("/assembler/init", { bank_path: bankPath }),
+    assemblerDeepCopy: (midi, vel, sourceBankPath)   =>
+        post("/assembler/deepcopy", { midi, vel, source_bank_path: sourceBankPath }),
+    assemblerSummary: ()                             => get("/assembler/summary"),
+    assemblerSources: ()                             => get("/assembler/sources"),
+    assemblerSave:   (outputDir, bankName)           =>
+        post("/assembler/save", { output_dir: outputDir, bank_name: bankName }),
+    assemblerPreview: ()                             => get("/assembler/preview"),
+    getBankNote:     (bankPath, midi, vel)            =>
+        get(`/bank/note?bank_path=${encodeURIComponent(bankPath)}&midi=${midi}&vel=${vel}`),
+
     // ── EQ editor ────────────────────────────────────────────────────────────
     getEq:           (midi, vel)                      => get(`/eq/${midi}/${vel}`),
     updateEq:        (midi, vel, freqs_hz, gains_db)  =>

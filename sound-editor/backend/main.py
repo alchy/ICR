@@ -26,6 +26,7 @@ from pydantic import BaseModel
 from params_store   import ParamsStore
 from spline_engine  import SplineEngine, SplineState, SplineConfig, ControlPoint
 from sysex_bridge   import SysExBridge, list_output_ports
+from catalog_store  import CatalogStore, BankAssembler
 from layer_registry import get_all_layers, group_layers, get_layer, build_layers_from_schema
 from schema_infer   import infer_schema
 from eq_editor      import refit_biquads
@@ -48,9 +49,11 @@ _BANKS_DIR    = Path(os.environ.get("ICR_BANKS_DIR", _REPO_ROOT / "soundbanks-ad
 
 # ── Singletons ────────────────────────────────────────────────────────────────
 
-store   = ParamsStore()
-engine  = SplineEngine()
-bridge  = SysExBridge()
+store     = ParamsStore()
+engine    = SplineEngine()
+bridge    = SysExBridge()
+catalog   = CatalogStore()
+assembler = BankAssembler()
 splines: dict[str, SplineState] = {}   # layer_id → SplineState
 
 
@@ -102,6 +105,25 @@ class SysExPartialRequest(BaseModel):
 class SysExMasterRequest(BaseModel):
     param_key: str
     value:     float
+
+class CatalogAddRequest(BaseModel):
+    midi:      int
+    vel:       int
+    rating:    int   = 3    # 1-5
+    bank_file: str          # filename only
+    bank_path: str          # full path
+
+class AssemblerInitRequest(BaseModel):
+    bank_path: str          # full path to base bank
+
+class DeepCopyRequest(BaseModel):
+    midi:            int
+    vel:             int    = -1   # -1 = all velocity layers
+    source_bank_path: str
+
+class AssemblerSaveRequest(BaseModel):
+    output_dir: str
+    bank_name:  str = "edit"
 
 class AuditionRequest(BaseModel):
     midi:     int
@@ -775,6 +797,108 @@ def editor_correct(req: CorrectRequest):
         dst_partials.sort(key=lambda p: p.get("k", 0))
 
     return {"applied": applied, "copied_partials": copied}
+
+
+# ── Catalog endpoints ─────────────────────────────────────────────────────────
+
+@app.get("/catalog")
+def get_catalog():
+    return {"entries": catalog.all()}
+
+@app.post("/catalog/add")
+def catalog_add(req: CatalogAddRequest):
+    entry = catalog.add(req.midi, req.vel, req.rating, req.bank_file, req.bank_path)
+    return entry.to_dict()
+
+@app.delete("/catalog/{entry_id}")
+def catalog_remove(entry_id: int):
+    ok = catalog.remove(entry_id)
+    if not ok:
+        raise HTTPException(404, f"Catalog entry {entry_id} not found")
+    return {"removed": entry_id}
+
+@app.delete("/catalog")
+def catalog_clear():
+    catalog.clear()
+    return {"cleared": True}
+
+@app.get("/catalog/find/{midi}")
+def catalog_find(midi: int, vel: Optional[int] = None):
+    return {"entries": catalog.find(midi, vel)}
+
+
+# ── Bank Assembler endpoints ─────────────────────────────────────────────────
+
+@app.post("/assembler/init")
+def assembler_init(req: AssemblerInitRequest):
+    """Initialize target bank from a base bank file."""
+    try:
+        n = assembler.init_from_base(req.bank_path)
+    except Exception as e:
+        raise HTTPException(400, f"Failed to load base bank: {e}")
+    return {"notes": n, "base_file": Path(req.bank_path).name}
+
+@app.post("/assembler/deepcopy")
+def assembler_deepcopy(req: DeepCopyRequest):
+    """Deep-copy a note (or all vel layers) from source bank into target."""
+    if not assembler.is_initialized:
+        raise HTTPException(400, "Assembler not initialized — call /assembler/init first")
+    if req.vel < 0:
+        count = assembler.deep_copy_all_vel(req.midi, req.source_bank_path)
+        return {"copied_layers": count, "midi": req.midi}
+    else:
+        ok = assembler.deep_copy_note(req.midi, req.vel, req.source_bank_path)
+        if not ok:
+            raise HTTPException(404, f"Note m{req.midi:03d}_vel{req.vel} not found in source")
+        return {"copied": True, "midi": req.midi, "vel": req.vel}
+
+@app.get("/assembler/summary")
+def assembler_summary():
+    if not assembler.is_initialized:
+        return {"initialized": False}
+    s = assembler.summary()
+    s["initialized"] = True
+    return s
+
+@app.get("/assembler/sources")
+def assembler_sources():
+    """Map of note_key -> source description for all notes in target."""
+    return assembler.get_all_sources()
+
+@app.get("/assembler/source/{midi}/{vel}")
+def assembler_note_source(midi: int, vel: int):
+    return {"source": assembler.get_note_source(midi, vel)}
+
+@app.post("/assembler/save")
+def assembler_save(req: AssemblerSaveRequest):
+    if not assembler.is_initialized:
+        raise HTTPException(400, "Assembler not initialized")
+    path = assembler.save(req.output_dir, req.bank_name)
+    return {"saved": path}
+
+@app.get("/assembler/preview")
+def assembler_preview():
+    """Return the current target bank dict."""
+    if not assembler.is_initialized:
+        raise HTTPException(400, "Assembler not initialized")
+    return assembler.target_dict()
+
+
+# ── Bank note preview (load note from arbitrary bank) ─────────────────────────
+
+@app.get("/bank/note")
+def get_bank_note(bank_path: str, midi: int, vel: int):
+    """Load a single note from an arbitrary bank file (for preview/compare)."""
+    try:
+        with open(bank_path) as f:
+            data = json.load(f)
+    except Exception as e:
+        raise HTTPException(400, f"Cannot load bank: {e}")
+    key = f"m{midi:03d}_vel{vel}"
+    note = data.get("notes", {}).get(key)
+    if not note:
+        raise HTTPException(404, f"{key} not found in {Path(bank_path).name}")
+    return note
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────

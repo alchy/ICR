@@ -12,6 +12,8 @@ import { LayerBrowser }   from "./editor/LayerBrowser.js";
 import { VelSelector }    from "./editor/VelSelector.js";
 import { NoteInspector }  from "./editor/NoteInspector.js";
 import { NoteCompare }    from "./editor/NoteCompare.js";
+import { BankBrowser }    from "./editor/BankBrowser.js";
+import { BankAssembler }  from "./editor/BankAssembler.js";
 
 // ── Boot ──────────────────────────────────────────────────────────────────────
 
@@ -26,7 +28,9 @@ const browser     = new LayerBrowser(
 );
 const editor      = new SplineEditor(space, browser, velSelector);
 const inspector   = new NoteInspector(document.getElementById("note-inspector-container"));
-const noteCompare = new NoteCompare(document.getElementById("note-compare-container"));
+const noteCompare  = new NoteCompare(document.getElementById("note-compare-container"));
+const bankBrowser  = new BankBrowser(document.getElementById("bank-browser-container"));
+const bankAssembler = new BankAssembler(document.getElementById("bank-assembler-container"));
 
 // Expose to inline HTML handlers
 window.app = {
