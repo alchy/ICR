@@ -328,8 +328,8 @@ void CoreEngine::processBlock(float* out_l, float* out_r, int n) noexcept {
         core->processBlock(out_l, out_r, n);
     }
 
-    // Progressive voice gain (AGC) — smooth gain reduction when many voices play
-    applyProgressiveGain(out_l, out_r, n);
+    // Progressive voice gain (AGC) — see dsp/agc.h
+    dsp::agc_process(agc_, out_l, out_r, n);
 
     // Master gain / LFO pan / DSP
     applyMasterAndLfo(out_l, out_r, n);
@@ -346,44 +346,6 @@ void CoreEngine::processBlock(float* out_l, float* out_r, int n) noexcept {
     cur = cur * peak_decay_coeff_;
     if (peak > cur) cur = peak;
     output_peak_lin_.store(cur, std::memory_order_relaxed);
-}
-
-// ── Progressive voice gain (AGC) ──────────────────────────────────────────────
-//
-// Measures block RMS and smoothly adjusts gain to keep output near agc_target_.
-// This replaces the need for aggressive limiting — voices naturally scale down
-// when many play simultaneously, and scale back up when polyphony decreases.
-//
-// Attack (gain reduction): fast (~5 ms) — respond quickly to avoid clipping
-// Release (gain recovery): slow (~200 ms) — avoid pumping artifacts
-// Floor: gain never drops below 0.05 (prevents silence)
-// Ceiling: gain never exceeds 1.0 (no amplification, only attenuation)
-
-void CoreEngine::applyProgressiveGain(float* out_l, float* out_r, int n) noexcept {
-    // Measure block RMS (both channels)
-    float sum_sq = 0.f;
-    for (int i = 0; i < n; i++) {
-        sum_sq += out_l[i] * out_l[i] + out_r[i] * out_r[i];
-    }
-    float rms = std::sqrt(sum_sq / (float)(n * 2));
-
-    // Compute target gain
-    float target_gain = 1.f;
-    if (rms > 1e-6f) {
-        target_gain = agc_target_ / rms;
-        if (target_gain > 1.f) target_gain = 1.f;   // never amplify
-        if (target_gain < 0.05f) target_gain = 0.05f; // floor
-    }
-
-    // Smooth envelope: fast attack (reduce), slow release (recover)
-    float coeff = (target_gain < agc_gain_) ? agc_attack_ : agc_release_;
-
-    // Apply per-sample with smoothing
-    for (int i = 0; i < n; i++) {
-        agc_gain_ += (target_gain - agc_gain_) * coeff;
-        out_l[i] *= agc_gain_;
-        out_r[i] *= agc_gain_;
-    }
 }
 
 void CoreEngine::applyMasterAndLfo(float* out_l, float* out_r,
@@ -425,13 +387,7 @@ void CoreEngine::applyMasterAndLfo(float* out_l, float* out_r,
 bool CoreEngine::start() {
     if (!isInitialized()) return false;
 
-    // Initialize AGC smoothing coefficients
-    //   attack  ~5 ms  (fast reduction when loud)
-    //   release ~200 ms (slow recovery to avoid pumping)
-    float sr = (float)sample_rate_;
-    agc_attack_  = 1.f - std::exp(-1.f / (0.005f * sr));   // 5 ms
-    agc_release_ = 1.f - std::exp(-1.f / (0.200f * sr));   // 200 ms
-    agc_gain_    = 1.f;
+    dsp::agc_init(agc_, (float)sample_rate_);
 
     ma_device_config cfg = ma_device_config_init(ma_device_type_playback);
     cfg.playback.format    = ma_format_f32;
