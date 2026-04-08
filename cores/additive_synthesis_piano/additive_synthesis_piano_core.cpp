@@ -41,9 +41,10 @@ bool AdditiveSynthesisPianoCore::load(const std::string& params_path, float sr, 
     inv_sr_      = 1.f / sr;
 
     if (params_path.empty()) {
-        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Error,
-                   "params_path is required (export with analysis/export_piano_params.py)");
-        return false;
+        logger.log("AdditiveSynthesisPianoCore", LogSeverity::Info,
+                   "No params_path — loaded empty (use loadBankJson or --params)");
+        loaded_ = true;
+        return true;
     }
 
     std::ifstream f(params_path);

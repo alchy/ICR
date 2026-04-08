@@ -132,6 +132,7 @@ bool CoreEngine::initialize(const std::string& core_name,
     active_core_name_ = core_name;
     active_core_      = core.get();
     cores_[core_name] = std::move(core);
+    core_params_paths_[core_name] = params_path;
 
     delete[] buf_l_;
     delete[] buf_r_;
@@ -174,6 +175,7 @@ bool CoreEngine::switchCore(const std::string& core_name,
         }
 
         cores_[core_name] = std::move(new_core);
+        core_params_paths_[core_name] = params_path;
     }
 
     // Switch active — no audio interruption. Old core's voices dozvuk naturally.

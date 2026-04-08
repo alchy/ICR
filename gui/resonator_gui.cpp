@@ -17,7 +17,16 @@
 #include "../engine/midi_input.h"
 #include "../engine/synth_core_registry.h"
 #include "../cores/sampler/sampler_core.h"
+#include "../cores/additive_synthesis_piano/additive_synthesis_piano_core.h"
 #include "../dsp/dsp_chain.h"
+
+#include <fstream>
+
+#ifdef _WIN32
+#  include <windows.h>
+#else
+#  include <dirent.h>
+#endif
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -103,6 +112,10 @@ struct GuiState {
     int  selected_core   = 0;
     std::string active_core_name;
 
+    // Soundbank selector (for AdditiveSynthesisPianoCore)
+    std::vector<std::string> soundbank_files;   // filenames (no path)
+    std::string active_soundbank;               // currently loaded
+
     std::vector<std::string> ports;
     int  selected_port   = 0;
     bool midi_connected  = false;
@@ -139,6 +152,37 @@ struct GuiState {
 static Logger* g_glfw_logger = nullptr;
 static void glfwErrorCb(int /*err*/, const char* desc) {
     if (g_glfw_logger) g_glfw_logger->log("GLFW", LogSeverity::Error, desc);
+}
+
+// ── Soundbank file discovery ──────────────────────────────────────────────
+static std::vector<std::string> discoverSoundbankJsonFiles() {
+    std::vector<std::string> result;
+    const char* dir = "soundbanks";
+#ifdef _WIN32
+    std::string pattern = std::string(dir) + "\\*.json";
+    WIN32_FIND_DATAA fd;
+    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
+    if (h != INVALID_HANDLE_VALUE) {
+        do {
+            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+                result.push_back(fd.cFileName);
+        } while (FindNextFileA(h, &fd));
+        FindClose(h);
+    }
+#else
+    DIR* d = opendir(dir);
+    if (d) {
+        struct dirent* ent;
+        while ((ent = readdir(d))) {
+            std::string name(ent->d_name);
+            if (name.size() > 5 && name.substr(name.size()-5) == ".json")
+                result.push_back(name);
+        }
+        closedir(d);
+    }
+#endif
+    std::sort(result.begin(), result.end());
+    return result;
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -711,6 +755,9 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             break;
         }
     }
+    // Discover soundbank JSON files for AdditiveSynthesisPianoCore
+    gs.soundbank_files = discoverSoundbankJsonFiles();
+
     // Sync convolver state from engine (--ir may have loaded it)
     if (DspChain* dsp = engine.getDspChain()) {
         if (dsp->isConvolverLoaded()) {
@@ -821,6 +868,43 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                         ImGui::TextColored({1.f, 0.8f, 0.2f, 1.f}, "Loading...");
                         ImGui::SameLine(0, 20.f);
                     }
+                }
+            }
+
+            // ── Soundbank selector (AdditiveSynthesisPianoCore) ─────────────
+            if (dynamic_cast<AdditiveSynthesisPianoCore*>(engine.core())) {
+                if (!gs.soundbank_files.empty()) {
+                    ImGui::Text("Soundbank:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(220.f);
+                    const char* sb_preview = gs.active_soundbank.empty()
+                                           ? "(select...)" : gs.active_soundbank.c_str();
+                    if (ImGui::BeginCombo("##soundbank", sb_preview)) {
+                        for (const auto& fname : gs.soundbank_files) {
+                            bool sel = (fname == gs.active_soundbank);
+                            if (ImGui::Selectable(fname.c_str(), sel)) {
+                                if (fname != gs.active_soundbank) {
+                                    std::string path = "soundbanks/" + fname;
+                                    auto* core = dynamic_cast<AdditiveSynthesisPianoCore*>(engine.core());
+                                    if (core) {
+                                        std::ifstream f(path);
+                                        if (f.is_open()) {
+                                            std::string json_str((std::istreambuf_iterator<char>(f)),
+                                                                  std::istreambuf_iterator<char>());
+                                            if (core->loadBankJson(json_str)) {
+                                                gs.active_soundbank = fname;
+                                                engine.getLogger().log("GUI", LogSeverity::Info,
+                                                    "Loaded soundbank: " + fname);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (sel) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SameLine(0, 20.f);
                 }
             }
 

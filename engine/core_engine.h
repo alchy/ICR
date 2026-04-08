@@ -151,6 +151,7 @@ private:
     // Multi-core: all instantiated cores live here. MIDI goes to active_core_,
     // but processBlock iterates ALL cores (so releasing voices dozvuk naturally).
     std::unordered_map<std::string, std::unique_ptr<ISynthCore>> cores_;
+    std::unordered_map<std::string, std::string> core_params_paths_;  // per-core params path
     ISynthCore*  active_core_      = nullptr;   // RT fast-path (never null after init)
     std::string  active_core_name_;
 
