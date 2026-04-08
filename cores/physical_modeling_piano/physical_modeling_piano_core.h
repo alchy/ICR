@@ -1,41 +1,16 @@
 #pragma once
 /*
  * cores/physical_modeling_piano/physical_modeling_piano_core.h
- * ────────────────────────────────────────────────────────────
- * PhysicalModelingPianoCore -- digital waveguide piano synthesis engine.
+ * ------------------------------------------------------------
+ * PhysicalModelingPianoCore -- Karplus-Strong string synthesis.
  *
- * Unlike AdditiveSynthesisPianoCore (additive, analysis-resynthesis),
- * PhysicalModelingPianoCore models the physical energy flow:
+ * Single-loop waveguide per voice:
+ *   [Delay N] -> [Fractional Allpass] -> [Dispersion Cascade] -> [Loss LPF] -> loop
  *
- *   Hammer --> String waveguide --> Bridge junction --> Soundboard --> Air
- *       ^           | (delay + loss + dispersion)          |
- *       +-----------+ (reflection back into string)        +--> Stereo output
+ * Excitation: Fourier series with two-stage rolloff, odd harmonic boost,
+ * gauge-dependent spectral shaping.  Per-note params from JSON bank.
  *
- * Energy conservation (Kirchhoff-style):
- *   At every junction, sum of incoming and outgoing wave power = 0.
- *   Losses are applied explicitly via loop filter (damping) and
- *   radiation (soundboard coupling).  The total system energy
- *   monotonically decreases -- no energy is created or destroyed.
- *
- * Synthesis algorithm per string:
- *   1. Hammer generates excitation force F = K_H * max(0, xi-u)^p
- *   2. Force enters the string delay line at strike position x0
- *   3. String = two delay lines (right-going + left-going waves)
- *   4. At bridge: reflection (k_r) + transmission to soundboard (k_t)
- *   5. At nut: full reflection (-1, rigid termination)
- *   6. Loss filter in loop: frequency-dependent damping
- *   7. Dispersion allpass: inharmonicity from string stiffness
- *   8. Soundboard: bank of resonant modes excited by bridge force
- *   9. Output: sum of radiated soundboard modes + direct string radiation
- *
- * Multi-string: 1/2/3 strings per note, each with independent waveguide,
- * slightly detuned for beating.  Coupled at the bridge.
- *
- * Can be driven by:
- *   a) Pure physics defaults (no JSON needed -- playable out of the box)
- *   b) JSON parameters matching AdditiveSynthesisPianoCore format
- *      (f0_hz, B, tau1, tau2, etc.) with automatic translation to
- *      physical parameters
+ * Current: one string per voice (multi-string beating in future iteration).
  *
  * Threading: same as ISynthCore -- see i_synth_core.h.
  */
@@ -54,127 +29,85 @@
 
 // -- Constants ----------------------------------------------------------------
 
-static constexpr int PHYS_MAX_VOICES = 128;
-static constexpr float PHYS_RELEASE_MS = 200.f;    // damper fall time
-static constexpr float PHYS_ONSET_MS   = 0.3f;     // DC-offset prevention
+static constexpr int PHYS_MAX_VOICES     = 128;
+static constexpr int PHYS_MAX_DISP       = 16;    // max dispersion allpass stages
+static constexpr float PHYS_RELEASE_MS   = 200.f;
+static constexpr float PHYS_ONSET_MS     = 0.3f;
 
-// -- Per-string waveguide state -----------------------------------------------
-
-struct PhysicsString {
-    // Delay lines: right-going and left-going travelling waves
-    physics::DelayLine delay_r;  // nut -> bridge
-    physics::DelayLine delay_l;  // bridge -> nut
-
-    // Loop filter (frequency-dependent damping)
-    physics::LossFilter loss;
-
-    // Dispersion (inharmonicity)
-    physics::DispersionFilter dispersion;
-
-    // Frequency offset from nominal f0 (detuning for multi-string beating)
-    float f0_hz = 440.f;
-
-    // Bridge junction coefficients
-    physics::JunctionCoeffs junction;
-
-    // Hammer felt low-pass: filters excitation before injection.
-    // Simulates felt compliance — harder hammer = higher cutoff = brighter.
-    float felt_lp_state = 0.f;    // one-pole LPF state
-    float felt_lp_coeff = 0.5f;   // alpha: 0=no filter, 1=bypass
-
-    // Hammer interaction point (as delay tap position)
-    int strike_tap = 0;  // delay_r position for hammer contact
-
-    // Last string displacement at hammer contact point
-    float u_at_hammer = 0.f;
-};
-
-// -- Per-note physical parameters ---------------------------------------------
+// -- Per-note bank parameters -------------------------------------------------
 
 struct PhysicsNoteParam {
-    bool  valid       = false;
-    float f0_hz       = 440.f;
-    float B           = 0.f;     // inharmonicity
-    int   n_strings   = 3;
-    float detune_cents = 0.5f;
+    bool  valid          = false;
+    int   midi           = 60;
+    float f0_hz          = 261.6f;
 
-    // Hammer parameters (Chabassier-style)
-    float K_H          = 1e9f;   // felt stiffness
-    float p            = 2.5f;   // nonlinear exponent
-    float M_H          = 0.009f; // hammer mass (kg)
-    float x0_ratio     = 0.125f; // strike position (fraction of string length)
+    // String
+    float B              = 4e-4f;    // inharmonicity
+    float gauge          = 1.5f;     // string thickness
+    float T60_fund       = 5.f;      // fundamental T60 (s)
+    float T60_nyq        = 0.25f;    // Nyquist T60 (s)
 
-    // String damping
-    float tau_fund     = 10.f;   // fundamental decay time (s)
-    float tau_high     = 1.f;    // high-frequency decay time (s)
+    // Excitation
+    float exc_rolloff    = 0.1f;     // harmonic rolloff (0=flat, 2=triangle)
+    float exc_x0         = 1.f/7.f;  // strike position
+    float odd_boost      = 1.8f;
+    int   knee_k         = 10;
+    float knee_slope     = 3.5f;
+    int   n_harmonics    = 80;
 
-    // Bridge coupling
-    float impedance_ratio = 0.01f;  // Z_string / Z_soundboard
+    // Dispersion
+    int   n_disp_stages  = 0;
+    float disp_coeff     = -0.15f;
 
-    // Output gain
-    float gain         = 1.f;
+    // Multi-string (future)
+    int   n_strings      = 1;        // currently always 1
+    float detune_cents   = 1.f;
 };
 
 // -- Voice --------------------------------------------------------------------
 
 class PhysicsVoice {
 public:
-    /// Process this voice for n_samples, adding output to out_l/out_r.
-    /// Returns false when voice has become inactive.
-    bool process(float* out_l, float* out_r, int n_samples,
-                 float inv_sr, float dt) noexcept;
+    bool process(float* out_l, float* out_r, int n_samples) noexcept;
 
-    // -- State ----------------------------------------------------------------
-    bool     active     = false;
-    bool     releasing  = false;
-    int      midi       = -1;
-    uint32_t t_samples  = 0;
-    uint64_t max_t_samp = 0;
+    bool     active      = false;
+    bool     releasing   = false;
+    int      midi        = -1;
+    uint32_t t_samples   = 0;
+    uint64_t max_t_samp  = 0;
 
-    // Strings (1, 2, or 3 waveguides)
-    int n_strings = 1;
-    PhysicsString strings[physics::MAX_STRINGS];
+    // Waveguide delay line
+    physics::DelayLine delay;
 
-    // Hammer (shared across all strings of this note)
-    physics::HammerState hammer;
+    // Loop filters
+    physics::LossFilter  loss;
+    float  ap_frac_a     = 0.f;    // fractional delay allpass coeff
+    float  ap_frac_state = 0.f;
 
-    // Soundboard modes (shared across strings)
-    physics::SoundboardMode sb_modes[physics::SOUNDBOARD_MODES];
+    // Dispersion cascade
+    int    n_disp        = 0;
+    float  disp_coeff    = -0.15f;
+    float  disp_states[PHYS_MAX_DISP] = {};
 
-    // Output gain and panning
-    float gain     = 1.f;
-    float pan_l    = 0.707f;
-    float pan_r    = 0.707f;
+    // Output
+    float  output_scale  = 1.f;
+    float  pan_l         = 0.707f;
+    float  pan_r         = 0.707f;
 
-    // Release: damper simulation (increases loss dramatically)
-    float rel_gain = 1.f;
-    float rel_step = 0.f;  // negative step for fadeout
+    // Envelope
+    float  rel_gain      = 1.f;
+    float  rel_step      = 0.f;
+    float  onset_gain    = 0.f;
+    float  onset_step    = 0.f;
+    bool   in_onset      = false;
 
-    // Onset gate (DC prevention)
-    float onset_gain = 0.f;
-    float onset_step = 0.f;
-    bool  in_onset   = false;
-
-    // String mixing gain (1/n_strings)
-    float string_mix = 1.f;
-
-    // Impedance-matched injection scale: F / (2*Z_string) → wave variable
-    // Precomputed at initVoice from f0 and sample rate.
-    float injection_scale = 0.f;
-
-    // Output scale: compensates for small bridge transmission coefficient k_t
-    // so that the final output reaches audible levels.
-    float output_scale = 1.f;
-
-    // Hammer noise: short burst of bandpass-filtered noise at attack.
-    // Models the physical "thwack" of felt hitting steel — adds punch
-    // and brightness to the onset that the waveguide alone cannot produce.
-    float noise_amp     = 0.f;   // initial noise amplitude
-    float noise_env     = 1.f;   // exponential decay envelope
-    float noise_decay   = 0.f;   // per-sample decay coefficient
-    dsp::BiquadCoeffs noise_bpf;       // bandpass filter coefficients
-    float noise_wL[2] = {};            // DF-II state L
-    float noise_wR[2] = {};            // DF-II state R
+    // Hammer noise
+    float  noise_amp     = 0.f;
+    float  noise_env     = 1.f;
+    float  noise_decay   = 0.f;
+    dsp::BiquadCoeffs noise_bpf;
+    float  noise_wL[2]   = {};
+    float  noise_wR[2]   = {};
     std::mt19937 rng;
     std::normal_distribution<float> ndist{0.f, 1.f};
 };
@@ -183,17 +116,11 @@ public:
 
 class PhysicsVoiceManager {
 public:
-    bool processBlock(float* out_l, float* out_r, int n_samples,
-                      float inv_sr, float dt) noexcept;
+    bool processBlock(float* out_l, float* out_r, int n_samples) noexcept;
 
-    void initVoice(int midi, const PhysicsNoteParam& np,
-                   uint8_t velocity, float sr,
-                   float keyboard_spread,
-                   float hammer_hardness,
-                   float damping_scale,
-                   float brightness,
-                   float detune_scale,
-                   float soundboard_mix) noexcept;
+    void initVoice(int midi, uint8_t velocity,
+                   const PhysicsNoteParam& np, float sr,
+                   float keyboard_spread) noexcept;
 
     void releaseVoice(int midi, float sr) noexcept;
     void releaseAll(float sr) noexcept;
@@ -214,11 +141,6 @@ public:
                 PhysicsVoiceManager& vm,
                 float sample_rate,
                 float keyboard_spread,
-                float hammer_hardness,
-                float damping_scale,
-                float brightness,
-                float detune_scale,
-                float soundboard_mix,
                 std::mutex& bank_mutex) noexcept;
 
     void noteOff(uint8_t midi, PhysicsVoiceManager& vm, float sr) noexcept;
@@ -235,7 +157,7 @@ private:
     std::atomic<int>  last_vel_{0};
 };
 
-// -- PhysicalModelingPianoCore -- ISynthCore implementation --------------------
+// -- PhysicalModelingPianoCore ------------------------------------------------
 
 class PhysicalModelingPianoCore final : public ISynthCore {
 public:
@@ -256,42 +178,33 @@ public:
     bool getParam(const std::string& key, float& out) const override;
     std::vector<CoreParamDesc> describeParams()        const override;
 
+    bool loadBankJson(const std::string& json_str) override;
+
     CoreVizState getVizState() const override;
 
     std::string coreName()    const override { return "PhysicalModelingPianoCore"; }
-    std::string coreVersion() const override { return "0.1"; }
+    std::string coreVersion() const override { return "0.3"; }
     bool        isLoaded()    const override { return loaded_; }
 
 private:
-    /// Populate note_params_[midi] from physical defaults.
     void populateDefaults(int midi_from, int midi_to);
+    bool loadBankFromJson(const std::string& json_str, Logger& logger);
 
-    /// Populate note_params_ from AdditiveSynthesisPianoCore-format JSON
-    /// (translates additive params to physical equivalents).
-    bool loadFromAdditiveSynthesisJson(const std::string& json_str,
-                                       Logger& logger,
-                                       int midi_from, int midi_to);
-
-    // Note parameters (one per MIDI note -- no velocity layers in physics model,
-    // velocity controls hammer speed directly)
     PhysicsNoteParam note_params_[128];
 
-    // Three-layer architecture
     PhysicsVoiceManager voice_mgr_;
     PhysicsPatchManager patch_mgr_;
 
-    float sample_rate_ = 44100.f;
-    float inv_sr_      = 1.f / 44100.f;
-    float dt_          = 1.f / 44100.f;
+    float sample_rate_ = 48000.f;
     bool  loaded_      = false;
 
-    // GUI-settable parameters
-    std::atomic<float> hammer_hardness_  {1.0f};   // scales K_H
-    std::atomic<float> damping_scale_    {1.0f};   // scales tau_fund/tau_high
-    std::atomic<float> soundboard_mix_   {1.0f};   // soundboard contribution
-    std::atomic<float> brightness_       {1.0f};   // scales tau_high (more = brighter)
-    std::atomic<float> keyboard_spread_  {0.60f};  // stereo width
-    std::atomic<float> detune_scale_     {1.0f};   // scales detuning
+    // GUI-settable global scalers
+    std::atomic<float> brightness_       {1.0f};   // scales T60_nyq
+    std::atomic<float> stiffness_scale_  {1.0f};   // scales B
+    std::atomic<float> sustain_scale_    {1.0f};   // scales T60_fund
+    std::atomic<float> keyboard_spread_  {0.60f};
+    std::atomic<float> odd_scale_        {1.0f};   // scales odd_boost
+    std::atomic<float> gauge_scale_      {1.0f};   // scales gauge
 
     mutable std::mutex bank_mutex_;
 };
