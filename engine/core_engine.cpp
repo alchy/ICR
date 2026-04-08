@@ -527,42 +527,87 @@ static const char* masterCoreParamKey(uint8_t id) {
     }
 }
 
+// ── Core ID resolution ───────────────────────────────────────────────────────
+//
+// SysEx frame: F0 7D 01 <cmd> <core_id> <data...> F7
+//
+//   core_id 0x00 = active core (backwards-compatible default)
+//   core_id 0x01 = AdditiveSynthesisPianoCore
+//   core_id 0x02 = PhysicalModelingPianoCore
+//   core_id 0x03 = SamplerCore
+//   core_id 0x04 = SineCore
+//   core_id 0x7F = engine-level (master/DspChain, not routed to any core)
+
+static const char* coreIdToName(uint8_t core_id) {
+    switch (core_id) {
+        case 0x01: return "AdditiveSynthesisPianoCore";
+        case 0x02: return "PhysicalModelingPianoCore";
+        case 0x03: return "SamplerCore";
+        case 0x04: return "SineCore";
+        default:   return nullptr;
+    }
+}
+
 std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
     // data is AFTER F0, BEFORE F7
     if (len < 3) return {};
     if (data[0] != 0x7D || data[1] != 0x01) return {};  // not ICR SysEx
 
-    uint8_t        cmd        = data[2];
-    const uint8_t* payload    = data + 3;
-    int            payloadLen = len - 3;
+    uint8_t cmd = data[2];
+
+    // PING/PONG — no core_id needed
+    if (cmd == 0x70) return { 0xF0, 0x7D, 0x01, 0x71, 0xF7 };
+
+    // All other commands: next byte is core_id
+    if (len < 4) return {};
+    uint8_t        core_id    = data[3];
+    const uint8_t* payload    = data + 4;
+    int            payloadLen = len - 4;
+
+    // Resolve target core from core_id
+    ISynthCore* target = nullptr;
+    bool engine_level = (core_id == 0x7F);
+
+    if (!engine_level) {
+        if (core_id == 0x00) {
+            target = active_core_;  // active core (default / backwards-compatible)
+        } else {
+            const char* name = coreIdToName(core_id);
+            if (name) {
+                auto it = cores_.find(name);
+                if (it != cores_.end())
+                    target = it->second.get();
+            }
+        }
+    }
 
     switch (cmd) {
 
     case 0x01: {  // SET_NOTE_PARAM — midi vel param_id value(5)
-        if (payloadLen < 8 || !active_core_) break;
+        if (payloadLen < 8 || !target) break;
         int         midi  = payload[0];
         int         vel   = payload[1];
         uint8_t     pid   = payload[2];
         float       value = decodeSysExFloat(payload + 3);
         const char* key   = noteParamKey(pid);
-        if (key) active_core_->setNoteParam(midi, vel, key, value);
+        if (key) target->setNoteParam(midi, vel, key, value);
         break;
     }
 
     case 0x02: {  // SET_NOTE_PARTIAL — midi vel k param_id value(5)
-        if (payloadLen < 9 || !active_core_) break;
+        if (payloadLen < 9 || !target) break;
         int         midi  = payload[0];
         int         vel   = payload[1];
         int         k     = payload[2];
         uint8_t     pid   = payload[3];
         float       value = decodeSysExFloat(payload + 4);
         const char* key   = partialParamKey(pid);
-        if (key) active_core_->setNotePartialParam(midi, vel, k, key, value);
+        if (key) target->setNotePartialParam(midi, vel, k, key, value);
         break;
     }
 
-    case 0x03: {  // SET_BANK — 3-byte 7-bit chunk_idx + 3-byte 7-bit total_chunks + data
-        if (payloadLen < 6 || !active_core_) break;
+    case 0x03: {  // SET_BANK — chunked JSON
+        if (payloadLen < 6 || !target) break;
         int chunk_idx    = ((int)payload[0] << 14) | ((int)payload[1] << 7) | payload[2];
         int total_chunks = ((int)payload[3] << 14) | ((int)payload[4] << 7) | payload[5];
         const uint8_t* chunk_data = payload + 6;
@@ -579,10 +624,11 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
         ++bank_chunk_recv_;
 
         if (bank_chunk_recv_ >= bank_chunk_total_) {
-            if (active_core_->loadBankJson(bank_chunk_buf_))
+            if (target->loadBankJson(bank_chunk_buf_))
                 logger_.log("CoreEngine", LogSeverity::Info,
-                            "SET_BANK: bank applied ("
-                            + std::to_string(bank_chunk_buf_.size()) + " bytes)");
+                            "SET_BANK: applied ("
+                            + std::to_string(bank_chunk_buf_.size()) + " bytes)"
+                            + " core_id=0x" + std::to_string((int)core_id));
             else
                 logger_.log("CoreEngine", LogSeverity::Warning,
                             "SET_BANK: loadBankJson failed");
@@ -598,56 +644,54 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
         uint8_t pid   = payload[0];
         float   value = decodeSysExFloat(payload + 1);
 
-        if (pid <= 0x07) {
-            // ISynthCore global params (beat_scale, noise_level, …)
+        if (engine_level || pid >= 0x10) {
+            // Engine-level and DspChain params (always engine, regardless of core_id)
+            if (pid >= 0x10 && pid <= 0x13) {
+                switch (pid) {
+                case 0x10:
+                    master_gain_.store((std::max)(0.f, (std::min)(2.f, value)),
+                                       std::memory_order_relaxed);
+                    break;
+                case 0x11: {
+                    float n = (std::max)(-1.f, (std::min)(1.f, value));
+                    if (n <= 0.f) { pan_l_.store(1.f);       pan_r_.store(1.f + n); }
+                    else          { pan_l_.store(1.f - n);   pan_r_.store(1.f);     }
+                    break;
+                }
+                case 0x12:
+                    lfo_speed_.store((std::max)(0.f, (std::min)(2.f, value)),
+                                     std::memory_order_relaxed);
+                    break;
+                case 0x13:
+                    lfo_depth_.store((std::max)(0.f, (std::min)(1.f, value)),
+                                     std::memory_order_relaxed);
+                    break;
+                }
+            } else if (pid >= 0x20 && pid <= 0x24) {
+                auto u = (uint8_t)((std::max)(0.f, (std::min)(1.f, value)) * 127.f);
+                switch (pid) {
+                case 0x20: dsp_.setLimiterThreshold(u); break;
+                case 0x21: dsp_.setLimiterRelease(u);   break;
+                case 0x22: dsp_.setLimiterEnabled(u);   break;
+                case 0x23: dsp_.setBBEDefinition(u);    break;
+                case 0x24: dsp_.setBBEBassBoost(u);     break;
+                }
+            }
+        }
+
+        if (!engine_level && pid <= 0x07 && target) {
+            // Core-specific global params — routed to target core's setParam
             const char* key = masterCoreParamKey(pid);
-            if (key && active_core_) active_core_->setParam(key, value);
-
-        } else if (pid >= 0x10 && pid <= 0x13) {
-            // CoreEngine mix params — write directly to atomics
-            switch (pid) {
-            case 0x10:  // master_gain  0.0–2.0
-                master_gain_.store((std::max)(0.f, (std::min)(2.f, value)),
-                                   std::memory_order_relaxed);
-                break;
-            case 0x11: {  // master_pan  -1.0–+1.0
-                float n = (std::max)(-1.f, (std::min)(1.f, value));
-                if (n <= 0.f) { pan_l_.store(1.f);       pan_r_.store(1.f + n); }
-                else          { pan_l_.store(1.f - n);   pan_r_.store(1.f);     }
-                break;
-            }
-            case 0x12:  // lfo_speed  Hz  0.0–2.0
-                lfo_speed_.store((std::max)(0.f, (std::min)(2.f, value)),
-                                 std::memory_order_relaxed);
-                break;
-            case 0x13:  // lfo_depth  0.0–1.0
-                lfo_depth_.store((std::max)(0.f, (std::min)(1.f, value)),
-                                 std::memory_order_relaxed);
-                break;
-            }
-
-        } else if (pid >= 0x20 && pid <= 0x24) {
-            // DspChain params — normalize float 0.0–1.0 → uint8 0–127
-            auto u = (uint8_t)((std::max)(0.f, (std::min)(1.f, value)) * 127.f);
-            switch (pid) {
-            case 0x20: dsp_.setLimiterThreshold(u); break;
-            case 0x21: dsp_.setLimiterRelease(u);   break;
-            case 0x22: dsp_.setLimiterEnabled(u);   break;
-            case 0x23: dsp_.setBBEDefinition(u);    break;
-            case 0x24: dsp_.setBBEBassBoost(u);     break;
-            }
+            if (key) target->setParam(key, value);
         }
         break;
     }
 
-    case 0x70:  // PING → reply with PONG
-        return { 0xF0, 0x7D, 0x01, 0x71, 0xF7 };
-
-    case 0x72: {  // EXPORT_BANK — path as ASCII bytes in payload
-        if (payloadLen < 1 || !active_core_) break;
+    case 0x72: {  // EXPORT_BANK — path as ASCII bytes
+        if (payloadLen < 1 || !target) break;
         std::string export_path(reinterpret_cast<const char*>(payload),
                                 (size_t)payloadLen);
-        if (active_core_->exportBankJson(export_path))
+        if (target->exportBankJson(export_path))
             logger_.log("CoreEngine", LogSeverity::Info,
                         "EXPORT_BANK: wrote " + export_path);
         else
@@ -658,8 +702,7 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
 
     default:
         logger_.log("CoreEngine", LogSeverity::Info,
-                    "SysEx: unknown cmd 0x"
-                    + std::to_string((int)cmd));
+                    "SysEx: unknown cmd 0x" + std::to_string((int)cmd));
         break;
     }
     return {};

@@ -1,5 +1,7 @@
 # AdditiveSynthesisPianoCore -- SysEx Parameter IDs
 
+**Core ID: 0x01**
+
 Core-specific SysEx parameters for AdditiveSynthesisPianoCore.
 For protocol framing and engine-level commands, see [SysEx Protocol](../../engine/SYSEX_PROTOCOL.md).
 
@@ -8,7 +10,9 @@ For protocol framing and engine-level commands, see [SysEx Protocol](../../engin
 ## SET_NOTE_PARAM (0x01) -- Scalar Param IDs
 
 ```
-F0 7D 01  01  <midi>  <vel>  <param_id>  <v0 v1 v2 v3 v4>  F7
+F0 7D 01  01  01  <midi>  <vel>  <param_id>  <v0..v4>  F7
+              |   |
+              cmd core_id=0x01
 ```
 
 | id   | key          | Description                                             |
