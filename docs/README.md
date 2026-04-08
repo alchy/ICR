@@ -7,6 +7,7 @@
 | [engine/ARCHITECTURE.md](engine/ARCHITECTURE.md) | CoreEngine, ISynthCore interface, 3-layer Ithaca Core pattern, threading, GUI |
 | [engine/BUILD.md](engine/BUILD.md) | C++ build, Python prerequisites, CLI options, troubleshooting |
 | [engine/SYSEX_PROTOCOL.md](engine/SYSEX_PROTOCOL.md) | SysEx frame format, float encoding, engine-level commands |
+| [engine/MULTI_CORE.md](engine/MULTI_CORE.md) | Multi-core architecture, lifecycle, per-core SysEx, icr-config.json |
 | [engine/MAC_OS_CHANGES.md](engine/MAC_OS_CHANGES.md) | macOS porting notes |
 
 ## Cores
@@ -30,6 +31,12 @@
 | [OVERVIEW](cores/physical-modeling-piano/OVERVIEW.md) | Waveguide approach, GUI params, physics defaults, v0.1 status |
 | [TODO](cores/physical-modeling-piano/TODO.md) | Roadmap: loss filter, soundboard modes, damper, coupling |
 | [DEVELOPMENT_LOG](cores/physical-modeling-piano/DEVELOPMENT_LOG.md) | Implementation notes, bugs fixed, references |
+
+### SamplerCore
+
+| Document | Content |
+|----------|---------|
+| [OVERVIEW](cores/sampler/OVERVIEW.md) | WAV sample playback, bank discovery, velocity crossfade, async loading |
 
 ### SineCore
 
