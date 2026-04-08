@@ -342,7 +342,7 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
     // Output scale: normalize waveguide output to audible range.
     // Empirical: waveguide bridge output peaks around 0.01-0.1;
     // scale to reach ~0.3-0.5 peak for mid-velocity.
-    v.output_scale = 1.5f;
+    v.output_scale = 0.07f;
 
     // -- Setup strings --------------------------------------------------------
 
@@ -393,46 +393,58 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
         s.u_at_hammer = 0.f;
     }
 
-    // -- Excitation: hammer impulse + noise burst ────────────────────────────
-    // Two components written into each string's delay line:
-    //   1) Sharp impulse at strike position — provides the initial transient
-    //      and harmonic content. Shaped by a short raised-cosine whose width
-    //      models felt softness (wider = darker).
-    //   2) Filtered noise burst — adds the "thwack" texture and broadband
-    //      energy that makes the attack feel percussive.
-    // Each string gets slightly different noise (random phase) for natural
-    // beating between unison strings.
+    // -- Excitation: pre-compute hammer force signal ──────────────────────────
+    // Run the nonlinear hammer model (Chaigne & Askenfelt) for ~5ms to
+    // generate a realistic multi-peak force signal.  Convert to velocity
+    // wave via impedance matching: v_in = F / (2*Z).
+    //
+    // Z = sqrt(T * mu) ≈ 2.0-3.5 for piano strings (Teng 2012).
+    // We use Z ≈ 2.5 as a keyboard-wide approximation.
+    //
+    // The force signal is injected at the strike position (x0 = L/8) into
+    // the delay line as initial conditions.  Each string gets the same force
+    // but with independent noise for natural beating.
     {
-        float hammer_vel = physics::midi_to_hammer_velocity(velocity);
-        float amp = hammer_vel * 0.25f;
-        float t_midi = (float)(midi - 21) / 87.f;  // 0..1 across keyboard
+        static constexpr float Z_STRING = 2.5f;   // wave impedance approximation
+        static constexpr int   MAX_HAMMER_SAMPLES = 512;  // ~10ms at 48kHz
 
+        float hammer_vel = physics::midi_to_hammer_velocity(velocity);
+        float dt = 1.f / sr;
+
+        // Simulate hammer-string interaction (simplified: string at rest)
+        physics::HammerState h;
+        physics::hammer_init(h, hammer_vel, eff_K_H, np.p, np.M_H);
+        float force_signal[MAX_HAMMER_SAMPLES];
+        int force_len = 0;
+        for (int i = 0; i < MAX_HAMMER_SAMPLES && h.in_contact; i++) {
+            force_signal[i] = physics::hammer_tick(h, 0.f, dt);
+            force_len = i + 1;
+        }
+
+        // Inject into each string's delay line
         for (int si = 0; si < np.n_strings; si++) {
             PhysicsString& s = v.strings[si];
             int strike = (std::max)(1, (int)(s.delay_r.len * np.x0_ratio));
 
-            // Component 1: short impulse (2-5 samples)
-            int imp_width = (std::max)(2, (int)(5.f - t_midi * 3.f));
-            for (int i = 0; i < imp_width; i++) {
+            // Velocity wave from hammer force: v = F / (2*Z)
+            for (int i = 0; i < force_len && i < s.delay_r.len; i++) {
                 int idx = (s.delay_r.write_ix + strike + i) % s.delay_r.len;
-                float pulse = 0.5f * (1.f - std::cos(dsp::TAU * (float)i / (float)imp_width));
-                s.delay_r.buf[idx] += amp * pulse;
+                s.delay_r.buf[idx] += force_signal[i] / (2.f * Z_STRING);
             }
 
-            // Component 2: noise burst (broadband attack texture)
-            // Longer duration (~3ms) and stronger for percussive "thwack"
-            int noise_len = (std::max)(20, (int)(0.003f * sr));
+            // Add noise burst at strike position for "thwack" + per-string variation
+            int noise_len = (std::max)(20, (int)(0.002f * sr));
             std::mt19937 exc_rng((unsigned)(midi * 1000 + si * 137 + velocity));
             std::normal_distribution<float> ndist(0.f, 1.f);
-            float noise_amp = amp * 0.7f;  // substantial noise for attack character
+            float noise_amp = hammer_vel * 0.05f / Z_STRING;
             for (int i = 0; i < noise_len; i++) {
-                float env = std::exp(-5.f * (float)i / (float)noise_len);
+                float env = std::exp(-4.f * (float)i / (float)noise_len);
                 int idx = (s.delay_r.write_ix + strike + i) % s.delay_r.len;
                 s.delay_r.buf[idx] += noise_amp * env * ndist(exc_rng);
             }
         }
 
-        v.hammer.in_contact = false;
+        v.hammer.in_contact = false;  // disable per-sample injection
     }
 
     // Soundboard coloring: handled by DspChain convolver (soundboard IR),

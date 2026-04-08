@@ -527,11 +527,10 @@ inline float default_impedance_ratio(int midi) {
     return 0.0002f + t * 0.0018f;
 }
 
-/// T60 of fundamental (s): bass ~18s, middle ~8s, treble ~2s.
-/// Longer than real piano — soundboard IR provides additional damping.
+/// T60 of fundamental (s): bass ~10s, middle ~4s, treble ~1s.
 inline float default_tau_fund(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 18.f - t * 16.f;  // 18 -> 2
+    return 10.f - t * 9.f;  // 10 -> 1
 }
 
 /// T60 at Nyquist (s): much gentler than before — the waveguide should
