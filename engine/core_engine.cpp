@@ -70,6 +70,7 @@ CoreEngine::~CoreEngine() {
     delete[] buf_l_;
     delete[] buf_r_;
     delete device_;
+    if (log_file_handle_) std::fclose(log_file_handle_);
 }
 
 // ── Helper: apply a JSON config file to a core via setParam ──────────────────
@@ -118,6 +119,24 @@ bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger
         logger.log("CoreEngine", LogSeverity::Error,
                    std::string("Engine config parse error: ") + e.what());
         return false;
+    }
+
+    // Open log file if configured
+    if (root.contains("log_file") && root["log_file"].is_string()) {
+        std::string log_path = root["log_file"].get<std::string>();
+        if (!log_path.empty()) {
+            log_file_handle_ = std::fopen(log_path.c_str(), "w");
+            if (log_file_handle_) {
+                // Redirect logger: file_out -> log file, rt_out -> stdout
+                logger = Logger(log_file_handle_, stdout);
+                logger_ = logger;
+                logger.log("CoreEngine", LogSeverity::Info,
+                           "Log file opened: " + log_path);
+            } else {
+                logger.log("CoreEngine", LogSeverity::Warning,
+                           "Cannot open log file: " + log_path);
+            }
+        }
     }
 
     if (root.contains("default_core") && root["default_core"].is_string())

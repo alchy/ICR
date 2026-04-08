@@ -171,6 +171,7 @@ private:
     Logger                      logger_;
 
     // Engine config (loaded from JSON, per-core settings)
+    std::FILE*  log_file_handle_ = nullptr;   // owned, closed in destructor
     std::string default_core_name_;
     // core_name -> {key -> value} from engine_config.json
     std::unordered_map<std::string,

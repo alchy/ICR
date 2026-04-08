@@ -1,4 +1,5 @@
 {
+  "log_file": "icr.log",
   "default_core": "SamplerCore",
   "cores": {
     "SamplerCore": {
