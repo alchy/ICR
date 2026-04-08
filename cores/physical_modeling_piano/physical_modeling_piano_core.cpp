@@ -391,14 +391,8 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
     float hammer_vel = physics::midi_to_hammer_velocity(velocity);
     physics::hammer_init(v.hammer, hammer_vel, eff_K_H, np.p, np.M_H);
 
-    // -- Setup soundboard modes (gain scaled by soundboard_mix) ---------------
-
-    auto sb = physics::default_soundboard();
-    for (int mi = 0; mi < physics::SOUNDBOARD_MODES; mi++) {
-        physics::soundboard_mode_init(v.sb_modes[mi],
-                                       sb.freqs[mi], sb.Qs[mi],
-                                       sb.gains[mi] * soundboard_mix, sr);
-    }
+    // Soundboard coloring: handled by DspChain convolver (soundboard IR),
+    // not by per-voice mode bank.  See strategy A in docs.
 
     // -- Hammer noise: felt-on-steel "thwack" at onset ------------------------
     // Velocity-scaled amplitude, bandpass centroid rises with pitch
@@ -498,19 +492,12 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples,
             physics::delay_write(s.delay_l, reflected);
         }
 
-        // -- Soundboard modes: excited by bridge force ------------------------
-        float sb_out = 0.f;
-        for (int mi = 0; mi < physics::SOUNDBOARD_MODES; mi++) {
-            sb_out += physics::soundboard_mode_tick(sb_modes[mi],
-                                                     bridge_force_total);
-        }
-
-        // -- Mix: direct string radiation + soundboard ------------------------
-        // Direct string: scale up to compensate for small k_t.
-        // Soundboard: already at audible level from its own gains —
-        //   apply a milder boost (sqrt of output_scale) to keep balanced.
-        float direct = bridge_force_total * string_mix * output_scale;
-        float total = direct + sb_out;
+        // -- Output: direct string radiation via bridge ───────────────────
+        // Soundboard coloring comes from the DspChain convolver (real
+        // soundboard IR) rather than the simplified mode bank.
+        // This is the "commuted synthesis" approach: waveguide produces
+        // a dry string signal, external IR adds body + room.
+        float total = bridge_force_total * string_mix * output_scale;
 
         // Apply gain and gates
         total *= gain * env_gate;
