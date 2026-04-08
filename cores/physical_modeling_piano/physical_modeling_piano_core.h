@@ -77,6 +77,11 @@ struct PhysicsString {
     // Bridge junction coefficients
     physics::JunctionCoeffs junction;
 
+    // Hammer felt low-pass: filters excitation before injection.
+    // Simulates felt compliance — harder hammer = higher cutoff = brighter.
+    float felt_lp_state = 0.f;    // one-pole LPF state
+    float felt_lp_coeff = 0.5f;   // alpha: 0=no filter, 1=bypass
+
     // Hammer interaction point (as delay tap position)
     int strike_tap = 0;  // delay_r position for hammer contact
 

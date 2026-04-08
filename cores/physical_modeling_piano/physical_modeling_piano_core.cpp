@@ -355,8 +355,17 @@ void PhysicsVoiceManager::initVoice(int midi, const PhysicsNoteParam& np,
         s.f0_hz = f0;
 
         // Loss filter (uses scaled damping times)
+        // Strengthen high-freq damping: use tau_high/4 for more aggressive rolloff.
+        // Real piano strings damp high partials much faster than one-pole predicts.
         s.loss = physics::compute_loss_filter(f0, eff_tau_fund,
-                                               eff_tau_high, sr);
+                                               eff_tau_high * 0.25f, sr);
+
+        // Felt low-pass: cutoff rises with pitch (softer hammer = darker)
+        //   Bass (MIDI 21): ~800 Hz,  Treble (MIDI 108): ~6 kHz
+        float felt_fc = 800.f + (float)(midi - 21) / 87.f * 5200.f;
+        float felt_w = dsp::TAU * felt_fc / sr;
+        s.felt_lp_coeff = felt_w / (felt_w + 1.f);  // one-pole alpha
+        s.felt_lp_state = 0.f;
 
         // Dispersion
         s.dispersion = physics::compute_dispersion(np.B, f0, sr);
@@ -478,12 +487,19 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples,
             // Output: bridge radiation (before filtering)
             bridge_out_total += bridge_sample;
 
-            // Karplus-Strong loop: low-pass filter + dispersion + inject
-            // No sign inversion — single delay line means the wave period
-            // equals len (not 2*len as with dual-rail + inversion).
+            // Felt low-pass filter on excitation: shapes hammer force spectrum
+            // (softer felt = darker attack, harder felt = brighter)
+            float filtered_injection = injection_per_string;
+            if (injection_per_string != 0.f) {
+                s.felt_lp_state += s.felt_lp_coeff
+                                 * (injection_per_string - s.felt_lp_state);
+                filtered_injection = s.felt_lp_state;
+            }
+
+            // Karplus-Strong loop: loss filter + dispersion + filtered injection
             float looped = physics::loss_filter_tick(bridge_sample, s.loss);
             looped = physics::dispersion_tick(looped, s.dispersion);
-            looped += injection_per_string;
+            looped += filtered_injection;
 
             physics::delay_write(s.delay_r, looped);
         }
