@@ -38,3 +38,4 @@ Thumbs.db
 .claude/
 .audit-*.md
 tmp/
+tmp_audio/
