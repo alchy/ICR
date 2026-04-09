@@ -343,7 +343,7 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     float v0 = physics::velocity_to_v0(vel_norm);
     v.hammer_len = physics::hammer::compute_force(
         midi, v0, np.exc_x0, sr, v.hammer_v_in,
-        np.K_hardening, np.p_hardening);
+        np.K_hardening, np.p_hardening, np.gauge);
 
     // ── Multi-string setup ──────────────────────────────────────────
     v.n_strings = np.n_strings;

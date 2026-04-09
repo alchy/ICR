@@ -335,7 +335,8 @@ inline AnchorParams interp_params(int midi) {
 inline int compute_force(int midi, float v0, float exc_x0, float sr,
                          float* v_in,
                          float K_hardening = 1.5f,
-                         float p_hardening = 0.3f) {
+                         float p_hardening = 0.3f,
+                         float gauge = 1.0f) {
     AnchorParams ap = interp_params(midi);
 
     // Velocity-dependent felt hardness
@@ -343,6 +344,11 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     float vel_norm = (std::min)(v0 / V_MAX, 1.f);
     ap.K_stiff *= (1.f + K_hardening * vel_norm);
     ap.p_exp   += p_hardening * vel_norm;
+
+    // Gauge scales string mass: thicker string = more mass = higher
+    // wave impedance = hammer bounces back faster = shorter contact
+    // = brighter attack. Also changes Ms in FD computation.
+    ap.Ms_g *= gauge;
 
     float Ms = ap.Ms_g * 0.001f;       // g → kg
     float L  = ap.L_m;
@@ -468,21 +474,40 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     for (int i = 0; i < actual_len; i++)
         v_in[i] = F[i] * inv_2R0;
 
-    // Add broadband HF content to hammer pulse.
-    // The Chaigne FD model with coarse grid (N~40-60) produces only
-    // low-frequency force. Real hammer felt impact has broadband
-    // energy up to 4-8 kHz. We add shaped noise proportional to
-    // the force envelope to inject this missing HF content.
+    // ── Spectral enrichment of hammer force ─────────────────────────
     //
-    // noise_level: controlled by K_hardening (harder felt = more HF)
-    float noise_level = 0.03f * (1.f + K_hardening * vel_norm);
+    // The Chaigne FD model with coarse grid produces too few harmonics.
+    // Real piano hammer impact has:
+    //   1. Broadband noise (felt impact transient)
+    //   2. Strong even harmonics (from bridge/soundboard coupling)
+    //
+    // We add both to the force signal, shaped by the force envelope.
+
+    // Broadband noise (subtle — just attack brightness)
+    float noise_level = 0.02f * (1.f + K_hardening * vel_norm);
     uint32_t rng_state = (uint32_t)(midi * 7919 + (int)(v0 * 1000.f));
+
+    // Even-harmonic enrichment: add 2nd and 4th harmonic of f0 into
+    // the force signal. This compensates for the waveguide's natural
+    // odd-harmonic bias (rigid terminations favor odd modes).
+    float f0_note = 440.f * std::pow(2.f, ((float)midi - 69.f) / 12.f);
+    float dt_sr = 1.f / sr;
+    float even_level = 0.12f;  // strength of even harmonic injection
+
     for (int i = 0; i < actual_len; i++) {
         if (F[i] < 1e-6f) continue;
-        // Simple LCG pseudo-random
+        float env = F[i] * inv_2R0;
+
+        // Noise component
         rng_state = rng_state * 1664525u + 1013904223u;
         float white = ((float)(rng_state >> 8) / 16777216.f - 0.5f) * 2.f;
-        v_in[i] += white * F[i] * inv_2R0 * noise_level;
+        v_in[i] += white * env * noise_level;
+
+        // Even harmonic injection (2nd + 4th harmonics)
+        float t = (float)i * dt_sr;
+        float h2 = std::sin(dsp::TAU * 2.f * f0_note * t);
+        float h4 = std::sin(dsp::TAU * 4.f * f0_note * t) * 0.5f;
+        v_in[i] += (h2 + h4) * env * even_level;
     }
 
     return actual_len;
