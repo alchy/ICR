@@ -16,7 +16,8 @@
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive/pl-grand-04071611-soundboard.wav"
     },
     "SineCore": {
-      "params_path": ""
+      "params_path": "",
+      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-sine"
     }
   }
 }

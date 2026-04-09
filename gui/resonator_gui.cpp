@@ -18,7 +18,6 @@
 #include "../engine/synth_core_registry.h"
 #include "../cores/sampler/sampler_core.h"
 #include "../cores/additive_synthesis_piano/additive_synthesis_piano_core.h"
-#include "../cores/physical_modeling_piano/physical_modeling_piano_core.h"
 #include "../dsp/dsp_chain.h"
 
 #include <fstream>
@@ -113,14 +112,13 @@ struct GuiState {
     int  selected_core   = 0;
     std::string active_core_name;
 
-    // Soundbank selector (per-core)
-    std::string soundbank_dir;                  // from engine config
-    std::vector<std::string> soundbank_files;   // filenames (no path)
-    std::string active_soundbank;               // currently loaded
-
-    std::string phys_soundbank_dir;
-    std::vector<std::string> phys_soundbank_files;
-    std::string phys_active_soundbank;
+    // Soundbank selector (generic, per core name)
+    struct CoreBankState {
+        std::string dir;
+        std::vector<std::string> files;
+        std::string active;
+    };
+    std::unordered_map<std::string, CoreBankState> core_banks;
 
     std::vector<std::string> ports;
     int  selected_port   = 0;
@@ -762,13 +760,14 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         }
     }
     // Discover soundbank JSON files for AdditiveSynthesisPianoCore
-    gs.soundbank_dir = engine.coreConfigValue("AdditiveSynthesisPianoCore", "soundbank_dir");
-    if (gs.soundbank_dir.empty()) gs.soundbank_dir = "soundbanks-additive";
-    gs.soundbank_files = discoverSoundbankJsonFiles(gs.soundbank_dir);
-
-    gs.phys_soundbank_dir = engine.coreConfigValue("PhysicalModelingPianoCore", "soundbank_dir");
-    if (gs.phys_soundbank_dir.empty()) gs.phys_soundbank_dir = "soundbanks-physical";
-    gs.phys_soundbank_files = discoverSoundbankJsonFiles(gs.phys_soundbank_dir);
+    // Discover soundbanks for all registered cores
+    for (const auto& cname : gs.core_names) {
+        GuiState::CoreBankState cbs;
+        cbs.dir = engine.coreConfigValue(cname, "soundbank_dir");
+        if (!cbs.dir.empty())
+            cbs.files = discoverSoundbankJsonFiles(cbs.dir);
+        gs.core_banks[cname] = std::move(cbs);
+    }
 
     // Sync convolver state from engine (--ir may have loaded it)
     if (DspChain* dsp = engine.getDspChain()) {
@@ -883,68 +882,31 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 }
             }
 
-            // ── Soundbank selector (AdditiveSynthesisPianoCore) ─────────────
-            if (dynamic_cast<AdditiveSynthesisPianoCore*>(engine.core())) {
-                if (!gs.soundbank_files.empty()) {
+            // ── Soundbank selector (generic, all cores) ──────────────────
+            if (engine.core()) {
+                std::string cname = engine.core()->coreName();
+                auto it = gs.core_banks.find(cname);
+                if (it != gs.core_banks.end() && !it->second.files.empty()) {
+                    auto& cbs = it->second;
                     ImGui::Text("Soundbank:");
                     ImGui::SameLine();
                     ImGui::SetNextItemWidth(220.f);
-                    const char* sb_preview = gs.active_soundbank.empty()
-                                           ? "(select...)" : gs.active_soundbank.c_str();
+                    const char* sb_preview = cbs.active.empty()
+                                           ? "(select...)" : cbs.active.c_str();
                     if (ImGui::BeginCombo("##soundbank", sb_preview)) {
-                        for (const auto& fname : gs.soundbank_files) {
-                            bool sel = (fname == gs.active_soundbank);
+                        for (const auto& fname : cbs.files) {
+                            bool sel = (fname == cbs.active);
                             if (ImGui::Selectable(fname.c_str(), sel)) {
-                                if (fname != gs.active_soundbank) {
-                                    std::string path = gs.soundbank_dir + "/" + fname;
-                                    auto* core = dynamic_cast<AdditiveSynthesisPianoCore*>(engine.core());
-                                    if (core) {
-                                        std::ifstream f(path);
-                                        if (f.is_open()) {
-                                            std::string json_str((std::istreambuf_iterator<char>(f)),
-                                                                  std::istreambuf_iterator<char>());
-                                            if (core->loadBankJson(json_str)) {
-                                                gs.active_soundbank = fname;
-                                                engine.getLogger().log("GUI", LogSeverity::Info,
-                                                    "Loaded soundbank: " + fname);
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                            if (sel) ImGui::SetItemDefaultFocus();
-                        }
-                        ImGui::EndCombo();
-                    }
-                    ImGui::SameLine(0, 20.f);
-                }
-            }
-
-            // ── Soundbank selector (PhysicalModelingPianoCore) ──────────────
-            if (dynamic_cast<PhysicalModelingPianoCore*>(engine.core())) {
-                if (!gs.phys_soundbank_files.empty()) {
-                    ImGui::Text("Soundbank:");
-                    ImGui::SameLine();
-                    ImGui::SetNextItemWidth(220.f);
-                    const char* sb_preview = gs.phys_active_soundbank.empty()
-                                           ? "(select...)" : gs.phys_active_soundbank.c_str();
-                    if (ImGui::BeginCombo("##phys_soundbank", sb_preview)) {
-                        for (const auto& fname : gs.phys_soundbank_files) {
-                            bool sel = (fname == gs.phys_active_soundbank);
-                            if (ImGui::Selectable(fname.c_str(), sel)) {
-                                if (fname != gs.phys_active_soundbank) {
-                                    std::string path = gs.phys_soundbank_dir + "/" + fname;
-                                    auto* core = dynamic_cast<PhysicalModelingPianoCore*>(engine.core());
-                                    if (core) {
-                                        std::ifstream f(path);
-                                        if (f.is_open()) {
-                                            std::string json_str((std::istreambuf_iterator<char>(f)),
-                                                                  std::istreambuf_iterator<char>());
-                                            if (core->loadBankJson(json_str)) {
-                                                gs.phys_active_soundbank = fname;
-                                                engine.getLogger().log("GUI", LogSeverity::Info,
-                                                    "Loaded physical bank: " + fname);
-                                            }
+                                if (fname != cbs.active) {
+                                    std::string path = cbs.dir + "/" + fname;
+                                    std::ifstream f(path);
+                                    if (f.is_open()) {
+                                        std::string json_str((std::istreambuf_iterator<char>(f)),
+                                                              std::istreambuf_iterator<char>());
+                                        if (engine.core()->loadBankJson(json_str)) {
+                                            cbs.active = fname;
+                                            engine.getLogger().log("GUI", LogSeverity::Info,
+                                                "Loaded bank: " + fname);
                                         }
                                     }
                                 }

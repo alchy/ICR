@@ -1,0 +1,13 @@
+{
+  "metadata": {
+    "instrument_name": "sine",
+    "version": 1,
+    "sr": 48000,
+    "model": "SineCore",
+    "description": "Default SineCore bank (gain + detune only)"
+  },
+  "params": {
+    "gain": 1.0,
+    "detune_cents": 0.0
+  }
+}

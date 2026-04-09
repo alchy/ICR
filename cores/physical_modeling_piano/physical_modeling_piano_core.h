@@ -169,6 +169,10 @@ public:
     std::vector<CoreParamDesc> describeParams()        const override;
 
     bool loadBankJson(const std::string& json_str) override;
+    bool exportBankJson(const std::string& path) override;
+
+    bool setNoteParam(int midi, int vel,
+                      const std::string& key, float value) override;
 
     CoreVizState getVizState() const override;
 

@@ -127,6 +127,69 @@ bool PhysicalModelingPianoCore::loadBankJson(const std::string& json_str) {
     return loadBankFromJson(json_str, dummy);
 }
 
+bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
+    std::lock_guard<std::mutex> lk(bank_mutex_);
+
+    json root;
+    root["metadata"] = {
+        {"instrument_name", "steel-string-piano"},
+        {"version", 2},
+        {"sr", (int)sample_rate_},
+        {"model", "teng-dual-rail-v2"},
+        {"description", "Exported from PhysicalModelingPianoCore v1.0"}
+    };
+
+    json notes_j = json::object();
+    for (int m = 0; m < 128; m++) {
+        const PhysicsNoteParam& np = note_params_[m];
+        if (!np.valid) continue;
+
+        char key[8];
+        std::snprintf(key, sizeof(key), "m%03d", m);
+        notes_j[key] = {
+            {"midi",          np.midi},
+            {"f0_hz",         np.f0_hz},
+            {"B",             np.B},
+            {"gauge",         np.gauge},
+            {"T60_fund",      np.T60_fund},
+            {"T60_nyq",       np.T60_nyq},
+            {"exc_x0",        np.exc_x0},
+            {"n_disp_stages", np.n_disp_stages},
+            {"disp_coeff",    np.disp_coeff},
+            {"n_strings",     np.n_strings},
+            {"detune_cents",  np.detune_cents}
+        };
+    }
+    root["notes"] = notes_j;
+
+    std::ofstream f(path);
+    if (!f.is_open()) return false;
+    f << root.dump(2);
+    return f.good();
+}
+
+bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
+                                              const std::string& key,
+                                              float value) {
+    if (midi < 0 || midi > 127) return false;
+    std::lock_guard<std::mutex> lk(bank_mutex_);
+    PhysicsNoteParam& np = note_params_[midi];
+    if (!np.valid) return false;
+
+    if (key == "f0_hz")         { np.f0_hz         = value; return true; }
+    if (key == "B")             { np.B             = value; return true; }
+    if (key == "gauge")         { np.gauge         = value; return true; }
+    if (key == "T60_fund")      { np.T60_fund      = value; return true; }
+    if (key == "T60_nyq")       { np.T60_nyq       = value; return true; }
+    if (key == "exc_x0")        { np.exc_x0        = value; return true; }
+    if (key == "n_disp_stages") { np.n_disp_stages = (int)value; return true; }
+    if (key == "disp_coeff")    { np.disp_coeff    = value; return true; }
+    if (key == "n_strings")     { np.n_strings     = (int)value; return true; }
+    if (key == "detune_cents")  { np.detune_cents  = value; return true; }
+
+    return false;
+}
+
 void PhysicalModelingPianoCore::setSampleRate(float sr) { sample_rate_ = sr; }
 
 // ── MIDI ─────────────────────────────────────────────────────────────────
