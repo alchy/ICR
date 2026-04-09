@@ -10,6 +10,7 @@
  *   SineCore:     ISynthCore adaptér (propojení s CoreEngine)
  */
 #include "sine_core.h"
+#include "dsp/dsp_math.h"
 #include "engine/synth_core_registry.h"
 
 // Registrace do globálního registru — CoreEngine najde SineCore podle jména
@@ -43,8 +44,8 @@ bool SineVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
 
         // Syntéza: sinusový oscilátor
         float s = amp * env * std::sin(phase);
-        out_l[i] += s;
-        out_r[i] += s;   // mono → stereo (identické kanály)
+        out_l[i] += s * pan_l;
+        out_r[i] += s * pan_r;
 
         // Posun fáze (akumulace)
         phase += omega;
@@ -71,7 +72,8 @@ bool SineVoiceManager::processBlock(float* out_l, float* out_r,
 }
 
 void SineVoiceManager::initVoice(int midi, float omega, float amp,
-                                  float sample_rate) noexcept {
+                                  float sample_rate,
+                                  float keyboard_spread) noexcept {
     SineVoice& v = voices_[midi];
     v.omega      = omega;
     v.amp        = amp;
@@ -82,6 +84,10 @@ void SineVoiceManager::initVoice(int midi, float omega, float amp,
     v.releasing  = false;
     v.rel_gain   = 1.f;
     v.active     = true;
+
+    // Keyboard spread pan
+    float angle = dsp::keyboard_pan_angle(midi, keyboard_spread);
+    dsp::constant_power_pan(angle, v.pan_l, v.pan_r);
 }
 
 void SineVoiceManager::releaseVoice(int midi, float sample_rate) noexcept {
@@ -104,15 +110,13 @@ void SineVoiceManager::releaseAll(float sample_rate) noexcept {
 void SinePatchManager::noteOn(uint8_t midi, uint8_t velocity,
                                SineVoiceManager& vm,
                                float sample_rate, float gain,
-                               float detune_cents) noexcept {
-    // Překlad MIDI velocity 0-127 → nativní amplituda 0.0-1.0
+                               float detune_cents,
+                               float keyboard_spread) noexcept {
     float amp   = (velocity / 127.f) * gain;
-    // Překlad MIDI nota → úhlová frekvence (rad/sample)
     float f     = midiToHz(midi, detune_cents);
     float omega = TAU * f / sample_rate;
 
-    // Delegace na VoiceManager — voice dostane jen nativní parametry
-    vm.initVoice(midi, omega, amp, sample_rate);
+    vm.initVoice(midi, omega, amp, sample_rate, keyboard_spread);
 
     last_midi_.store(midi,     std::memory_order_relaxed);
     last_vel_ .store(velocity, std::memory_order_relaxed);
@@ -177,7 +181,8 @@ void SineCore::noteOn(uint8_t midi, uint8_t velocity) {
     if (velocity == 0) { noteOff(midi); return; }
     patch_mgr_.noteOn(midi, velocity, voice_mgr_, sample_rate_,
                       gain_.load(std::memory_order_relaxed),
-                      detune_cents_.load(std::memory_order_relaxed));
+                      detune_cents_.load(std::memory_order_relaxed),
+                      keyboard_spread_.load(std::memory_order_relaxed));
 }
 
 void SineCore::noteOff(uint8_t midi) {
@@ -209,19 +214,26 @@ bool SineCore::setParam(const std::string& key, float value) {
                             std::memory_order_relaxed);
         return true;
     }
+    if (key == "keyboard_spread") {
+        keyboard_spread_.store(std::max(0.f, std::min(3.14159f, value)),
+                               std::memory_order_relaxed);
+        return true;
+    }
     return false;
 }
 
 bool SineCore::getParam(const std::string& key, float& out) const {
-    if (key == "gain")         { out = gain_.load(std::memory_order_relaxed);         return true; }
-    if (key == "detune_cents") { out = detune_cents_.load(std::memory_order_relaxed); return true; }
+    if (key == "gain")            { out = gain_.load(std::memory_order_relaxed);            return true; }
+    if (key == "detune_cents")    { out = detune_cents_.load(std::memory_order_relaxed);    return true; }
+    if (key == "keyboard_spread") { out = keyboard_spread_.load(std::memory_order_relaxed); return true; }
     return false;
 }
 
 std::vector<CoreParamDesc> SineCore::describeParams() const {
     return {
-        { "gain",         "Gain",   "Output", "",   gain_.load(),         0.f,   2.f,   false },
-        { "detune_cents", "Detune", "Tuning", "ct", detune_cents_.load(), -100.f, 100.f, false },
+        { "gain",            "Gain",            "Output", "",    gain_.load(),            0.f,    2.f,     false },
+        { "detune_cents",    "Detune",          "Tuning", "ct",  detune_cents_.load(),    -100.f, 100.f,   false },
+        { "keyboard_spread", "Keyboard Spread", "Stereo", "rad", keyboard_spread_.load(), 0.f,    3.14159f, false },
     };
 }
 
