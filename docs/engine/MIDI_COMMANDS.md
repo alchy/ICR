@@ -6,28 +6,30 @@ Complete table of MIDI messages accepted by the ICR engine.
 
 ### Note On / Off
 
-| Status | Data | Description |
-|--------|------|-------------|
-| `0x90 ch` | `midi vel` | Note On (vel 1-127). Routed to active core `noteOn(midi, vel)` |
-| `0x90 ch` | `midi 0` | Note Off (velocity 0 = note off) |
-| `0x80 ch` | `midi vel` | Note Off. Routed to active core `noteOff(midi)` |
+| Status | Data | Physical | Additive | Sampler | Sine |
+|--------|------|:--------:|:--------:|:-------:|:----:|
+| `0x90` | `midi vel` | Note On | Note On | Note On | Note On |
+| `0x90` | `midi 0` | Note Off | Note Off | Note Off | Note Off |
+| `0x80` | `midi vel` | Note Off | Note Off | Note Off | Note Off |
 
 ### Control Change (CC)
 
-| Status | CC# | Range | Description |
-|--------|-----|-------|-------------|
-| `0xB0` | **64** | 0-127 | Sustain pedal. ≥64 = down (delays note-off), <64 = up (releases held notes) |
-| `0xB0` | **7** | 0-127 | Channel volume → `setMasterGain()`. Square law: `(v/127)² × 2` |
-| `0xB0` | **10** | 0-127 | Pan → `setMasterPan()`. 0=left, 64=center, 127=right |
-| `0xB0` | **93** | 0-127 | LFO pan speed → `setPanSpeed()`. 0=off, 127=2 Hz |
-| `0xB0` | **91** | 0-127 | LFO pan depth → `setPanDepth()`. 0=off, 127=100% |
-| `0xB0` | **74** | 0-127 | Limiter threshold → `setLimiterThreshold()`. 0=-40 dB, 127=0 dB |
+| CC# | Description | Physical | Additive | Sampler | Sine |
+|-----|-------------|:--------:|:--------:|:-------:|:----:|
+| **64** | Sustain pedal (≥64 = down) | yes | yes | yes | yes |
+| **7** | Channel volume → master gain | yes | yes | yes | yes |
+| **10** | Pan (0=L, 64=C, 127=R) | yes | yes | yes | yes |
+| **93** | LFO pan speed (0-2 Hz) | yes | yes | yes | yes |
+| **91** | LFO pan depth (0-100%) | yes | yes | yes | yes |
+| **74** | Limiter threshold (-40..0 dB) | yes | yes | yes | yes |
+
+Note: CC 7/10/91/93/74 are engine-level — they work regardless of active core.
 
 ---
 
 ## SysEx Protocol
 
-Frame format: `F0 7D 01 <cmd> <core_id> <data...> F7`
+Frame: `F0 7D 01 <cmd> <core_id> <data...> F7`
 
 ### Core IDs
 
@@ -42,14 +44,14 @@ Frame format: `F0 7D 01 <cmd> <core_id> <data...> F7`
 
 ### Commands
 
-| Cmd | Name | Payload | Description |
-|-----|------|---------|-------------|
-| `0x70` | PING | (none) | Returns PONG: `F0 7D 01 71 F7` |
-| `0x01` | SET_NOTE_PARAM | `midi vel param_id value(5)` | Set per-note parameter |
-| `0x02` | SET_NOTE_PARTIAL | `midi vel k param_id value(5)` | Set per-partial parameter |
-| `0x03` | SET_BANK | `chunk_idx(3) total(3) data...` | Upload JSON bank (chunked) |
-| `0x10` | SET_MASTER | `param_id value(5)` | Set engine/core/DSP parameter |
-| `0x72` | EXPORT_BANK | `path (ASCII)` | Export bank JSON to file path |
+| Cmd | Name | Physical | Additive | Sampler | Sine |
+|-----|------|:--------:|:--------:|:-------:|:----:|
+| `0x70` | PING/PONG | yes | yes | yes | yes |
+| `0x01` | SET_NOTE_PARAM | yes | yes | — | — |
+| `0x02` | SET_NOTE_PARTIAL | — | yes | — | — |
+| `0x03` | SET_BANK | yes | yes | — | — |
+| `0x10` | SET_MASTER | yes | yes | yes | yes |
+| `0x72` | EXPORT_BANK | yes | yes | — | — |
 
 ### Value Encoding (5 bytes)
 
@@ -62,76 +64,80 @@ bytes[0..4] → 35-bit integer → reinterpret as IEEE 754 float32
 
 ## SET_NOTE_PARAM (0x01) — Per-Note Parameters
 
-### Additive Core (core_id 0x01)
+| Key | Physical | Additive | Description |
+|-----|:--------:|:--------:|-------------|
+| `f0_hz` | yes | yes (0x01) | Fundamental frequency (Hz) |
+| `B` | yes | yes (0x02) | Inharmonicity coefficient |
+| `gauge` | yes | — | String thickness multiplier |
+| `T60_fund` | yes | — | Fundamental decay time (s) |
+| `T60_nyq` | yes | — | Nyquist decay time (s) |
+| `exc_x0` | yes | — | Hammer striking position (fraction) |
+| `K_hardening` | yes | — | Velocity stiffness scaling (0-5) |
+| `p_hardening` | yes | — | Velocity exponent offset (0-1) |
+| `n_disp_stages` | yes | — | Dispersion allpass stages (0-16) |
+| `disp_coeff` | yes | — | Per-stage allpass coefficient |
+| `n_strings` | yes | — | Unison strings (1-3) |
+| `detune_cents` | yes | — | String detuning (cents) |
+| `output_scale` | yes | — | Per-note output gain (0.01-0.5) |
+| `attack_tau` | — | yes (0x03) | Attack transient decay (s) |
+| `A_noise` | — | yes (0x04) | Attack noise amplitude |
+| `rms_gain` | — | yes (0x05) | RMS output gain |
+| `phi_diff` | — | yes (0x06) | Phase difference (stereo) |
 
-| Param ID | Key | Description |
-|----------|-----|-------------|
-| `0x01` | `f0_hz` | Fundamental frequency (Hz) |
-| `0x02` | `B` | Inharmonicity coefficient |
-| `0x03` | `attack_tau` | Attack transient decay (s) |
-| `0x04` | `A_noise` | Attack noise amplitude |
-| `0x05` | `rms_gain` | RMS output gain |
-| `0x06` | `phi_diff` | Phase difference (stereo) |
-
-### Physical Core (core_id 0x02)
-
-Accepts any bank key via `setNoteParam(midi, vel, key, value)`:
-
-| Key | Description |
-|-----|-------------|
-| `f0_hz` | Fundamental frequency |
-| `B` | Inharmonicity coefficient |
-| `gauge` | String thickness |
-| `T60_fund` | Fundamental decay time (s) |
-| `T60_nyq` | Nyquist decay time (s) |
-| `exc_x0` | Hammer striking position |
-| `n_disp_stages` | Dispersion allpass stages |
-| `disp_coeff` | Per-stage allpass coefficient |
-| `n_strings` | Unison strings (1-3) |
-| `detune_cents` | String detuning (cents) |
-| `K_hardening` | Velocity stiffness scaling (0-5) |
-| `p_hardening` | Velocity exponent offset (0-1) |
-| `output_scale` | Per-note output gain (0.01-0.5) |
-
-Note: Physical core uses string key names (not param IDs) in its
-`setNoteParam` implementation. SysEx param IDs 0x01-0x06 map to
-additive core keys only.
+Sampler, Sine: `setNoteParam` not implemented (returns false).
 
 ---
 
 ## SET_NOTE_PARTIAL (0x02) — Per-Partial Parameters
 
-### Additive Core only (core_id 0x01)
+| Key | Physical | Additive | Description |
+|-----|:--------:|:--------:|-------------|
+| `f_hz` (0x10) | — | yes | Partial frequency (Hz) |
+| `A0` (0x11) | — | yes | Partial amplitude |
+| `tau1` (0x12) | — | yes | Fast decay time (s) |
+| `tau2` (0x13) | — | yes | Slow decay time (s) |
+| `a1` (0x14) | — | yes | Envelope mix ratio |
+| `beat_hz` (0x15) | — | yes | Beating frequency (Hz) |
+| `phi` (0x16) | — | yes | Partial phase (rad) |
 
-| Param ID | Key | Description |
-|----------|-----|-------------|
-| `0x10` | `f_hz` | Partial frequency (Hz) |
-| `0x11` | `A0` | Partial amplitude |
-| `0x12` | `tau1` | Fast decay time (s) |
-| `0x13` | `tau2` | Slow decay time (s) |
-| `0x14` | `a1` | Envelope mix ratio (fast/slow) |
-| `0x15` | `beat_hz` | Beating frequency (Hz) |
-| `0x16` | `phi` | Partial phase (rad) |
-
-Physical core: N/A (no partial concept — returns false).
+Physical, Sampler, Sine: N/A (no partial concept).
 
 ---
 
 ## SET_MASTER (0x10) — Global Parameters
 
-### Core-Specific (param_id 0x01-0x07, routed to core's setParam)
+### Core-Specific (param_id 0x01-0x07, routed to `setParam`)
 
-| Param ID | Key | Description |
-|----------|-----|-------------|
-| `0x01` | `beat_scale` | Beating scale (additive) |
-| `0x02` | `noise_level` | Attack noise level |
-| `0x03` | `pan_spread` | Pan spread |
-| `0x04` | `stereo_decorr` | Stereo decorrelation |
-| `0x05` | `keyboard_spread` | Keyboard L/R spread (rad) |
-| `0x06` | `eq_strength` | EQ strength (additive) |
-| `0x07` | `rng_seed` | Random seed |
+| Param ID | Key | Physical | Additive | Sampler | Sine | Description |
+|----------|-----|:--------:|:--------:|:-------:|:----:|-------------|
+| `0x01` | `beat_scale` | — | yes | — | — | Beating scale |
+| `0x02` | `noise_level` | — | yes | — | — | Attack noise level |
+| `0x03` | `pan_spread` | — | yes | — | — | Pan spread |
+| `0x04` | `stereo_decorr` | — | yes | — | — | Stereo decorrelation |
+| `0x05` | `keyboard_spread` | yes | yes | yes | yes | Keyboard L/R spread (rad) |
+| `0x06` | `eq_strength` | — | yes | — | — | EQ strength |
+| `0x07` | `rng_seed` | — | yes | — | — | Random seed |
 
-### Engine-Level (param_id 0x10-0x13)
+### Core-Specific `setParam` keys (full list per core)
+
+| Key | Physical | Additive | Sampler | Sine | Description |
+|-----|:--------:|:--------:|:-------:|:----:|-------------|
+| `brightness` | yes | yes | — | — | Scales T60_nyq (timbre) |
+| `stiffness_scale` | yes | yes | — | — | Scales inharmonicity B |
+| `sustain_scale` | yes | yes | — | — | Scales T60_fund |
+| `keyboard_spread` | yes | yes | yes | yes | Stereo pan from note position |
+| `stereo_spread` | yes | — | — | — | Multi-string pan width |
+| `gauge_scale` | yes | — | — | — | Scales string thickness |
+| `gain` | — | — | yes | yes | Output gain (0-2) |
+| `detune_cents` | — | — | — | yes | Global detuning (cents) |
+| `release_time` | — | — | yes | — | Release envelope (0.1-4s) |
+| `beat_scale` | — | yes | — | — | Beating amplitude scale |
+| `noise_level` | — | yes | — | — | Attack noise level |
+| `pan_spread` | — | yes | — | — | Per-partial pan spread |
+| `stereo_decorr` | — | yes | — | — | Stereo decorrelation |
+| `eq_strength` | — | yes | — | — | Spectral EQ strength |
+
+### Engine-Level (param_id 0x10-0x13, always applied)
 
 | Param ID | Range | Description |
 |----------|-------|-------------|
@@ -140,7 +146,7 @@ Physical core: N/A (no partial concept — returns false).
 | `0x12` | 0-2.0 | LFO pan speed (Hz) |
 | `0x13` | 0-1.0 | LFO pan depth |
 
-### DspChain (param_id 0x20-0x24)
+### DspChain (param_id 0x20-0x24, always applied)
 
 | Param ID | Range | Description |
 |----------|-------|-------------|
@@ -154,21 +160,26 @@ Physical core: N/A (no partial concept — returns false).
 
 ## SET_BANK (0x03) — Chunked Bank Upload
 
+| Feature | Physical | Additive | Sampler | Sine |
+|---------|:--------:|:--------:|:-------:|:----:|
+| `loadBankJson` | yes | yes | — | — |
+
 JSON bank split into SysEx-safe chunks (max ~240 bytes each).
-Header per chunk: 3-byte chunk_idx + 3-byte total_chunks (7-bit encoding).
+Header: 3-byte chunk_idx + 3-byte total_chunks (7-bit encoding).
 
 ```
 F0 7D 01 03 <core_id> <idx_hi> <idx_mid> <idx_lo> <tot_hi> <tot_mid> <tot_lo> <json_data...> F7
 ```
 
-When all chunks received, calls `core->loadBankJson(json_string)`.
-
 ---
 
-## EXPORT_BANK (0x72) — Bank Export
+## EXPORT_BANK (0x72)
 
-Payload is ASCII file path. Calls `core->exportBankJson(path)`.
+| Feature | Physical | Additive | Sampler | Sine |
+|---------|:--------:|:--------:|:-------:|:----:|
+| `exportBankJson` | yes | yes | — | — |
 
+Payload is ASCII file path:
 ```
 F0 7D 01 72 <core_id> <path bytes...> F7
 ```
