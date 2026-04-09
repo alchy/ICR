@@ -17,7 +17,7 @@ from pathlib import Path
 import numpy as np
 from scipy.signal import sosfilt
 
-from training.modules.eq_fitter import _eq_to_biquads
+from training_additive.modules.eq_fitter import _eq_to_biquads
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +127,7 @@ class SoundbankExporter:
             params:  Params dict with real extracted samples.
             out_path: Output JSON path.
         """
-        from training.modules.profile_trainer import build_dataset, generate_profile
+        from training_additive.modules.profile_trainer import build_dataset, generate_profile
 
         samples = params["notes"]
         measured = {k: v for k, v in samples.items()
@@ -139,7 +139,7 @@ class SoundbankExporter:
         # Generate full 88×8 profile; measured samples are preserved verbatim.
         # Use generate_profile_exp for EncExp models (forward_dur requires vf).
         try:
-            from training.modules.profile_trainer_exp import (
+            from training_additive.modules.profile_trainer_exp import (
                 InstrumentProfileEncExp, generate_profile_exp,
                 build_dataset_exp,
             )
@@ -210,7 +210,7 @@ class SoundbankExporter:
             params:   Params dict (used only for eq_freqs / B spline context).
             out_path: Output JSON path.
         """
-        from training.modules.profile_trainer import build_dataset, generate_profile
+        from training_additive.modules.profile_trainer import build_dataset, generate_profile
 
         samples  = params["notes"]
         measured = {k: v for k, v in samples.items()
@@ -219,7 +219,7 @@ class SoundbankExporter:
         ds = build_dataset(measured)
 
         try:
-            from training.modules.profile_trainer_exp import (
+            from training_additive.modules.profile_trainer_exp import (
                 InstrumentProfileEncExp, generate_profile_exp,
                 build_dataset_exp,
             )
@@ -342,7 +342,7 @@ class SoundbankExporter:
                     parts = midi_map[m]["partials"]
                     # Only correct if deviation > 50% from smoothed
                     if abs(tau1_arr[i] - sm_tau1[i]) / (tau1_arr[i] + 1e-6) > 0.5:
-                        parts[ki]["tau1"] = float(max(sm_tau1[i], 0.05))
+                        parts[ki]["tau1"] = float(max(sm_tau1[i], 0.010))
                         n_smoothed += 1
                     if abs(tau2_arr[i] - sm_tau2[i]) / (tau2_arr[i] + 1e-6) > 0.5:
                         parts[ki]["tau2"] = float(max(sm_tau2[i], parts[ki]["tau1"]))
@@ -651,7 +651,7 @@ class SoundbankExporter:
             beat = 0.0
 
         raw_tau1 = p.get("tau1")
-        tau1 = max(float(raw_tau1) if raw_tau1 is not None else 0.5, 0.05)
+        tau1 = max(float(raw_tau1) if raw_tau1 is not None else 0.5, 0.010)
 
         raw_tau2 = p.get("tau2")
         tau2 = float(raw_tau2) if raw_tau2 is not None else tau1

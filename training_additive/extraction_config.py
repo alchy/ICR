@@ -8,7 +8,7 @@ Two presets:
   RELAXED — v2 behavior (trust extraction, minimal corrections)
 
 Usage:
-    from training.extraction_config import ExtractionConfig, RELAXED, STRICT
+    from training_additive.extraction_config import ExtractionConfig, RELAXED, STRICT
     cfg = RELAXED  # or STRICT for backward compat
 """
 

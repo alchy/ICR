@@ -11,17 +11,17 @@ overly-strict corrections are undone/relaxed in a post-processing
 step controlled by ExtractionConfig.
 
 Usage:
-    from training.pipeline_v2 import run
-    from training.extraction_config import RELAXED
+    from training_additive.pipeline_v2 import run
+    from training_additive.extraction_config import RELAXED
     run(bank_dir, out_path, config=RELAXED)
 """
 
 import math
-from training.extraction_config import ExtractionConfig, RELAXED
-from training.modules.extractor import ParamExtractor
-from training.modules.structural_outlier_filter import StructuralOutlierFilter
-from training.modules.eq_fitter import EQFitter
-from training.modules.exporter import SoundbankExporter
+from training_additive.extraction_config import ExtractionConfig, RELAXED
+from training_additive.modules.extractor import ParamExtractor
+from training_additive.modules.structural_outlier_filter import StructuralOutlierFilter
+from training_additive.modules.eq_fitter import EQFitter
+from training_additive.modules.exporter import SoundbankExporter
 
 
 def _relax_extraction(params: dict, cfg: ExtractionConfig) -> dict:

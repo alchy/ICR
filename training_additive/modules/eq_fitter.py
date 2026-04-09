@@ -153,7 +153,7 @@ def _eq_worker(key: str) -> tuple:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _compute_eq_for_sample(key: str, sample: dict, bank_dir: str) -> dict:
-    from training.modules.synthesizer import Synthesizer
+    from training_additive.modules.synthesizer import Synthesizer
 
     midi = sample["midi"]
     vel  = sample["vel"]

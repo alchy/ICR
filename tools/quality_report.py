@@ -27,7 +27,7 @@ REPO_ROOT = Path(__file__).parent.parent.resolve()
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from training.modules.exporter import _render_note_rms_ref
+from training_additive.modules.exporter import _render_note_rms_ref
 
 
 # ── Metrics ───────────────────────────────────────────────────────────────────

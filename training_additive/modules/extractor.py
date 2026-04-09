@@ -522,7 +522,7 @@ def _fit_decay(times, amps, i_peak) -> dict:
 
         def bi_exp(t, a1, tau1, tau2):
             a1   = np.clip(a1, 0.01, 0.99)
-            tau1 = max(tau1, 0.05)   # floor: 50 ms — no string decays faster even with strong soundboard coupling
+            tau1 = max(tau1, 0.010)  # floor: 10 ms (relaxed from 50 ms in v1)
             tau2 = max(tau2, tau1 * 1.1)
             return a1 * np.exp(-t / tau1) + (1 - a1) * np.exp(-t / tau2)
 

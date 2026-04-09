@@ -18,7 +18,7 @@ def main():
     out_path = sys.argv[2] if len(sys.argv) > 2 else "soundbanks-additive/pl-grand.json"
     workers  = int(sys.argv[3]) if len(sys.argv) > 3 else 6
 
-    from training.pipeline_simple import run
+    from training_additive.pipeline_simple import run
     result = run(
         bank_dir=bank_dir,
         out_path=out_path,

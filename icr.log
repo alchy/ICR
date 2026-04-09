@@ -1,0 +1,72 @@
+[INF][CoreEngine] Log file opened: icr.log
+[INF][CoreEngine] Engine config loaded: icr-config.json (default_core=SineCore, 4 core configs)
+[INF][main] === IthacaCoreResonatorGUI STARTING — SineCore ===
+[INF][CoreEngine] Initializing core: SineCore
+[INF][SineCore] Ready. SR=48000
+[INF][CoreEngine] Master gain MIDI=100
+[INF][CoreEngine] Ready. Core=SineCore SR=48000 block=256
+[INF][CoreEngine] Audio started: Speakers/Headphones (Realtek(R) Audio)
+[INF][GUI] Starting GLFW + ImGui
+[INF][MIDI] Opened: loopMIDI Port 0
+[INF][GUI] Auto-connected: loopMIDI Port 0
+[INF][GUI] GUI loop started
+[INF][CoreEngine] Instantiating core: AdditiveSynthesisPianoCore
+[INF][AdditiveSynthesisPianoCore] No params_path — loaded empty (use loadBankJson or --params)
+[INF][CoreEngine] Auto-loaded IR from config: C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav
+[INF][CoreEngine] Master gain MIDI=100
+[INF][CoreEngine] Active core: AdditiveSynthesisPianoCore (2 cores loaded)
+[INF][GUI] Loaded bank: pl-grand.json
+[INF][CoreEngine] Instantiating core: PhysicalModelingPianoCore params=C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/teng-v2-default.json
+[INF][PhysicalModelingPianoCore] Bank loaded: C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/teng-v2-default.json
+[INF][PhysicalModelingPianoCore] Ready (v1.0 dual-rail). SR=48000
+[INF][CoreEngine] Master gain MIDI=100
+[INF][CoreEngine] Active core: PhysicalModelingPianoCore (3 cores loaded)
+[INF][GUI] Loaded bank: teng-v2-default.json
+[INF][CoreEngine] Master gain MIDI=77
+[INF][CoreEngine] Master gain MIDI=76
+[INF][CoreEngine] Master gain MIDI=74
+[INF][CoreEngine] Master gain MIDI=72
+[INF][CoreEngine] Master gain MIDI=69
+[INF][CoreEngine] Master gain MIDI=63
+[INF][CoreEngine] Master gain MIDI=58
+[INF][CoreEngine] Master gain MIDI=53
+[INF][CoreEngine] Master gain MIDI=51
+[INF][CoreEngine] Master gain MIDI=49
+[INF][CoreEngine] Master gain MIDI=47
+[INF][CoreEngine] Master gain MIDI=46
+[INF][CoreEngine] Master gain MIDI=45
+[INF][CoreEngine] Master gain MIDI=46
+[INF][CoreEngine] Master gain MIDI=47
+[INF][CoreEngine] Master gain MIDI=48
+[INF][CoreEngine] Master gain MIDI=49
+[INF][CoreEngine] Master gain MIDI=50
+[INF][CoreEngine] Master gain MIDI=51
+[INF][CoreEngine] Master gain MIDI=52
+[INF][CoreEngine] Master gain MIDI=51
+[INF][CoreEngine] Master gain MIDI=50
+[INF][CoreEngine] Master gain MIDI=51
+[INF][CoreEngine] Master gain MIDI=52
+[INF][CoreEngine] Master gain MIDI=53
+[INF][CoreEngine] Master gain MIDI=54
+[INF][CoreEngine] Master gain MIDI=56
+[INF][CoreEngine] Master gain MIDI=57
+[INF][CoreEngine] Master gain MIDI=58
+[INF][CoreEngine] Master gain MIDI=59
+[INF][CoreEngine] Master gain MIDI=60
+[INF][CoreEngine] Master gain MIDI=61
+[INF][CoreEngine] Master gain MIDI=62
+[INF][CoreEngine] Master gain MIDI=63
+[INF][CoreEngine] Master gain MIDI=64
+[INF][CoreEngine] Master gain MIDI=65
+[INF][CoreEngine] Master gain MIDI=67
+[INF][CoreEngine] Master gain MIDI=68
+[INF][CoreEngine] Master gain MIDI=69
+[INF][CoreEngine] Master gain MIDI=68
+[INF][CoreEngine] Master gain MIDI=67
+[INF][CoreEngine] Master gain MIDI=66
+[INF][CoreEngine] Master gain MIDI=65
+[INF][CoreEngine] Master gain MIDI=66
+[INF][CoreEngine] Master gain MIDI=67
+[INF][CoreEngine] Master gain MIDI=66
+[INF][CoreEngine] Master gain MIDI=65
+[INF][CoreEngine] Master gain MIDI=64

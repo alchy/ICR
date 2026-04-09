@@ -4,14 +4,14 @@ training/pipeline_simple.py
 Extract → filter outliers → fit EQ → export soundbank.
 
 Call via run-extract-additive.py or import directly:
-    from training.pipeline_simple import run
+    from training_additive.pipeline_simple import run
     out_path = run(bank_dir, out_path, workers=4)
 """
 
-from training.modules.extractor                  import ParamExtractor
-from training.modules.structural_outlier_filter  import StructuralOutlierFilter
-from training.modules.eq_fitter                  import EQFitter
-from training.modules.exporter                   import SoundbankExporter
+from training_additive.modules.extractor                  import ParamExtractor
+from training_additive.modules.structural_outlier_filter  import StructuralOutlierFilter
+from training_additive.modules.eq_fitter                  import EQFitter
+from training_additive.modules.exporter                   import SoundbankExporter
 
 
 def run(bank_dir: str, out_path: str,

@@ -102,7 +102,7 @@ def main() -> int:
     sys.stderr = tee
 
     try:
-        from training.extraction_config import STRICT, RELAXED
+        from training_additive.extraction_config import STRICT, RELAXED
         cfg = STRICT if args.strict else RELAXED
 
         print(f"Pipeline:  train-additive v2")
@@ -115,7 +115,7 @@ def main() -> int:
               f"physics_floor={'ON' if cfg.physics_floor_enabled else 'OFF'}")
         print()
 
-        from training.pipeline_v2 import run
+        from training_additive.pipeline_v2 import run
         out = run(
             bank_dir=args.bank,
             out_path=out_path,
