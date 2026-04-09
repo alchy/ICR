@@ -57,13 +57,31 @@ CMD_PONG             = 0x71
 CMD_EXPORT_BANK      = 0x72
 
 # Scalar param IDs — per-note fields (commands 0x01 SET_NOTE_PARAM)
+# Shared: 0x01-0x02 (additive + physical)
+# Additive-specific: 0x03-0x06
+# Physical-specific: 0x10-0x1D
 PARAM_IDS = {
-    "f0_hz":      0x01,
-    "B":          0x02,
-    "attack_tau": 0x03,
-    "A_noise":    0x04,
-    "rms_gain":   0x05,
-    "phi_diff":   0x06,
+    "f0_hz":         0x01,
+    "B":             0x02,
+    "attack_tau":    0x03,
+    "A_noise":       0x04,
+    "rms_gain":      0x05,
+    "phi_diff":      0x06,
+    # Physical modeling core (0x10-0x1D)
+    "gauge":         0x10,
+    "T60_fund":      0x11,
+    "T60_nyq":       0x12,
+    "exc_x0":        0x13,
+    "K_hardening":   0x14,
+    "p_hardening":   0x15,
+    "n_disp_stages": 0x16,
+    "disp_coeff":    0x17,
+    "n_strings":     0x18,
+    "detune_cents":  0x19,
+    "hammer_mass":   0x1A,
+    "string_mass":   0x1B,
+    "output_scale":  0x1C,
+    "bridge_refl":   0x1D,
 }
 
 # Master param IDs (command 0x10 SET_MASTER)

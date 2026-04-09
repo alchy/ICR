@@ -1,25 +1,26 @@
 # Physical Modeling Soundbanks
 
-JSON parameter banks for the dual-rail waveguide piano synthesizer
-(`tools-physical/generate_teng_v2.py`).
+JSON parameter banks for the dual-rail waveguide piano synthesizer.
 
 ## Banks
 
 | File | Description |
 |---|---|
-| `teng-v2-default.json` | Physics-based defaults for Chaigne hammer + dual-rail |
+| `A-default.json` | Default physics (Teng-audit-2 corrected) |
+| `teng-v2-default.json` | Original v2 bank (corrected) |
+| `B-bright.json` ... `v12-concert-grand.json` | Timbre variants |
 
 ## Usage
 
 ```bash
-# With bank
-python tools-physical/generate_teng_v2.py \
-    --bank soundbanks-physical/teng-v2-default.json \
-    --midi 60 64 72 --vel 0.3 0.6 0.9
+# Real-time with MIDI:
+build/bin/Release/icrgui.exe
 
-# Without bank (same physics defaults, built-in)
-python tools-physical/generate_teng_v2.py \
-    --midi 60 64 72 --vel 0.3 0.6 0.9
+# Offline batch render:
+build/bin/Release/icr.exe \
+    --core PhysicalModelingPianoCore \
+    --params soundbanks-physical/A-default.json \
+    --render-batch batch.json --out-dir output/
 ```
 
 ## Schema (v2)
@@ -37,14 +38,20 @@ python tools-physical/generate_teng_v2.py \
       "midi": 60,
       "f0_hz": 261.626,
       "B": 0.0007,
-      "gauge": 1.6,
-      "T60_fund": 7.3,
-      "T60_nyq": 0.233,
+      "gauge": 2.0,
+      "T60_fund": 7.29,
+      "T60_nyq": 0.26,
       "exc_x0": 0.1429,
       "n_strings": 3,
-      "detune_cents": 1.5,
-      "n_disp_stages": 11,
-      "disp_coeff": -0.15
+      "detune_cents": 1.51,
+      "n_disp_stages": 14,
+      "disp_coeff": -0.30,
+      "K_hardening": 1.5,
+      "p_hardening": 0.3,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0,
+      "output_scale": 0.045,
+      "bridge_refl": -1.0
     }
   }
 }
@@ -56,14 +63,26 @@ python tools-physical/generate_teng_v2.py \
 |-----|------|-------|-------------|
 | `f0_hz` | float | 27-4200 | Fundamental frequency |
 | `B` | float | 0-0.01 | Inharmonicity coefficient (string stiffness) |
-| `gauge` | float | 0.5-3.0 | String thickness (HF damping multiplier) |
+| `gauge` | float | 0.5-4.0 | Retained for compatibility (no DSP effect) |
 | `T60_fund` | float | 1.5-12 | Decay time of fundamental (seconds, 60 dB) |
-| `T60_nyq` | float | 0.15-0.30 | Decay time at Nyquist (before gauge scaling) |
+| `T60_nyq` | float | 0.15-0.35 | Decay time at Nyquist (controls spectral tilt) |
 | `exc_x0` | float | 0.05-0.25 | Hammer striking position (fraction of string) |
 | `n_strings` | int | 1-3 | Unison strings per note |
 | `detune_cents` | float | 0.3-2.5 | Detuning between outer strings |
-| `n_disp_stages` | int | 0-16 | Dispersion allpass stages (0 = harmonic) |
-| `disp_coeff` | float | -0.3-0 | Per-stage allpass coefficient |
+| `n_disp_stages` | int | 0-16 | Dispersion allpass stages (~4/octave below 3 kHz) |
+| `disp_coeff` | float | -0.5-0 | Per-stage allpass coefficient (Teng: -0.30) |
+| `K_hardening` | float | 0-5 | Velocity stiffness scaling |
+| `p_hardening` | float | 0-1 | Velocity exponent offset |
+| `hammer_mass` | float | 0.1-3 | Hammer mass scale (1.0 = Chaigne default) |
+| `string_mass` | float | 0.1-3 | String mass scale (1.0 = Chaigne default) |
+| `output_scale` | float | 0.01-0.5 | Per-note output gain |
+| `bridge_refl` | float | -1..0 | Bridge reflection (-1.0 = rigid, default) |
 
-Note: v1 single-rail params (`exc_rolloff`, `odd_boost`, `knee_k`, `knee_slope`,
-`n_harmonics`) are not used by the dual-rail renderer and are not in v2 banks.
+## Generation
+
+```bash
+python tools/generate_physical_bank.py --out soundbanks-physical/my-bank.json
+```
+
+See [JSON_SCHEMA.md](../docs/cores/physical-modeling-piano/JSON_SCHEMA.md)
+for full schema documentation.

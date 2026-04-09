@@ -551,12 +551,29 @@ static float decodeSysExFloat(const uint8_t* b) {
 
 static const char* noteParamKey(uint8_t id) {
     switch (id) {
+        // Shared (additive + physical)
         case 0x01: return "f0_hz";
-        case 0x02: return "B";          // recomputes all partial f_hz = k*f0*sqrt(1+B*k²)
+        case 0x02: return "B";
+        // Additive-specific (0x03-0x06)
         case 0x03: return "attack_tau";
         case 0x04: return "A_noise";
         case 0x05: return "rms_gain";
         case 0x06: return "phi_diff";
+        // Physical-specific (0x10-0x1D)
+        case 0x10: return "gauge";
+        case 0x11: return "T60_fund";
+        case 0x12: return "T60_nyq";
+        case 0x13: return "exc_x0";
+        case 0x14: return "K_hardening";
+        case 0x15: return "p_hardening";
+        case 0x16: return "n_disp_stages";
+        case 0x17: return "disp_coeff";
+        case 0x18: return "n_strings";
+        case 0x19: return "detune_cents";
+        case 0x1A: return "hammer_mass";
+        case 0x1B: return "string_mass";
+        case 0x1C: return "output_scale";
+        case 0x1D: return "bridge_refl";
         default:   return nullptr;
     }
 }

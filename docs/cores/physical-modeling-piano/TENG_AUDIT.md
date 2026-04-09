@@ -263,3 +263,18 @@ for (int si = 0; si < n_strings; si++) {
 // V bance: zvýšit disp_coeff z -0.15 na -0.25 až -0.30
 // A/nebo: zvýšit n_disp_stages
 ```
+
+---
+
+## STATUS: Opraveno v teng-audit-2
+
+Viz [teng-audit-2.md](../../../docs/teng-audit-2.md) (branch `dev-teng-audit2`):
+
+- Fix #2 (disperze): `disp_coeff` -0.15 → -0.30, Teng-style n_stages
+- Fix #3 (loss pole): `bridge_refl` -0.98 → -1.0 (odstraněna nekompenzovaná ztráta)
+- Even-harmonic injection odstraněn (fyzikálně chybný)
+- FD stabilita: fallback na C4 pro MIDI 96+ (Courant podmínka nesplnitelná)
+- Gauge odstraněn z DSP cesty (double-counting Ms)
+
+Fix #1 (IR konvoluce před waveguidem) zůstává otevřený — IR je stále
+post-hoc na master bus.

@@ -66,25 +66,29 @@ bytes[0..4] → 35-bit integer → reinterpret as IEEE 754 float32
 
 | Key | Physical | Additive | Description |
 |-----|:--------:|:--------:|-------------|
-| `f0_hz` | yes | yes (0x01) | Fundamental frequency (Hz) |
-| `B` | yes | yes (0x02) | Inharmonicity coefficient |
-| `gauge` | yes | — | String thickness multiplier |
-| `T60_fund` | yes | — | Fundamental decay time (s) |
-| `T60_nyq` | yes | — | Nyquist decay time (s) |
-| `exc_x0` | yes | — | Hammer striking position (fraction) |
-| `K_hardening` | yes | — | Velocity stiffness scaling (0-5) |
-| `p_hardening` | yes | — | Velocity exponent offset (0-1) |
-| `n_disp_stages` | yes | — | Dispersion allpass stages (0-16) |
-| `disp_coeff` | yes | — | Per-stage allpass coefficient |
-| `n_strings` | yes | — | Unison strings (1-3) |
-| `detune_cents` | yes | — | String detuning (cents) |
-| `hammer_mass` | yes | — | Hammer mass scale (0.1-3.0) |
-| `string_mass` | yes | — | String mass scale (0.1-3.0) |
-| `output_scale` | yes | — | Per-note output gain (0.01-0.5) |
-| `attack_tau` | — | yes (0x03) | Attack transient decay (s) |
-| `A_noise` | — | yes (0x04) | Attack noise amplitude |
-| `rms_gain` | — | yes (0x05) | RMS output gain |
-| `phi_diff` | — | yes (0x06) | Phase difference (stereo) |
+| `f0_hz` | 0x01 | 0x01 | Fundamental frequency (Hz) |
+| `B` | 0x02 | 0x02 | Inharmonicity coefficient |
+| `gauge` | 0x10 | — | Retained for compatibility (no DSP effect) |
+| `T60_fund` | 0x11 | — | Fundamental decay time (s) |
+| `T60_nyq` | 0x12 | — | Nyquist decay time (s) |
+| `exc_x0` | 0x13 | — | Hammer striking position (fraction) |
+| `K_hardening` | 0x14 | — | Velocity stiffness scaling (0-5) |
+| `p_hardening` | 0x15 | — | Velocity exponent offset (0-1) |
+| `n_disp_stages` | 0x16 | — | Dispersion allpass stages (0-16) |
+| `disp_coeff` | 0x17 | — | Per-stage allpass coefficient (Teng: -0.30) |
+| `n_strings` | 0x18 | — | Unison strings (1-3) |
+| `detune_cents` | 0x19 | — | String detuning (cents) |
+| `hammer_mass` | 0x1A | — | Hammer mass scale (0.1-3.0) |
+| `string_mass` | 0x1B | — | String mass scale (0.1-3.0) |
+| `output_scale` | 0x1C | — | Per-note output gain (0.01-0.5) |
+| `bridge_refl` | 0x1D | — | Bridge reflection (-1.0=rigid, default) |
+| `attack_tau` | — | 0x03 | Attack transient decay (s) |
+| `A_noise` | — | 0x04 | Attack noise amplitude |
+| `rms_gain` | — | 0x05 | RMS output gain |
+| `phi_diff` | — | 0x06 | Phase difference (stereo) |
+
+Shared IDs (0x01-0x02) work for both cores. Physical-specific IDs
+(0x10-0x1D) are silently ignored by additive core, and vice versa.
 
 Sampler, Sine: `setNoteParam` not implemented (returns false).
 
@@ -129,7 +133,7 @@ Physical, Sampler, Sine: N/A (no partial concept).
 | `sustain_scale` | yes | yes | — | — | Scales T60_fund |
 | `keyboard_spread` | yes | yes | yes | yes | Stereo pan from note position |
 | `stereo_spread` | yes | — | — | — | Multi-string pan width |
-| `gauge_scale` | yes | — | — | — | Scales string thickness |
+| `gauge_scale` | yes | — | — | — | Retained for compatibility (no DSP effect) |
 | `gain` | — | — | yes | yes | Output gain (0-2) |
 | `detune_cents` | — | — | — | yes | Global detuning (cents) |
 | `release_time` | — | — | yes | — | Release envelope (0.1-4s) |

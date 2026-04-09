@@ -83,7 +83,36 @@ F0 7D 01  01  <core_id>  <midi>  <vel>  <param_id>  <v0..v4>  F7
 ```
 
 Update one scalar parameter for a specific (midi, velocity) slot.
-The `param_id` -> key mapping is **core-specific** (see per-core docs).
+
+**Shared IDs** (work for both additive and physical):
+
+| param_id | key |
+|----------|-----|
+| 0x01 | `f0_hz` |
+| 0x02 | `B` |
+
+**Additive-specific** (0x03-0x06): `attack_tau`, `A_noise`, `rms_gain`, `phi_diff`
+
+**Physical-specific** (0x10-0x1D):
+
+| param_id | key |
+|----------|-----|
+| 0x10 | `gauge` (compatibility, no DSP effect) |
+| 0x11 | `T60_fund` |
+| 0x12 | `T60_nyq` |
+| 0x13 | `exc_x0` |
+| 0x14 | `K_hardening` |
+| 0x15 | `p_hardening` |
+| 0x16 | `n_disp_stages` |
+| 0x17 | `disp_coeff` |
+| 0x18 | `n_strings` |
+| 0x19 | `detune_cents` |
+| 0x1A | `hammer_mass` |
+| 0x1B | `string_mass` |
+| 0x1C | `output_scale` |
+| 0x1D | `bridge_refl` |
+
+Unrecognized IDs are silently ignored (core returns false).
 
 ---
 
