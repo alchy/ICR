@@ -262,6 +262,13 @@ inline AnchorParams interp_params(int midi) {
 /// interaction. The force is converted to velocity input (F / 2Z)
 /// ready for waveguide injection.
 ///
+/// Velocity-dependent felt hardness:
+///   Real piano felt compresses more at forte → effective stiffness
+///   and nonlinearity exponent increase with velocity.
+///   K_eff = K_base × (1 + vel_hardening × vel_norm)
+///   p_eff = p_base + vel_hardening_p × vel_norm
+///   where vel_norm = v0 / V_MAX (0..1)
+///
 /// Args:
 ///   midi    — MIDI note (for parameter interpolation)
 ///   v0      — initial hammer velocity (m/s)
@@ -273,6 +280,16 @@ inline AnchorParams interp_params(int midi) {
 inline int compute_force(int midi, float v0, float exc_x0, float sr,
                          float* v_in) {
     AnchorParams ap = interp_params(midi);
+
+    // Velocity-dependent felt hardness
+    // v0 range: 0.5 (pp) to 6.0 (ff) → vel_norm 0..1
+    static constexpr float V_MAX = 6.0f;
+    static constexpr float K_HARDENING = 1.5f;   // K scales up to 2.5× at ff
+    static constexpr float P_HARDENING = 0.3f;   // p increases by up to 0.3 at ff
+
+    float vel_norm = (std::min)(v0 / V_MAX, 1.f);
+    ap.K_stiff *= (1.f + K_HARDENING * vel_norm);
+    ap.p_exp   += P_HARDENING * vel_norm;
 
     float Ms = ap.Ms_g * 0.001f;       // g → kg
     float L  = ap.L_m;
