@@ -457,21 +457,102 @@ S `stereo_spread=0.3` (default): subtle stereo šíře. S `1.0`: plný L/R.
 
 ---
 
-## TODO: další kroky (po 2026-04-08 session)
+## Velocity mapping a headroom (C++ core)
 
-### Hotové komponenty, čekají na propojení
+### Řetězec velocity → zvuk
 
-- **Soundboard IR konvoluce** — `tools/extract_soundboard_ir.py` existuje.
-  Teng konvolvuje výstup waveguidu s nahraným IR těla piana: "warmer and
-  less metallic, with realistic attack transient". Stačí propojit s v2
-  renderem: `output = convolve(output, ir)`.
+MIDI velocity (0-127) prochází třemi stupni, z nichž každý přidá
+nelineární závislost:
+
+```
+MIDI velocity (1-127)
+  │
+  ▼
+vel_norm = velocity / 127         (0.008 .. 1.0, lineární)
+  │
+  ▼
+v0 = max(0.5, vel_norm * 6.0)    (0.5 .. 6.0 m/s, hammer velocity)
+  │
+  ▼
+Chaigne FD hammer                  nelineární F = K × |δ|^p
+  │                                p ≈ 2.5 → forte má proporcionálně
+  ▼                                víc HF než piano
+raw waveguide output               peak ~ 0.7 (pp) .. 10.7 (ff)
+  │
+  ▼
+output_scale = 0.065               fixní, velocity-independent
+  │
+  ▼
+final peak                         0.05 (pp) .. 0.76 (ff)
+```
+
+### Proč fixní output_scale (ne velocity-dependent)
+
+V předchozí single-rail implementaci byl `output_scale = 0.4 * vel_norm`,
+protože Fourierova excitace měla lineární amplitude škálování — velocity
+neovlivňovala spektrální obsah, jen hlasitost.
+
+V dual-rail s Chaigne hammerem je velocity zakódována přímo ve fyzice:
+- Vyšší v0 → silnější komprese plsti → ostřejší force puls → víc HF
+- Nelineární exponent p ≈ 2.5 způsobuje, že force roste rychleji než
+  lineárně s velocity
+
+Kdyby output_scale závisel na vel_norm, zdvojil by se velocity efekt
+(jednou ve fyzice hammeru, podruhé v gain). Proto je output_scale fixní
+a veškerá dynamika pochází z Chaigne modelu.
+
+### Headroom tabulka (MIDI 60, 3 struny, C++ stereo output)
+
+| vel_idx | MIDI vel | v0 (m/s) | Peak   | Headroom |
+|---------|----------|----------|--------|----------|
+| 0 (pp)  | 9        | 0.5      | 0.049  | 26.2 dB  |
+| 1       | 25       | 1.2      | 0.131  | 17.7 dB  |
+| 2       | 41       | 1.9      | 0.229  | 12.8 dB  |
+| 3 (mf)  | 57       | 2.7      | 0.323  | 9.8 dB   |
+| 4       | 73       | 3.4      | 0.416  | 7.6 dB   |
+| 5 (f)   | 89       | 4.2      | 0.526  | 5.6 dB   |
+| 6       | 105      | 5.0      | 0.673  | 3.4 dB   |
+| 7 (ff)  | 121      | 5.7      | 0.756  | 2.4 dB   |
+
+Pravidlo: **jedna nota nesmí nikdy clipovat**. Clipping z polyphonie
+řeší limiter v DspChain (za soundboard IR konvolucí).
+
+### vel_idx → MIDI velocity mapping
+
+ICR batch render používá 8 velocity vrstev (vel_idx 0-7):
+
+```
+MIDI velocity = 9 + vel_idx × 16
+```
+
+| vel_idx | MIDI vel | vel_norm | Charakter    |
+|---------|----------|----------|--------------|
+| 0       | 9        | 0.071    | pianissimo   |
+| 1       | 25       | 0.197    | piano        |
+| 2       | 41       | 0.323    | mezzo-piano  |
+| 3       | 57       | 0.449    | mezzo-forte  |
+| 4       | 73       | 0.575    | forte        |
+| 5       | 89       | 0.701    | forte+       |
+| 6       | 105      | 0.827    | fortissimo   |
+| 7       | 121      | 0.953    | fff          |
+
+---
+
+## TODO: další kroky
+
+### Hotové (2026-04-09)
+
+- **C++ dual-rail + Chaigne hammer** — kompletní rewrite core v1.0
+- **Soundboard IR konvoluce** — automaticky via DspChain v real-time
+- **Stereo batch render** — `m060-v03-f48.wav` formát
+- **Headroom** — single nota -2.4 dB i při fff
 
 ### Další vylepšení (seřazeno podle dopadu)
 
-1. **Soundboard IR** — quick win, velký dopad na warmth a body
-2. **Velocity-dependent hammer hardness** — K a p z Chaigne tabulky se
+1. **Velocity-dependent hammer hardness** — K a p z Chaigne tabulky se
    mění s velocity, ne jen v0. Forte = tvrdší plsť = ostřejší spektrum.
-3. **String coupling** — feedback ze sumy zpět do waveguidů (Bank 2000).
+2. **String coupling** — feedback ze sumy zpět do waveguidů (Bank 2000).
    Lepší two-stage decay než jen z detuningu.
-4. **Damper modeling** — sympathetic resonance při sustain pedálu.
-5. **C++ implementace** — přepis dual-rail + Chaigne hammer do C++ core.
+3. **Damper modeling** — sympathetic resonance při sustain pedálu.
+4. **Per-note output calibration** — basové noty mají vyšší raw peak
+   než diskant; kalibrace by vyrovnala perceived loudness.
