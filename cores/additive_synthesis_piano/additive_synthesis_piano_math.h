@@ -27,6 +27,33 @@ inline float partial_frequency(int k, float f0_hz, float B) {
     return (float)(k * f0_hz * std::sqrt(1.0 + (double)B * k * k));
 }
 
+// ── Velocity-dependent spectral tilt ─────────────────────────────────────────
+//
+// Real piano hammer felt compresses more at forte → effective K and p
+// increase → force pulse is sharper → more high-frequency energy.
+// At pianissimo, the soft felt produces a smooth force → fundamental
+// dominates, upper harmonics are weaker.
+//
+// Model: forte (vel_norm=1) is the reference (bank A0 values measured
+// at mf-f).  Lower velocities progressively attenuate higher partials.
+//
+//   weight(k, vel) = 1 - tilt(k) * (1 - vel_norm)
+//   tilt(k) = 1 - 1/(1 + slope*(k-1))
+//
+//   k=1: tilt=0 → weight=1.0 always (fundamental unchanged)
+//   k→∞: tilt→1 → weight=vel_norm (full velocity scaling)
+//
+// slope controls how quickly the tilt ramps up with harmonic number.
+// slope=0.15: gentle (k=10 → tilt=0.57, k=20 → tilt=0.74)
+
+/// Spectral weight for partial k at velocity vel_norm (0..1).
+/// Returns 1.0 for forte, < 1.0 for piano (higher k = more reduction).
+inline float vel_spectral_weight(int k, float vel_norm, float slope = 0.15f) {
+    if (k <= 1) return 1.f;
+    float tilt = 1.f - 1.f / (1.f + slope * (float)(k - 1));
+    return 1.f - tilt * (1.f - vel_norm);
+}
+
 // ── Bi-exponential envelope ──────────────────────────────────────────────────
 
 /// Evaluate the bi-exponential decay envelope and advance one sample.

@@ -196,7 +196,7 @@ public:
                    float beat_scale, float noise_level, int rng_seed,
                    float pan_spread, float stereo_decorr,
                    float keyboard_spread, float sample_rate,
-                   float eq_strength) noexcept;
+                   float eq_strength, float vel_norm) noexcept;
 
     /// Begin release phase for a voice.
     void releaseVoice(int midi, float sample_rate) noexcept;

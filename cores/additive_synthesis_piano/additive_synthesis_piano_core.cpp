@@ -234,7 +234,7 @@ void PianoPatchManager::noteOn(
 
     vm.initVoice(midi, vel_idx, np, beat_scale, noise_level, rng_seed,
                  pan_spread, stereo_decorr, keyboard_spread,
-                 sample_rate, eq_strength);
+                 sample_rate, eq_strength, vel_f / 7.f);
 
     last_midi_   .store(midi,     std::memory_order_relaxed);
     last_vel_    .store(velocity, std::memory_order_relaxed);
@@ -357,7 +357,8 @@ void PianoVoiceManager::initVoice(int midi, int vel_idx,
                                    float stereo_decorr,
                                    float keyboard_spread,
                                    float sample_rate,
-                                   float eq_strength) noexcept {
+                                   float eq_strength,
+                                   float vel_norm) noexcept {
     PianoVoice& v = voices_[midi];
 
     v.active     = true;
@@ -411,7 +412,8 @@ void PianoVoiceManager::initVoice(int midi, int vel_idx,
         ps.env_slow   = 1.f;
         ps.decay_fast = dsp::decay_coeff(pp.tau1, sample_rate);
         ps.decay_slow = dsp::decay_coeff(pp.tau2, sample_rate);
-        ps.A0_scaled  = pp.A0 * np.rms_gain;
+        ps.A0_scaled  = pp.A0 * np.rms_gain
+                      * piano::vel_spectral_weight(pp.k, vel_norm);
         ps.a1         = pp.a1;
         ps.f_hz       = pp.f_hz;
         ps.beat_hz_h  = pp.beat_hz * beat_scale * 0.5f;
