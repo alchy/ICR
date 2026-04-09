@@ -218,11 +218,23 @@ void PhysicalModelingPianoCore::setSampleRate(float sr) { sample_rate_ = sr; }
 void PhysicalModelingPianoCore::noteOn(uint8_t midi, uint8_t velocity) {
     if (midi >= PHYS_MAX_VOICES) return;
     if (velocity == 0) { noteOff(midi); return; }
-    patch_mgr_.noteOn(midi, velocity, note_params_, voice_mgr_,
-                      sample_rate_,
-                      keyboard_spread_.load(std::memory_order_relaxed),
-                      stereo_spread_.load(std::memory_order_relaxed),
-                      bank_mutex_);
+
+    // Apply GUI scalers to a copy of note params
+    PhysicsNoteParam np;
+    {
+        std::unique_lock<std::mutex> lk(bank_mutex_, std::try_to_lock);
+        if (!lk.owns_lock()) return;
+        if (!note_params_[midi].valid) return;
+        np = note_params_[midi];
+    }
+    np.T60_nyq  *= brightness_.load(std::memory_order_relaxed);
+    np.B        *= stiffness_scale_.load(std::memory_order_relaxed);
+    np.T60_fund *= sustain_scale_.load(std::memory_order_relaxed);
+
+    voice_mgr_.initVoice(midi, velocity, np, sample_rate_,
+                         keyboard_spread_.load(std::memory_order_relaxed),
+                         stereo_spread_.load(std::memory_order_relaxed));
+    patch_mgr_.noteOnDirect(midi, velocity);
 }
 
 void PhysicalModelingPianoCore::noteOff(uint8_t midi) {
@@ -497,8 +509,6 @@ std::vector<CoreParamDesc> PhysicalModelingPianoCore::describeParams() const {
           stiffness_scale_.load(), 0.1f, 4.f, false },
         { "sustain_scale",   "Sustain",           "Timbre",  "",
           sustain_scale_.load(),   0.1f, 4.f, false },
-        { "gauge_scale",     "Gauge Scale",       "String",  "",
-          gauge_scale_.load(),     0.5f, 4.f, false },
         { "keyboard_spread", "Keyboard Spread",   "Stereo",  "rad",
           keyboard_spread_.load(), 0.f,  3.14159f, false },
         { "stereo_spread",   "Multi-String Spread","Stereo",  "",

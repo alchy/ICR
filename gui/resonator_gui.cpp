@@ -1109,24 +1109,8 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 drawConvolverControls(gs, dsp);
                 ImGui::Spacing();
 
-                // Row 4: STEREO (keyboard spread — engine-level)
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::Spacing();
-                {
-                    ImGui::SeparatorText("STEREO");
-                    int v = gs.keyboard_spread;
-                    char desc[48];
-                    float rad = (float)v / 100.f * 3.14159f;
-                    snprintf(desc, sizeof(desc), "Spread: %.0f%%", (float)v);
-                    if (labeledSlider("##kbspread", "Kbd Spread", desc, &v, 0, 100)) {
-                        gs.keyboard_spread = v;
-                        float val = (float)v / 100.f * 3.14159f;
-                        if (engine.core())
-                            engine.core()->setParam("keyboard_spread", val);
-                    }
-                }
-                ImGui::Spacing();
+                // keyboard_spread removed — it's a core param shown via
+                // describeParams() in the right panel (no duplication)
 
                 ImGui::EndTable();
             }

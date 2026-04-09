@@ -143,6 +143,12 @@ public:
                 float stereo_spread,
                 std::mutex& bank_mutex) noexcept;
 
+    // Record last note without lock/init (used when core does init itself)
+    void noteOnDirect(uint8_t midi, uint8_t velocity) noexcept {
+        last_midi_.store(midi,     std::memory_order_relaxed);
+        last_vel_ .store(velocity, std::memory_order_relaxed);
+    }
+
     void noteOff(uint8_t midi, PhysicsVoiceManager& vm, float sr) noexcept;
     void sustainPedal(bool down, PhysicsVoiceManager& vm, float sr) noexcept;
     void allNotesOff(PhysicsVoiceManager& vm, float sr) noexcept;
