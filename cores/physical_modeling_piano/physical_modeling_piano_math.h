@@ -336,7 +336,9 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
                          float* v_in,
                          float K_hardening = 1.5f,
                          float p_hardening = 0.3f,
-                         float gauge = 1.0f) {
+                         float gauge = 1.0f,
+                         float hammer_mass_scale = 1.0f,
+                         float string_mass_scale = 1.0f) {
     AnchorParams ap = interp_params(midi);
 
     // Velocity-dependent felt hardness
@@ -345,10 +347,12 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     ap.K_stiff *= (1.f + K_hardening * vel_norm);
     ap.p_exp   += p_hardening * vel_norm;
 
-    // Gauge scales string mass: thicker string = more mass = higher
-    // wave impedance = hammer bounces back faster = shorter contact
-    // = brighter attack. Also changes Ms in FD computation.
-    ap.Ms_g *= gauge;
+    // Scale string and hammer mass from bank parameters.
+    // gauge: thicker string = more mass = higher impedance
+    // string_mass: direct scale of Ms (independent of gauge)
+    // hammer_mass: lighter hammer = less momentum = shorter contact
+    ap.Ms_g *= gauge * string_mass_scale;
+    ap.Mh_g *= hammer_mass_scale;
 
     float Ms = ap.Ms_g * 0.001f;       // g → kg
     float L  = ap.L_m;

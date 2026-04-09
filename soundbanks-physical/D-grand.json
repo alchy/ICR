@@ -24,7 +24,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m022": {
       "midi": 22,
@@ -43,7 +45,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m023": {
       "midi": 23,
@@ -62,7 +66,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m024": {
       "midi": 24,
@@ -81,7 +87,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m025": {
       "midi": 25,
@@ -100,7 +108,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m026": {
       "midi": 26,
@@ -119,7 +129,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m027": {
       "midi": 27,
@@ -138,7 +150,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m028": {
       "midi": 28,
@@ -157,7 +171,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m029": {
       "midi": 29,
@@ -176,7 +192,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m030": {
       "midi": 30,
@@ -195,7 +213,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m031": {
       "midi": 31,
@@ -214,7 +234,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m032": {
       "midi": 32,
@@ -233,7 +255,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m033": {
       "midi": 33,
@@ -252,7 +276,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m034": {
       "midi": 34,
@@ -271,7 +297,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m035": {
       "midi": 35,
@@ -290,7 +318,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m036": {
       "midi": 36,
@@ -309,7 +339,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m037": {
       "midi": 37,
@@ -328,7 +360,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m038": {
       "midi": 38,
@@ -347,7 +381,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m039": {
       "midi": 39,
@@ -366,7 +402,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m040": {
       "midi": 40,
@@ -385,7 +423,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m041": {
       "midi": 41,
@@ -404,7 +444,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m042": {
       "midi": 42,
@@ -423,7 +465,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m043": {
       "midi": 43,
@@ -442,7 +486,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m044": {
       "midi": 44,
@@ -461,7 +507,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m045": {
       "midi": 45,
@@ -480,7 +528,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m046": {
       "midi": 46,
@@ -499,7 +549,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m047": {
       "midi": 47,
@@ -518,7 +570,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m048": {
       "midi": 48,
@@ -537,7 +591,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m049": {
       "midi": 49,
@@ -556,7 +612,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m050": {
       "midi": 50,
@@ -575,7 +633,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m051": {
       "midi": 51,
@@ -594,7 +654,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m052": {
       "midi": 52,
@@ -613,7 +675,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m053": {
       "midi": 53,
@@ -632,7 +696,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m054": {
       "midi": 54,
@@ -651,7 +717,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m055": {
       "midi": 55,
@@ -670,7 +738,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m056": {
       "midi": 56,
@@ -689,7 +759,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m057": {
       "midi": 57,
@@ -708,7 +780,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m058": {
       "midi": 58,
@@ -727,7 +801,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m059": {
       "midi": 59,
@@ -746,7 +822,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m060": {
       "midi": 60,
@@ -765,7 +843,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m061": {
       "midi": 61,
@@ -784,7 +864,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m062": {
       "midi": 62,
@@ -803,7 +885,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m063": {
       "midi": 63,
@@ -822,7 +906,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m064": {
       "midi": 64,
@@ -841,7 +927,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m065": {
       "midi": 65,
@@ -860,7 +948,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m066": {
       "midi": 66,
@@ -879,7 +969,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m067": {
       "midi": 67,
@@ -898,7 +990,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m068": {
       "midi": 68,
@@ -917,7 +1011,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m069": {
       "midi": 69,
@@ -936,7 +1032,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m070": {
       "midi": 70,
@@ -955,7 +1053,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m071": {
       "midi": 71,
@@ -974,7 +1074,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m072": {
       "midi": 72,
@@ -993,7 +1095,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m073": {
       "midi": 73,
@@ -1012,7 +1116,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m074": {
       "midi": 74,
@@ -1031,7 +1137,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m075": {
       "midi": 75,
@@ -1050,7 +1158,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m076": {
       "midi": 76,
@@ -1069,7 +1179,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m077": {
       "midi": 77,
@@ -1088,7 +1200,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m078": {
       "midi": 78,
@@ -1107,7 +1221,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m079": {
       "midi": 79,
@@ -1126,7 +1242,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m080": {
       "midi": 80,
@@ -1145,7 +1263,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m081": {
       "midi": 81,
@@ -1164,7 +1284,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m082": {
       "midi": 82,
@@ -1183,7 +1305,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m083": {
       "midi": 83,
@@ -1202,7 +1326,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m084": {
       "midi": 84,
@@ -1221,7 +1347,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m085": {
       "midi": 85,
@@ -1240,7 +1368,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m086": {
       "midi": 86,
@@ -1259,7 +1389,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m087": {
       "midi": 87,
@@ -1278,7 +1410,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m088": {
       "midi": 88,
@@ -1297,7 +1431,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m089": {
       "midi": 89,
@@ -1316,7 +1452,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m090": {
       "midi": 90,
@@ -1335,7 +1473,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m091": {
       "midi": 91,
@@ -1354,7 +1494,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m092": {
       "midi": 92,
@@ -1373,7 +1515,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m093": {
       "midi": 93,
@@ -1392,7 +1536,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m094": {
       "midi": 94,
@@ -1411,7 +1557,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m095": {
       "midi": 95,
@@ -1430,7 +1578,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m096": {
       "midi": 96,
@@ -1449,7 +1599,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m097": {
       "midi": 97,
@@ -1468,7 +1620,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m098": {
       "midi": 98,
@@ -1487,7 +1641,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m099": {
       "midi": 99,
@@ -1506,7 +1662,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m100": {
       "midi": 100,
@@ -1525,7 +1683,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m101": {
       "midi": 101,
@@ -1544,7 +1704,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m102": {
       "midi": 102,
@@ -1563,7 +1725,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m103": {
       "midi": 103,
@@ -1582,7 +1746,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m104": {
       "midi": 104,
@@ -1601,7 +1767,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m105": {
       "midi": 105,
@@ -1620,7 +1788,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m106": {
       "midi": 106,
@@ -1639,7 +1809,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m107": {
       "midi": 107,
@@ -1658,7 +1830,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     },
     "m108": {
       "midi": 108,
@@ -1677,7 +1851,9 @@
       "output_scale": 0.045,
       "bridge_freq": 400.0,
       "bridge_Q": 8.0,
-      "bridge_mix": 0.15
+      "bridge_mix": 0.15,
+      "hammer_mass": 1.0,
+      "string_mass": 1.0
     }
   }
 }

@@ -50,6 +50,8 @@ struct PhysicsNoteParam {
     float exc_x0         = 1.f/7.f;     // strike position (fraction)
     float K_hardening    = 1.5f;        // K scales: K_eff = K × (1 + K_hardening × vel)
     float p_hardening    = 0.3f;        // p offset: p_eff = p + p_hardening × vel
+    float hammer_mass    = 1.0f;        // Mh scale (1.0 = Chaigne default, <1 = lighter)
+    float string_mass    = 1.0f;        // Ms scale (1.0 = Chaigne default, affects impedance)
 
     // Bridge admittance
     float bridge_freq    = 400.f;       // bridge/soundboard resonance (Hz)
