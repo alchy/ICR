@@ -253,7 +253,7 @@ inline float dual_rail_tick(DualRailString& s, float hammer_in) {
 
     // 5. Shift lower ← (new sample at position M-1)
     s.shift_lower();
-    s.lower_at(s.M - 1) = bridge_filter_tick(x, s.bridge);  // bridge admittance
+    s.lower_at(s.M - 1) = -x;   // rigid bridge reflection
 
     // 6. Inject hammer force at n0
     s.upper_at(s.n0) += hammer_in;
@@ -467,6 +467,23 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     float inv_2R0 = 1.f / (2.f * R0);
     for (int i = 0; i < actual_len; i++)
         v_in[i] = F[i] * inv_2R0;
+
+    // Add broadband HF content to hammer pulse.
+    // The Chaigne FD model with coarse grid (N~40-60) produces only
+    // low-frequency force. Real hammer felt impact has broadband
+    // energy up to 4-8 kHz. We add shaped noise proportional to
+    // the force envelope to inject this missing HF content.
+    //
+    // noise_level: controlled by K_hardening (harder felt = more HF)
+    float noise_level = 0.15f * (1.f + K_hardening * vel_norm);
+    uint32_t rng_state = (uint32_t)(midi * 7919 + (int)(v0 * 1000.f));
+    for (int i = 0; i < actual_len; i++) {
+        if (F[i] < 1e-6f) continue;
+        // Simple LCG pseudo-random
+        rng_state = rng_state * 1664525u + 1013904223u;
+        float white = ((float)(rng_state >> 8) / 16777216.f - 0.5f) * 2.f;
+        v_in[i] += white * F[i] * inv_2R0 * noise_level;
+    }
 
     return actual_len;
 }
