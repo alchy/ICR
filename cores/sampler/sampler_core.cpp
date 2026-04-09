@@ -15,100 +15,44 @@
 #include <cmath>
 #include <regex>
 
-#ifdef _WIN32
-#  include <windows.h>
-#else
-#  include <dirent.h>
-#  include <sys/stat.h>
-#endif
+#include <filesystem>
 
 REGISTER_SYNTH_CORE("SamplerCore", SamplerCore)
 
 // Default base directory for sample banks.
-// Normally provided by engine_config.json via CoreEngine.
-// OS-specific fallback if no config is available.
-static const char* DEFAULT_SAMPLE_DIR =
-#ifdef _WIN32
-    "C:\\SoundBanks\\IthacaPlayer";
-#elif defined(__APPLE__)
-    "/Users/Shared/SoundBanks/IthacaPlayer";
-#else
-    "/opt/SoundBanks/IthacaPlayer";
-#endif
+// Normally provided by icr-config.json via CoreEngine.
+static const char* DEFAULT_SAMPLE_DIR = "soundbanks-sampler";
 
-// -- Directory scanning helpers -----------------------------------------------
+// -- Directory scanning helpers (cross-platform via std::filesystem) ----------
 
-#ifdef _WIN32
 static std::vector<std::string> listSubdirectories(const std::string& dir) {
     std::vector<std::string> result;
-    std::string pattern = dir + "\\*";
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return result;
-    do {
-        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) &&
-            fd.cFileName[0] != '.') {
-            result.push_back(fd.cFileName);
-        }
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (entry.is_directory() && entry.path().filename().string()[0] != '.')
+            result.push_back(entry.path().filename().string());
+    }
     std::sort(result.begin(), result.end());
     return result;
 }
 
 static std::vector<std::string> listFiles(const std::string& dir) {
     std::vector<std::string> result;
-    std::string pattern = dir + "\\*";
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h == INVALID_HANDLE_VALUE) return result;
-    do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY)) {
-            result.push_back(fd.cFileName);
-        }
-    } while (FindNextFileA(h, &fd));
-    FindClose(h);
-    return result;
-}
-#else
-static std::vector<std::string> listSubdirectories(const std::string& dir) {
-    std::vector<std::string> result;
-    DIR* d = opendir(dir.c_str());
-    if (!d) return result;
-    struct dirent* ent;
-    while ((ent = readdir(d))) {
-        if (ent->d_name[0] == '.') continue;
-        std::string full = dir + "/" + ent->d_name;
-        struct stat st;
-        if (stat(full.c_str(), &st) == 0 && S_ISDIR(st.st_mode))
-            result.push_back(ent->d_name);
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir, ec)) {
+        if (ec) break;
+        if (entry.is_regular_file())
+            result.push_back(entry.path().filename().string());
     }
-    closedir(d);
-    std::sort(result.begin(), result.end());
     return result;
 }
-
-static std::vector<std::string> listFiles(const std::string& dir) {
-    std::vector<std::string> result;
-    DIR* d = opendir(dir.c_str());
-    if (!d) return result;
-    struct dirent* ent;
-    while ((ent = readdir(d))) {
-        if (ent->d_type == DT_REG || ent->d_type == DT_UNKNOWN)
-            result.push_back(ent->d_name);
-    }
-    closedir(d);
-    return result;
-}
-#endif
 
 // -- Path separator -----------------------------------------------------------
 
-#ifdef _WIN32
-static const char PATH_SEP = '\\';
-#else
 static const char PATH_SEP = '/';
-#endif
 
 // -- Constructor --------------------------------------------------------------
 

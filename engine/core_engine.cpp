@@ -34,11 +34,7 @@ using json = nlohmann::json;
 #include <memory>
 #include <fstream>
 #include <chrono>
-#ifdef _WIN32
-#  include <direct.h>   // _mkdir
-#else
-#  include <sys/stat.h> // mkdir
-#endif
+#include <filesystem>
 
 #ifdef _WIN32
   #include <conio.h>
@@ -829,13 +825,8 @@ static inline uint8_t _velIdxToMidi(int vel_idx) {
     return static_cast<uint8_t>(9 + (std::min)(7, (std::max)(0, vel_idx)) * 16);
 }
 
-// Cross-platform mkdir (single level)
 static void _mkdirP(const std::string& dir) {
-#ifdef _WIN32
-    ::_mkdir(dir.c_str());
-#else
-    ::mkdir(dir.c_str(), 0755);
-#endif
+    std::filesystem::create_directories(dir);
 }
 
 int CoreEngine::renderBatch(const std::string& batch_json_path,
