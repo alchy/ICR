@@ -230,7 +230,8 @@ static int drawPiano(GuiState& gs, CoreEngine& engine) {
     float total_w = total_white * WHITE_W;
     ImGui::Dummy(ImVec2(total_w, WHITE_H + 4.f));
 
-    bool   lmb  = ImGui::IsMouseDown(ImGuiMouseButton_Left);
+    bool   lmb  = ImGui::IsMouseDown(ImGuiMouseButton_Left)
+                && !ImGui::IsAnyItemActive() && !ImGui::IsPopupOpen("", ImGuiPopupFlags_AnyPopup);
     ImVec2 mp   = ImGui::GetMousePos();
     int    hit  = -1;
 
