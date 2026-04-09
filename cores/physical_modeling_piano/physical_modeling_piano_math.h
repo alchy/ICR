@@ -30,7 +30,8 @@ namespace physics {
 static constexpr int   MAX_RAIL_LEN      = 2048;  // half-period, supports A0 @ 96 kHz
 static constexpr int   MAX_STRINGS       = 3;
 static constexpr int   MAX_DISP_STAGES   = 16;
-static constexpr int   MAX_HAMMER_SAMPLES = 512;   // 10 ms @ 48 kHz
+static constexpr int   MAX_HAMMER_SAMPLES = 512;   // raw force (10 ms @ 48 kHz)
+static constexpr int   MAX_EXCITATION_SAMPLES = 8192; // convolved force+IR (~170ms @ 48kHz)
 
 // ── Loss filter (Välimäki one-pole) ──────────────────────────────────────
 
@@ -183,14 +184,17 @@ inline void dual_rail_init(DualRailString& s, float f0, float sr,
                            int n_disp, float a_disp, float exc_x0,
                            float T60_fund, float T60_nyq, float gauge,
                            float bridge_freq = 400.f, float bridge_Q = 8.f,
-                           float bridge_mix = 0.15f) {
+                           float bridge_mix = 0.15f,
+                           float loss_pole_scale = 0.05f) {
     float N_period = sr / f0;
 
-    // Loss filter
+    // Loss filter — pole scaled down to match Teng (al ≈ -0.001).
+    // loss_pole_scale=0.05 → nearly flat loss (DC gain only, minimal tilt)
+    // loss_pole_scale=1.0 → full T60-based spectral tilt
     float T60_nyq_eff = T60_nyq / std::max(gauge, 0.1f);
     LossFilter lf = compute_loss_filter(f0, T60_fund, T60_nyq_eff, sr);
     s.g_dc = lf.g;
-    s.pole = lf.b;
+    s.pole = lf.b * loss_pole_scale;  // scale down pole
     s.lp_state = 0.f;
 
     // Delay compensation: loss filter + dispersion cascade

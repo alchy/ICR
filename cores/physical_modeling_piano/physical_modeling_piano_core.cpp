@@ -16,6 +16,7 @@
 #include "third_party/json.hpp"
 
 #include <fstream>
+#include <filesystem>
 #include <algorithm>
 #include <cstdio>
 #include <cstring>
@@ -82,9 +83,28 @@ bool PhysicalModelingPianoCore::load(const std::string& params_path, float sr,
         }
     }
 
+    // Load excitation IR from same path as soundboard IR (if bank JSON
+    // is in a directory that has a soundboard WAV, or from config ir_path).
+    // Try: bank_dir/*soundboard*.wav
+    if (!params_path.empty()) {
+        std::string dir = params_path.substr(0, params_path.find_last_of("/\\"));
+        namespace fs = std::filesystem;
+        std::error_code ec;
+        for (const auto& entry : fs::directory_iterator(dir, ec)) {
+            if (ec) break;
+            auto fname = entry.path().filename().string();
+            if (fname.find("soundboard") != std::string::npos &&
+                fname.find(".wav") != std::string::npos) {
+                loadExcitationIR(entry.path().string(), logger);
+                break;
+            }
+        }
+    }
+
     loaded_ = true;
     logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
-               "Ready (v1.0 dual-rail). SR=" + std::to_string((int)sr));
+               "Ready (v1.0 dual-rail). SR=" + std::to_string((int)sr)
+               + " IR=" + std::to_string((int)excitation_ir_.size()) + " samples");
     return true;
 }
 
@@ -121,6 +141,7 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.hammer_mass   = s.value("hammer_mass", np.hammer_mass);
         np.string_mass   = s.value("string_mass", np.string_mass);
         np.output_scale  = s.value("output_scale", np.output_scale);
+        np.loss_pole_scale = s.value("loss_pole_scale", np.loss_pole_scale);
         np.bridge_freq   = s.value("bridge_freq", np.bridge_freq);
         np.bridge_Q      = s.value("bridge_Q", np.bridge_Q);
         np.bridge_mix    = s.value("bridge_mix", np.bridge_mix);
@@ -171,6 +192,7 @@ bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
             {"hammer_mass",   np.hammer_mass},
             {"string_mass",   np.string_mass},
             {"output_scale",  np.output_scale},
+            {"loss_pole_scale", np.loss_pole_scale},
             {"bridge_freq",   np.bridge_freq},
             {"bridge_Q",      np.bridge_Q},
             {"bridge_mix",    np.bridge_mix}
@@ -207,11 +229,80 @@ bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
     if (key == "hammer_mass")   { np.hammer_mass   = value; return true; }
     if (key == "string_mass")   { np.string_mass   = value; return true; }
     if (key == "output_scale")  { np.output_scale  = value; return true; }
+    if (key == "loss_pole_scale") { np.loss_pole_scale = value; return true; }
     if (key == "bridge_freq")   { np.bridge_freq   = value; return true; }
     if (key == "bridge_Q")      { np.bridge_Q      = value; return true; }
     if (key == "bridge_mix")    { np.bridge_mix    = value; return true; }
 
     return false;
+}
+
+void PhysicalModelingPianoCore::loadExcitationIR(const std::string& path,
+                                                  Logger& logger) {
+    std::ifstream f(path, std::ios::binary);
+    if (!f.is_open()) return;
+
+    // Minimal WAV parser (mono or stereo → mono)
+    char riff[4]; f.read(riff, 4);
+    if (std::memcmp(riff, "RIFF", 4) != 0) return;
+    f.seekg(8); // skip file size
+    char wave[4]; f.read(wave, 4);
+    if (std::memcmp(wave, "WAVE", 4) != 0) return;
+
+    uint16_t channels = 0, bits = 0, fmt_tag = 0;
+    uint32_t wav_sr = 0, data_size = 0;
+
+    while (f.good()) {
+        char cid[4]; f.read(cid, 4);
+        uint32_t csz; f.read(reinterpret_cast<char*>(&csz), 4);
+        if (std::memcmp(cid, "fmt ", 4) == 0) {
+            f.read(reinterpret_cast<char*>(&fmt_tag), 2);
+            f.read(reinterpret_cast<char*>(&channels), 2);
+            f.read(reinterpret_cast<char*>(&wav_sr), 4);
+            f.seekg(6, std::ios::cur);
+            f.read(reinterpret_cast<char*>(&bits), 2);
+            if (csz > 16) f.seekg(csz - 16, std::ios::cur);
+        } else if (std::memcmp(cid, "data", 4) == 0) {
+            data_size = csz; break;
+        } else {
+            f.seekg(csz, std::ios::cur);
+        }
+    }
+    if (channels == 0 || data_size == 0) return;
+
+    int n_frames = 0;
+    if (fmt_tag == 1 && bits == 16) {
+        n_frames = data_size / (2 * channels);
+        std::vector<int16_t> raw(n_frames * channels);
+        f.read(reinterpret_cast<char*>(raw.data()), data_size);
+        excitation_ir_.resize(n_frames);
+        for (int i = 0; i < n_frames; i++) {
+            float sum = 0;
+            for (int c = 0; c < channels; c++)
+                sum += raw[i * channels + c] / 32768.f;
+            excitation_ir_[i] = sum / channels;
+        }
+    } else if (fmt_tag == 3 && bits == 32) {
+        n_frames = data_size / (4 * channels);
+        std::vector<float> raw(n_frames * channels);
+        f.read(reinterpret_cast<char*>(raw.data()), data_size);
+        excitation_ir_.resize(n_frames);
+        for (int i = 0; i < n_frames; i++) {
+            float sum = 0;
+            for (int c = 0; c < channels; c++)
+                sum += raw[i * channels + c];
+            excitation_ir_[i] = sum / channels;
+        }
+    }
+
+    // Truncate to max useful length (~100ms)
+    int max_ir = (int)(0.1f * sample_rate_);
+    if ((int)excitation_ir_.size() > max_ir)
+        excitation_ir_.resize(max_ir);
+
+    logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
+               "Excitation IR loaded: " + path + " ("
+               + std::to_string(excitation_ir_.size()) + " samples)");
 }
 
 void PhysicalModelingPianoCore::setSampleRate(float sr) { sample_rate_ = sr; }
@@ -224,6 +315,8 @@ void PhysicalModelingPianoCore::noteOn(uint8_t midi, uint8_t velocity) {
     patch_mgr_.noteOn(midi, velocity, note_params_, voice_mgr_,
                       sample_rate_,
                       keyboard_spread_.load(std::memory_order_relaxed),
+                      excitation_ir_.empty() ? nullptr : excitation_ir_.data(),
+                      (int)excitation_ir_.size(),
                       stereo_spread_.load(std::memory_order_relaxed),
                       bank_mutex_);
 }
@@ -247,6 +340,7 @@ void PhysicsPatchManager::noteOn(uint8_t midi, uint8_t velocity,
                                   PhysicsNoteParam note_params[],
                                   PhysicsVoiceManager& vm,
                                   float sr, float keyboard_spread,
+                                  const float* exc_ir, int exc_ir_len,
                                   float stereo_spread,
                                   std::mutex& bank_mutex) noexcept {
     std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
@@ -254,7 +348,8 @@ void PhysicsPatchManager::noteOn(uint8_t midi, uint8_t velocity,
     if (!note_params[midi].valid) return;
 
     vm.initVoice(midi, velocity, note_params[midi], sr,
-                 keyboard_spread, stereo_spread);
+                 keyboard_spread, stereo_spread,
+                 exc_ir, exc_ir_len);
     last_midi_.store(midi,     std::memory_order_relaxed);
     last_vel_ .store(velocity, std::memory_order_relaxed);
 }
@@ -318,7 +413,8 @@ void PhysicsVoiceManager::releaseAll(float sr) noexcept {
 void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
                                      const PhysicsNoteParam& np, float sr,
                                      float keyboard_spread,
-                                     float stereo_spread) noexcept {
+                                     float stereo_spread,
+                                     const float* exc_ir, int exc_ir_len) noexcept {
     PhysicsVoice& v = voices_[midi];
 
     v.active    = true;
@@ -345,17 +441,39 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     float bridge_comp = 1.f / (1.f + np.bridge_mix * 3.f);  // mix=0→1.0, mix=0.3→0.52
     v.output_scale = np.output_scale * bridge_comp;
 
-    // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
+    // ── Chaigne-Askenfelt hammer → convolve with body IR ────────────
     float v0 = physics::velocity_to_v0(vel_norm);
-    v.hammer_len = physics::hammer::compute_force(
-        midi, v0, np.exc_x0, sr, v.hammer_v_in,
+
+    // 1. Compute raw hammer force
+    float raw_force[physics::MAX_HAMMER_SAMPLES];
+    int raw_len = physics::hammer::compute_force(
+        midi, v0, np.exc_x0, sr, raw_force,
         np.K_hardening, np.p_hardening, np.gauge,
         np.hammer_mass, np.string_mass);
+
+    // 2. Convolve force with excitation IR (Teng: body character in excitation)
+    std::memset(v.excitation, 0, sizeof(v.excitation));
+    if (exc_ir && exc_ir_len > 0) {
+        int conv_len = (std::min)(raw_len + exc_ir_len - 1,
+                                   (int)physics::MAX_EXCITATION_SAMPLES);
+        for (int i = 0; i < conv_len; i++) {
+            float sum = 0.f;
+            int k_start = (std::max)(0, i - exc_ir_len + 1);
+            int k_end   = (std::min)(i, raw_len - 1);
+            for (int k = k_start; k <= k_end; k++)
+                sum += raw_force[k] * exc_ir[i - k];
+            v.excitation[i] = sum;
+        }
+        v.excitation_len = conv_len;
+    } else {
+        // No IR loaded — use raw force (fallback)
+        std::memcpy(v.excitation, raw_force, raw_len * sizeof(float));
+        v.excitation_len = raw_len;
+    }
 
     // ── Multi-string setup ──────────────────────────────────────────
     v.n_strings = np.n_strings;
 
-    // Compute detuned frequencies and panning
     physics::StringDetuning sd = physics::compute_detuning(
         np.n_strings, np.detune_cents, np.f0_hz, stereo_spread);
 
@@ -365,11 +483,12 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     if (n_disp == 0) a_disp = 0.f;
 
     for (int si = 0; si < sd.count; si++) {
-        // Initialize each dual-rail string
+        // Initialize dual-rail string with loss_pole_scale
         physics::dual_rail_init(v.strings[si], sd.f0s[si], sr,
                                 n_disp, a_disp, np.exc_x0,
                                 np.T60_fund, np.T60_nyq, np.gauge,
-                                np.bridge_freq, np.bridge_Q, np.bridge_mix);
+                                np.bridge_freq, np.bridge_Q, np.bridge_mix,
+                                np.loss_pole_scale);
 
         // Keyboard panning (base angle) + multi-string spread
         float kb_angle = (PI / 4.f) +
@@ -407,7 +526,7 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
         }
 
         // Hammer input for this sample
-        float h_in = (t_samples < (uint32_t)hammer_len) ? hammer_v_in[t_samples] : 0.f;
+        float h_in = (t_samples < (uint32_t)excitation_len) ? excitation[t_samples] : 0.f;
 
         // Sum all strings through dual-rail waveguide
         float sum_l = 0.f, sum_r = 0.f;

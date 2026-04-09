@@ -58,9 +58,12 @@ struct PhysicsNoteParam {
     float bridge_Q       = 8.f;         // resonance Q factor
     float bridge_mix     = 0.15f;       // 0=rigid (-1), 1=full resonator
 
+    // Loss filter tuning
+    float loss_pole_scale = 0.05f;      // multiply computed pole (0.05≈Teng, 1.0=full tilt)
+
     // Dispersion
     int   n_disp_stages  = 0;           // allpass cascade count
-    float disp_coeff     = -0.15f;      // allpass coefficient
+    float disp_coeff     = -0.25f;      // allpass coefficient (Teng: -0.30)
 
     // Multi-string
     int   n_strings      = 3;
@@ -88,9 +91,9 @@ public:
     float str_pan_l[physics::MAX_STRINGS] = {};
     float str_pan_r[physics::MAX_STRINGS] = {};
 
-    // Shared hammer velocity input
-    float hammer_v_in[physics::MAX_HAMMER_SAMPLES] = {};
-    int   hammer_len = 0;
+    // Excitation signal (hammer force convolved with body IR)
+    float excitation[physics::MAX_EXCITATION_SAMPLES] = {};
+    int   excitation_len = 0;
 
     // Output
     float output_scale   = 1.f;
@@ -121,7 +124,8 @@ public:
 
     void initVoice(int midi, uint8_t velocity,
                    const PhysicsNoteParam& np, float sr,
-                   float keyboard_spread, float stereo_spread) noexcept;
+                   float keyboard_spread, float stereo_spread,
+                   const float* exc_ir = nullptr, int exc_ir_len = 0) noexcept;
 
     void releaseVoice(int midi, float sr) noexcept;
     void releaseAll(float sr) noexcept;
@@ -142,6 +146,7 @@ public:
                 PhysicsVoiceManager& vm,
                 float sample_rate,
                 float keyboard_spread,
+                const float* exc_ir, int exc_ir_len,
                 float stereo_spread,
                 std::mutex& bank_mutex) noexcept;
 
@@ -195,8 +200,12 @@ public:
 private:
     void populateDefaults(int midi_from, int midi_to);
     bool loadBankFromJson(const std::string& json_str, Logger& logger);
+    void loadExcitationIR(const std::string& ir_path, Logger& logger);
 
     PhysicsNoteParam note_params_[128];
+
+    // Excitation IR (body impulse response convolved with hammer force)
+    std::vector<float> excitation_ir_;  // loaded once at init
 
     PhysicsVoiceManager voice_mgr_;
     PhysicsPatchManager patch_mgr_;
