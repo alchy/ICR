@@ -5,17 +5,15 @@
  * Pure DSP mathematics for physical piano modelling -- stateless, inline,
  * header-only.
  *
- * Implements a commuted digital waveguide piano model based on:
- *   - Smith (1993): Physical Modelling using Digital Waveguides
- *   - Bank & Sujbert (2005): Generation of longitudinal vibrations in piano
- *   - Chabassier, Chaigne & Joly (2012): Modeling of a grand piano (INRIA)
- *   - Valimaki et al. (2006): Commuted waveguide synthesis of the clavichord
+ * v1.0: Dual-rail digital waveguide (Teng 2012 / Smith 1992) with
+ *       Chaigne-Askenfelt (1994) finite-difference hammer model.
  *
- * Energy conservation:
- *   The waveguide junction at the bridge enforces Kirchhoff-style energy
- *   balance: the sum of incoming and outgoing wave power at each junction
- *   equals zero (lossless junction).  Losses are applied independently via
- *   the loop filter (frequency-dependent damping) and radiation filter.
+ * References:
+ *   - Smith (1992): Physical Modelling using Digital Waveguides
+ *   - Teng (2012): Piano Sounds Synthesis (MSc, Edinburgh)
+ *   - Chaigne & Askenfelt (1994): Numerical simulations of piano strings
+ *   - Van Duyne & Smith (1994): Dispersion via allpass cascade
+ *   - Välimäki et al. (1996): Plucked string physical modeling
  *
  * Used by: PhysicalModelingPianoCore
  */
@@ -27,482 +25,443 @@
 
 namespace physics {
 
-// -- Constants ----------------------------------------------------------------
+// ── Constants ────────────────────────────────────────────────────────────
 
-static constexpr int   MAX_DELAY_SAMPLES = 8192;  // supports A0 (27.5 Hz) up to 96 kHz
+static constexpr int   MAX_RAIL_LEN      = 2048;  // half-period, supports A0 @ 96 kHz
 static constexpr int   MAX_STRINGS       = 3;
-static constexpr float SPEED_OF_SOUND    = 343.f; // m/s (for radiation)
+static constexpr int   MAX_DISP_STAGES   = 16;
+static constexpr int   MAX_HAMMER_SAMPLES = 512;   // 10 ms @ 48 kHz
 
-// -- Delay line (fractional, allpass-interpolated) ----------------------------
-
-/// Fixed-size delay line with first-order allpass fractional delay.
-///
-/// Digital waveguide string = two delay lines (travelling waves) + loss filter.
-/// The allpass interpolation preserves allpass phase characteristics,
-/// which is critical for accurate tuning without amplitude distortion.
-struct DelayLine {
-    float buf[MAX_DELAY_SAMPLES] = {};
-    int   len      = 256;    // integer part of total delay
-    int   write_ix = 0;
-    // Allpass fractional delay: H(z) = (a + z^-1) / (1 + a*z^-1)
-    float ap_a     = 0.f;    // allpass coefficient
-    float ap_state = 0.f;    // delay element
-};
-
-/// Write a sample into the delay line.
-inline void delay_write(DelayLine& d, float x) {
-    d.buf[d.write_ix] = x;
-    d.write_ix = (d.write_ix + 1) % d.len;
-}
-
-/// Read from delay line at position `tap` samples behind write head.
-inline float delay_read(const DelayLine& d, int tap) {
-    int idx = d.write_ix - tap - 1;
-    if (idx < 0) idx += d.len;
-    return d.buf[idx];
-}
-
-/// Read with first-order allpass fractional delay interpolation.
-///   Total delay = integer_tap + fractional
-///   H(z) = (ap_a + z^-1) / (1 + ap_a * z^-1)
-inline float delay_read_allpass(DelayLine& d, int tap) {
-    float raw = delay_read(d, tap);
-    float y = d.ap_a * raw + d.ap_state;
-    d.ap_state = raw - d.ap_a * y;
-    return y;
-}
-
-/// Compute delay length and allpass coefficient for a target frequency.
-///   total_delay = sr / f0 - filter_delay
-///   integer part -> delay line length
-///   fractional part -> allpass coefficient
-///
-/// filter_delay accounts for group delay of the loop filter (in samples).
-/// Returns {integer_len, ap_coeff}.
-struct DelayTuning {
-    int   len;
-    float ap_a;
-};
-
-inline DelayTuning compute_delay_tuning(float f0_hz, float sr,
-                                         float filter_delay_samples) {
-    float total = sr / f0_hz - filter_delay_samples;
-    if (total < 2.f) total = 2.f;
-    int   N = (int)total;
-    float frac = total - (float)N;
-
-    // Allpass coefficient for fractional delay:
-    //   a = (1 - frac) / (1 + frac)  when 0 < frac < 1
-    // When frac ~ 0, use N-1 and frac+1 to keep a in stable range
-    if (frac < 0.1f) {
-        N -= 1;
-        frac += 1.f;
-    }
-    float ap = (1.f - frac) / (1.f + frac);
-
-    N = std::min(N, MAX_DELAY_SAMPLES - 1);
-    N = std::max(N, 2);
-
-    return { N, ap };
-}
-
-/// Reset delay line to target length and allpass coefficient.
-inline void delay_reset(DelayLine& d, const DelayTuning& t) {
-    d.len      = t.len;
-    d.ap_a     = t.ap_a;
-    d.ap_state = 0.f;
-    d.write_ix = 0;
-    std::memset(d.buf, 0, sizeof(float) * t.len);
-}
-
-// -- Loss filter (frequency-dependent string damping) -------------------------
+// ── Loss filter (Välimäki one-pole) ──────────────────────────────────────
 
 /// One-pole low-pass loss filter for waveguide loop.
-///
-/// Models frequency-dependent damping of piano strings:
 ///   H(z) = g * (1-b) / (1 - b*z^-1)
-///
-/// where:
-///   g = overall loop gain (< 1 for decay)
-///   b = pole position (0 = flat loss, ->1 = more treble damping)
-///
-/// The combined effect: low frequencies decay slowly (long tau2),
-/// high frequencies decay fast (short tau1).  This is the physical
-/// mechanism behind bi-exponential envelope perception.
-///
-/// Chabassier: damping = R + eta*f^2  ->  frequency-dependent loss per sample.
 struct LossFilter {
-    float g = 0.999f;  // overall gain per round-trip
-    float b = 0.3f;    // pole coefficient (treble damping)
-    float s = 0.f;     // filter state
+    float g = 0.999f;   // DC gain per round-trip
+    float b = 0.3f;     // pole coefficient (treble damping)
+    float s = 0.f;      // filter state
 };
 
-/// Compute loss filter coefficients from T60 decay times.
-///
-/// Smith/Bank design: the loop filter gain at DC determines how fast the
-/// fundamental decays; the gain at Nyquist determines how fast the highest
-/// partials decay.  For piano, high partials must die within milliseconds
-/// while the fundamental rings for seconds.
-///
-///   f0        = fundamental frequency [Hz]
-///   T60_fund  = time for fundamental to decay 60 dB [s]
-///   T60_nyq   = time for Nyquist component to decay 60 dB [s]
-///   sr        = sample rate
-///
-/// Filter: H(z) = g * (1-p) / (1 - p*z^-1)
-///   g = DC gain per round-trip (sets fundamental decay)
-///   p = pole (sets spectral tilt: how much faster treble decays)
+/// Compute loss filter from T60 decay times (Smith/Bank design).
 inline LossFilter compute_loss_filter(float f0, float T60_fund,
                                        float T60_nyq, float sr) {
-    float N = sr / f0;  // samples per round-trip
-
-    // Per-loop gain at DC and Nyquist from T60:
-    //   g = 10^(-3 * N / (T60 * sr))
-    // Clamp T60_nyq to minimum 0.001s to avoid zero gain
+    float N = sr / f0;
     float g_dc  = std::pow(10.f, -3.f * N / std::max(T60_fund * sr, 1.f));
     float g_nyq = std::pow(10.f, -3.f * N / std::max(T60_nyq * sr, 0.001f * sr));
-
-    // Clamp gains to stable range
-    g_dc  = std::max(0.5f, std::min(g_dc, 0.9999f));
+    g_dc  = std::max(0.5f,  std::min(g_dc,  0.9999f));
     g_nyq = std::max(0.01f, std::min(g_nyq, g_dc));
-
-    // Pole coefficient from DC and Nyquist gain ratio:
-    //   |H(1)| = g_dc,  |H(-1)| = g*(1-p)/(1+p) = g_nyq
-    //   p = (g_dc - g_nyq) / (g_dc + g_nyq)
     float p = (g_dc - g_nyq) / std::max(g_dc + g_nyq, 1e-9f);
     p = std::max(0.f, std::min(p, 0.95f));
-
-    // Normalize so that DC gain = g_dc:
-    //   H(1) = g*(1-p)/(1-p) = g  =>  g = g_dc
     return { g_dc, p, 0.f };
 }
 
-/// Process one sample through the loss filter.
-///   y[n] = g * ((1-b) * x[n] + b * y[n-1])
-inline float loss_filter_tick(float x, LossFilter& f) {
+/// Process one sample through loss filter.
+inline float loss_tick(float x, LossFilter& f) {
     float y = f.g * ((1.f - f.b) * x + f.b * f.s);
     f.s = y;
     return y;
 }
 
-/// Approximate group delay of loss filter at fundamental (in samples).
-///   For one-pole: delay ~ b / (1 - b^2) at low frequencies.
-inline float loss_filter_delay(const LossFilter& f) {
+/// Group delay of loss filter at DC (samples).
+inline float loss_delay(const LossFilter& f) {
     float b2 = f.b * f.b;
     return f.b / std::max(1.f - b2, 0.01f);
 }
 
-// -- Hammer model (nonlinear felt compression) --------------------------------
+// ── First-order allpass (tuning + dispersion) ────────────────────────────
 
-/// Felt hammer state.
-///
-/// Models the hammer-string interaction as a nonlinear spring:
-///   F = K_H * max(0, xi - u)^p
-///
-/// where xi = hammer displacement, u = string displacement at contact point,
-/// K_H = felt stiffness, p = nonlinear exponent.
-///
-/// Chabassier parameters:
-///   K_H: 4e8 (bass) to 2.3e11 (treble)
-///   p:   2.27 (bass) to 3.0 (treble)
-///   M_H: 12 g (bass) to 6.77 g (treble)
-///
-/// In the commuted model, we inject the hammer force directly into the
-/// string delay line rather than solving the full PDE interaction.
-struct HammerState {
-    float xi       = 0.f;   // hammer position (m)
-    float vi       = 0.f;   // hammer velocity (m/s)
-    float K_H      = 1e9f;  // felt stiffness
-    float p        = 2.5f;  // nonlinear exponent
-    float M_H      = 0.009f;// hammer mass (kg)
-    float x0_ratio = 0.125f;// strike position as fraction of string length
-    bool  in_contact = false;
+struct AllpassState {
+    float s = 0.f;
 };
 
-/// Initialize hammer for a note-on event.
-///
-///   v0 = hammer velocity (m/s), derived from MIDI velocity
-///   The hammer starts just touching the string (xi = 0) with velocity v0.
-inline void hammer_init(HammerState& h, float v0,
-                        float K_H, float p, float M_H) {
-    h.xi    = 0.f;
-    h.vi    = v0;
-    h.K_H   = K_H;
-    h.p     = p;
-    h.M_H   = M_H;
-    h.in_contact = true;
+/// First-order allpass: H(z) = (a + z^-1) / (1 + a*z^-1)
+inline float allpass_tick(float x, float a, AllpassState& st) {
+    float y = a * x + st.s;
+    st.s = x - a * y;
+    return y;
 }
 
-/// Advance hammer by one sample.  Returns the force applied to the string.
+/// Group delay of first-order allpass at DC: (1-a)/(1+a)
+inline float allpass_delay_dc(float a) {
+    return (1.f - a) / std::max(1.f + a, 0.01f);
+}
+
+// ── Dual-rail string ─────────────────────────────────────────────────────
+
+/// One dual-rail waveguide string with circular-buffer shift.
 ///
-///   u_string = string displacement at contact point
-///   dt = 1 / sample_rate
+/// Two rails model physically traveling waves:
+///   upper: right-traveling (nut → bridge), length M
+///   lower: left-traveling  (bridge → nut), length M
 ///
-/// The hammer separates from the string when xi < u_string (hammer
-/// bounces back), after which force = 0.
-inline float hammer_tick(HammerState& h, float u_string, float dt) {
-    if (!h.in_contact) return 0.f;
+/// Circular buffer avoids O(M) memmove per sample.
+/// upper_at(i) = upper[(upper_base + i) % M]
+struct DualRailString {
+    float upper[MAX_RAIL_LEN] = {};
+    float lower[MAX_RAIL_LEN] = {};
+    int   M          = 0;        // rail length (half compensated period)
+    int   upper_base = 0;        // circular pointer for upper[0]
+    int   lower_base = 0;        // circular pointer for lower[0]
+    int   n0         = 0;        // hammer injection position
 
-    // Advance hammer position first (symplectic Euler: position before force)
-    h.xi += h.vi * dt;
+    // Per-string filter coefficients
+    float g_dc       = 0.999f;   // loss filter DC gain
+    float pole       = 0.3f;     // loss filter pole
+    float ap_a       = 0.f;      // tuning allpass coefficient
+    int   n_disp     = 0;        // dispersion stages
+    float a_disp     = -0.15f;   // dispersion allpass coefficient
 
-    float compression = h.xi - u_string;
+    // Per-string filter states
+    float lp_state   = 0.f;      // loss filter
+    AllpassState ap_tune;         // tuning allpass
+    AllpassState disp_st[MAX_DISP_STAGES];
 
-    if (compression <= 0.f) {
-        // Hammer has bounced off (or hasn't reached string yet)
-        // Only separate if hammer is moving away (vi < 0 means retreating)
-        if (h.vi < 0.f) {
-            h.in_contact = false;
-            return 0.f;
-        }
-        // Still approaching — no force yet but keep in contact
-        return 0.f;
+    // -- Circular buffer accessors --
+    inline float  upper_at(int i) const { return upper[(upper_base + i) % M]; }
+    inline float& upper_at(int i)       { return upper[(upper_base + i) % M]; }
+    inline float  lower_at(int i) const { return lower[(lower_base + i) % M]; }
+    inline float& lower_at(int i)       { return lower[(lower_base + i) % M]; }
+
+    /// "Shift upper right" = new sample enters at position 0
+    inline void shift_upper() { upper_base = (upper_base - 1 + M) % M; }
+    /// "Shift lower left"  = new sample enters at position M-1
+    inline void shift_lower() { lower_base = (lower_base + 1) % M; }
+};
+
+/// Initialize a dual-rail string for a given f0 with delay compensation.
+inline void dual_rail_init(DualRailString& s, float f0, float sr,
+                           int n_disp, float a_disp, float exc_x0,
+                           float T60_fund, float T60_nyq, float gauge) {
+    float N_period = sr / f0;
+
+    // Loss filter
+    float T60_nyq_eff = T60_nyq / std::max(gauge, 0.1f);
+    LossFilter lf = compute_loss_filter(f0, T60_fund, T60_nyq_eff, sr);
+    s.g_dc = lf.g;
+    s.pole = lf.b;
+    s.lp_state = 0.f;
+
+    // Delay compensation: loss filter + dispersion cascade
+    float filt_del = loss_delay(lf);
+    float disp_del = (n_disp > 0) ? (float)n_disp * allpass_delay_dc(a_disp) : 0.f;
+
+    // Each rail = half the compensated period
+    float N_comp = N_period - filt_del - disp_del;
+    int M = std::max(4, (int)(N_comp / 2.f));
+    float frac = N_comp / 2.f - (float)M;
+    if (frac < 0.1f) { M -= 1; frac += 1.f; }
+    M = std::min(M, MAX_RAIL_LEN - 1);
+    M = std::max(M, 4);
+
+    s.M = M;
+    s.ap_a = (1.f - frac) / (1.f + frac);
+    s.n_disp = n_disp;
+    s.a_disp = a_disp;
+    s.n0 = std::max(1, std::min(M - 2, (int)std::round(exc_x0 * (float)M)));
+
+    // Clear rails and states
+    std::memset(s.upper, 0, sizeof(float) * M);
+    std::memset(s.lower, 0, sizeof(float) * M);
+    s.upper_base = 0;
+    s.lower_base = 0;
+    s.ap_tune.s = 0.f;
+    for (int i = 0; i < MAX_DISP_STAGES; i++) s.disp_st[i].s = 0.f;
+}
+
+/// Process one sample through the dual-rail waveguide.
+/// Returns bridge output (right-traveling wave arriving at bridge).
+inline float dual_rail_tick(DualRailString& s, float hammer_in) {
+    // 1. Output: right-traveling wave at bridge
+    float bridge_out = s.upper_at(s.M - 1);
+
+    // 2. Bridge reflection: loss → dispersion → tuning → negate
+    float x = bridge_out;
+
+    // Loss filter
+    float y = s.g_dc * ((1.f - s.pole) * x + s.pole * s.lp_state);
+    s.lp_state = y;
+    x = y;
+
+    // Dispersion cascade
+    for (int di = 0; di < s.n_disp; di++)
+        x = allpass_tick(x, s.a_disp, s.disp_st[di]);
+
+    // Tuning allpass
+    x = allpass_tick(x, s.ap_a, s.ap_tune);
+
+    // 3. Nut reflection: rigid termination (-1)
+    float nut_ref = -s.lower_at(0);
+
+    // 4. Shift upper → (new sample at position 0)
+    s.shift_upper();
+    s.upper_at(0) = nut_ref;
+
+    // 5. Shift lower ← (new sample at position M-1)
+    s.shift_lower();
+    s.lower_at(s.M - 1) = -x;   // bridge reflection (negated)
+
+    // 6. Inject hammer force at n0
+    s.upper_at(s.n0) += hammer_in;
+    s.lower_at(s.n0) += hammer_in;
+
+    return bridge_out;
+}
+
+// ── Chaigne-Askenfelt hammer model ───────────────────────────────────────
+//
+// Physical parameters from Chaigne & Askenfelt (1994):
+//   C2 (MIDI 36): Ms=35g,   L=1.9m,  Mh=4.9g,  T=750N, p=2.3, K=1e8
+//   C4 (MIDI 60): Ms=3.93g, L=0.62m, Mh=2.97g, T=670N, p=2.5, K=4.5e9
+//   C7 (MIDI 96): Ms=0.467g,L=0.09m, Mh=2.2g,  T=750N, p=3.0, K=1e11
+
+namespace hammer {
+
+struct AnchorParams {
+    float Ms_g, L_m, Mh_g, T_N, p_exp, K_stiff;
+};
+
+static constexpr AnchorParams ANCHOR_C2 = { 35.0f,  1.90f, 4.9f,  750.f, 2.3f, 1e8f  };
+static constexpr AnchorParams ANCHOR_C4 = { 3.93f,  0.62f, 2.97f, 670.f, 2.5f, 4.5e9f };
+static constexpr AnchorParams ANCHOR_C7 = { 0.467f, 0.09f, 2.2f,  750.f, 3.0f, 1e11f };
+
+inline float lerp(float a, float b, float t) { return a + (b - a) * t; }
+inline float log_lerp(float a, float b, float t) {
+    return std::pow(10.f, lerp(std::log10(a), std::log10(b), t));
+}
+
+/// Interpolate hammer parameter from 3 anchor notes.
+inline AnchorParams interp_params(int midi) {
+    AnchorParams r;
+    if (midi <= 36) {
+        r = ANCHOR_C2;
+    } else if (midi <= 60) {
+        float t = (float)(midi - 36) / 24.f;
+        r.Ms_g    = lerp(ANCHOR_C2.Ms_g,    ANCHOR_C4.Ms_g,    t);
+        r.L_m     = lerp(ANCHOR_C2.L_m,     ANCHOR_C4.L_m,     t);
+        r.Mh_g    = lerp(ANCHOR_C2.Mh_g,    ANCHOR_C4.Mh_g,    t);
+        r.T_N     = lerp(ANCHOR_C2.T_N,     ANCHOR_C4.T_N,     t);
+        r.p_exp   = lerp(ANCHOR_C2.p_exp,   ANCHOR_C4.p_exp,   t);
+        r.K_stiff = log_lerp(ANCHOR_C2.K_stiff, ANCHOR_C4.K_stiff, t);
+    } else if (midi <= 96) {
+        float t = (float)(midi - 60) / 36.f;
+        r.Ms_g    = lerp(ANCHOR_C4.Ms_g,    ANCHOR_C7.Ms_g,    t);
+        r.L_m     = lerp(ANCHOR_C4.L_m,     ANCHOR_C7.L_m,     t);
+        r.Mh_g    = lerp(ANCHOR_C4.Mh_g,    ANCHOR_C7.Mh_g,    t);
+        r.T_N     = lerp(ANCHOR_C4.T_N,     ANCHOR_C7.T_N,     t);
+        r.p_exp   = lerp(ANCHOR_C4.p_exp,   ANCHOR_C7.p_exp,   t);
+        r.K_stiff = log_lerp(ANCHOR_C4.K_stiff, ANCHOR_C7.K_stiff, t);
+    } else {
+        r = ANCHOR_C7;
+    }
+    return r;
+}
+
+/// Compute hammer force using Chaigne-Askenfelt finite-difference model.
+///
+/// Runs a short FD simulation (~3-7ms) of nonlinear hammer-string
+/// interaction. The force is converted to velocity input (F / 2Z)
+/// ready for waveguide injection.
+///
+/// Args:
+///   midi    — MIDI note (for parameter interpolation)
+///   v0      — initial hammer velocity (m/s)
+///   exc_x0  — striking position (fraction of string)
+///   sr      — sample rate
+///   v_in    — output buffer (at least MAX_HAMMER_SAMPLES)
+///
+/// Returns: number of samples written to v_in
+inline int compute_force(int midi, float v0, float exc_x0, float sr,
+                         float* v_in) {
+    AnchorParams ap = interp_params(midi);
+
+    float Ms = ap.Ms_g * 0.001f;       // g → kg
+    float L  = ap.L_m;
+    float Mh = ap.Mh_g * 0.001f;       // g → kg
+    float T  = ap.T_N;
+    float p  = ap.p_exp;
+    float K  = ap.K_stiff;
+
+    // Damping and stiffness (Chaigne & Askenfelt constants)
+    static constexpr float b1 = 0.5f;
+    static constexpr float b3 = 6.25e-9f;
+    static constexpr float epsilon = 3.82e-5f;
+
+    float rho_L = Ms / L;              // linear density
+    float R0 = std::sqrt(T * rho_L);   // wave impedance
+    float c  = std::sqrt(T / rho_L);   // wave speed
+
+    // Spatial grid: find largest stable N for stiff string
+    // Courant: r ≤ 1/sqrt(1 + 4*epsilon*N²)
+    int N = 15;
+    for (int N_try = 120; N_try >= 15; N_try--) {
+        float r_try = c * (float)N_try / (sr * L);
+        float r_max = 1.f / std::sqrt(1.f + 4.f * epsilon * (float)(N_try * N_try));
+        if (r_try <= 0.9f * r_max) { N = N_try; break; }
     }
 
-    float F = h.K_H * std::pow(compression, h.p);
+    int i0 = std::max(2, std::min(N - 3, (int)std::round(exc_x0 * (float)N)));
+    float dt = 1.f / sr;
+    float dt2 = dt * dt;
 
-    // Newton: M_H * a = -F  (hammer decelerates)
-    float a = -F / h.M_H;
-    h.vi += a * dt;
+    // FD coefficients (Teng Appendix II)
+    float D  = 1.f + b1 / sr + 2.f * b3 * sr;
+    float r  = c * (float)N / (sr * L);
+    float a1 = (2.f - 2.f*r*r + b3*sr - 6.f*epsilon*(float)(N*N)*r*r) / D;
+    float a2 = (-1.f + b1/sr + 2.f*b3*sr) / D;
+    float a3 = (r*r * (1.f + 4.f*epsilon*(float)(N*N))) / D;
+    float a4 = (b3*sr - epsilon*(float)(N*N)*r*r) / D;
+    float a5 = (-b3*sr) / D;
 
-    return F;
+    // Rolling buffer: 4 time slices (circular), max 120 grid points
+    static constexpr int MAX_N = 120;
+    float y[4][MAX_N] = {};     // y[slot][spatial]
+    float yh[MAX_HAMMER_SAMPLES] = {};
+    float F[MAX_HAMMER_SAMPLES]  = {};
+
+    // t=0: all zero
+    // t=1
+    yh[1] = v0 * dt;
+    for (int i = 1; i < N-1; i++)
+        y[1][i] = (y[0][i+1] + y[0][i-1]) / 2.f;
+    float delta = yh[1] - y[1][i0];
+    if (delta > 0.f) F[1] = K * std::pow(delta, p);
+
+    // t=2
+    for (int i = 1; i < N-1; i++)
+        y[2][i] = y[1][i+1] + y[1][i-1] - y[0][i];
+    y[2][i0] += dt2 * (float)N * F[1] / Ms;
+    yh[2] = 2.f*yh[1] - yh[0] - dt2 * F[1] / Mh;
+    delta = yh[2] - y[2][i0];
+    if (delta > 0.f) F[2] = K * std::pow(delta, p);
+
+    // Main FD loop (t=3..max)
+    int max_steps = std::min((int)(0.010f * sr), MAX_HAMMER_SAMPLES - 1);
+    int actual_len = max_steps;
+    int no_contact = 0;
+
+    for (int n = 3; n < max_steps; n++) {
+        // Circular time indices
+        int cur  = n & 3;
+        int prv  = (n-1) & 3;
+        int prv2 = (n-2) & 3;
+        int prv3 = (n-3) & 3;
+
+        // Boundary
+        y[cur][0]   = 0.f;
+        y[cur][N-1] = 0.f;
+
+        // Edge i=1
+        y[cur][1] = a1*y[prv][1] + a2*y[prv2][1]
+                  + a3*(y[prv][2] + y[prv][0])
+                  + a4*(y[prv][3] - y[prv][1])
+                  + a5*(y[prv2][2] + y[prv2][0] + y[prv3][1]);
+
+        // Edge i=N-2
+        y[cur][N-2] = a1*y[prv][N-2] + a2*y[prv2][N-2]
+                    + a3*(y[prv][N-1] + y[prv][N-3])
+                    + a4*(y[prv][N-4] - y[prv][N-2])
+                    + a5*(y[prv2][N-1] + y[prv2][N-3] + y[prv3][N-2]);
+
+        // Interior 2..N-3
+        for (int i = 2; i <= N-3; i++) {
+            y[cur][i] = a1*y[prv][i] + a2*y[prv2][i]
+                      + a3*(y[prv][i+1] + y[prv][i-1])
+                      + a4*(y[prv][i+2] + y[prv][i-2])
+                      + a5*(y[prv2][i+1] + y[prv2][i-1] + y[prv3][i]);
+        }
+
+        // Striking point (force injection)
+        y[cur][i0] = a1*y[prv][i0] + a2*y[prv2][i0]
+                   + a3*(y[prv][i0+1] + y[prv][i0-1])
+                   + a4*(y[prv][i0+2] + y[prv][i0-2])
+                   + a5*(y[prv2][i0+1] + y[prv2][i0-1] + y[prv3][i0])
+                   + dt2 * (float)N * F[n-1] / Ms;
+
+        // Hammer displacement (Verlet)
+        yh[n] = 2.f*yh[n-1] - yh[n-2] - dt2 * F[n-1] / Mh;
+
+        // Nonlinear felt compression
+        delta = yh[n] - y[cur][i0];
+        if (delta > 0.f) {
+            F[n] = K * std::pow(delta, p);
+            no_contact = 0;
+        } else {
+            F[n] = 0.f;
+            no_contact++;
+        }
+
+        if (no_contact > 100) { actual_len = n + 1; break; }
+    }
+
+    // Convert force → velocity input for waveguide
+    float inv_2R0 = 1.f / (2.f * R0);
+    for (int i = 0; i < actual_len; i++)
+        v_in[i] = F[i] * inv_2R0;
+
+    return actual_len;
 }
 
-/// Convert MIDI velocity (1-127) to hammer velocity in m/s.
-///
-/// Chabassier: 0.5 m/s (pp) to 4.5 m/s (ff).
-/// Mapping: v = v_min + (v_max - v_min) * (vel/127)^gamma
-///
-/// gamma > 1 gives a more natural feel (exponential-like response).
-inline float midi_to_hammer_velocity(uint8_t velocity, float gamma = 1.5f) {
-    static constexpr float V_MIN = 0.5f;
-    static constexpr float V_MAX = 4.5f;
+} // namespace hammer
 
-    float t = (float)velocity / 127.f;
-    float curved = std::pow(t, gamma);
-    return V_MIN + (V_MAX - V_MIN) * curved;
-}
+// ── Multi-string detuning ────────────────────────────────────────────────
 
-// -- Hammer excitation spectrum (commuted model) ------------------------------
-
-/// Compute the spectral excitation weight for partial k based on hammer
-/// strike position and felt compression.
-///
-///   sin(k * pi * x0/L) gives the modal coupling -- partials at strike position
-///   nodes (k = L/x0, 2L/x0, ...) are suppressed (e.g., k=8,16,24 for x0=L/8).
-///
-///   The felt compression acts as a low-pass: higher p -> harder hammer ->
-///   more high-frequency content.
-///
-///   spectral_rolloff models felt low-pass: exp(-k * f0 / f_cutoff)
-///   f_cutoff depends on hammer hardness (higher p -> higher cutoff).
-inline float hammer_spectral_weight(int k, float x0_ratio, float p,
-                                     float f0, float sr) {
-    // Modal coupling (strike position)
-    float modal = std::abs(std::sin((float)k * dsp::PI * x0_ratio));
-
-    // Felt low-pass (harder hammer = more partials)
-    // f_cutoff ~ K_H^(1/(2p+1)) but simplified:
-    //   p=2.3 (soft, bass) -> cutoff ~ 2 kHz
-    //   p=3.0 (hard, treble) -> cutoff ~ 8 kHz
-    float f_cutoff = 500.f + (p - 2.0f) * 6000.f;
-    float f_k = (float)k * f0;
-    float rolloff = std::exp(-f_k / std::max(f_cutoff, 100.f));
-
-    return modal * rolloff;
-}
-
-// -- Soundboard coupling (bridge junction) ------------------------------------
-
-/// Two-port junction scattering coefficients.
-///
-/// At the bridge, string impedance Z_s meets soundboard impedance Z_b.
-/// The scattering coefficients determine how much wave energy:
-///   - reflects back into the string (k_r)
-///   - transmits into the soundboard (k_t)
-///
-/// Energy conservation: k_r^2 + k_t^2 * (Z_s/Z_b) = 1
-///
-/// For piano: Z_s << Z_b -> most energy reflects (k_r ~ -1), small
-/// fraction transmits (long sustain, gradual radiation).
-struct JunctionCoeffs {
-    float k_r;  // reflection coefficient (string side)
-    float k_t;  // transmission coefficient (to soundboard)
-};
-
-/// Compute bridge junction coefficients.
-///   Kirchhoff junction: incoming = outgoing
-///   k_r = (Z_b - Z_s) / (Z_b + Z_s)
-///   k_t = 2 * Z_s / (Z_b + Z_s)
-///
-/// Parametrized by impedance ratio r = Z_s / Z_b.
-inline JunctionCoeffs compute_junction(float impedance_ratio) {
-    // r = Z_s / Z_b  (typically 0.001 to 0.05 for piano)
-    float r = std::max(impedance_ratio, 1e-6f);
-    float k_r = (1.f - r) / (1.f + r);
-    float k_t = 2.f * r / (1.f + r);
-    return { k_r, k_t };
-}
-
-// -- Soundboard resonator (simplified modal model) ----------------------------
-
-/// Simplified soundboard as a bank of resonant modes.
-/// Each mode is a second-order resonator (damped harmonic oscillator).
-///
-/// In a full model, the soundboard has ~100+ modes below 1 kHz.
-/// We use a simplified version with a small number of modes that
-/// capture the gross spectral envelope.
-static constexpr int SOUNDBOARD_MODES = 24;
-
-struct SoundboardMode {
-    float freq  = 200.f;  // resonance frequency (Hz)
-    float decay = 0.99f;  // per-sample decay
-    float gain  = 0.01f;  // coupling gain
-    // Resonator state (two-pole)
-    float y1 = 0.f, y2 = 0.f;
-    float c1 = 0.f, c2 = 0.f;  // coefficients (precomputed)
-};
-
-/// Initialize soundboard mode coefficients.
-///   freq  = resonance frequency [Hz]
-///   Q     = quality factor
-///   gain  = coupling amplitude
-///   sr    = sample rate
-inline void soundboard_mode_init(SoundboardMode& m, float freq, float Q,
-                                  float gain, float sr) {
-    m.freq  = freq;
-    m.gain  = gain;
-    float w = dsp::TAU * freq / sr;
-    m.decay = std::exp(-w / std::max(Q, 0.5f));
-    m.c1    = 2.f * m.decay * std::cos(w);
-    m.c2    = -(m.decay * m.decay);
-    m.y1    = 0.f;
-    m.y2    = 0.f;
-}
-
-/// Process one sample through a soundboard mode.
-///   x = input excitation (from bridge)
-///   Returns radiated output.
-inline float soundboard_mode_tick(SoundboardMode& m, float x) {
-    float y = m.gain * x + m.c1 * m.y1 + m.c2 * m.y2;
-    m.y2 = m.y1;
-    m.y1 = y;
-    return y;
-}
-
-// -- Inharmonicity dispersion filter ------------------------------------------
-
-/// Second-order allpass for inharmonicity (string stiffness).
-///
-/// Piano strings are not ideal -- stiffness causes dispersion:
-///   f_k = k * f0 * sqrt(1 + B * k^2)
-///
-/// In a waveguide model, this is implemented as an allpass filter in
-/// the delay loop.  The allpass adds frequency-dependent phase shift
-/// that stretches upper partials, matching the inharmonicity equation.
-///
-/// We use a second-order allpass tuned to approximate B across the
-/// first ~15-20 partials.
-struct DispersionFilter {
-    float a1 = 0.f, a2 = 0.f;
-    float s1 = 0.f, s2 = 0.f;
-};
-
-/// Compute dispersion allpass coefficients from inharmonicity B.
-///
-/// Simplified approach: coefficient ~ -B * N^2,
-/// calibrated to match first 15 partials within ~5 cents.
-inline DispersionFilter compute_dispersion(float B, float f0, float sr) {
-    DispersionFilter d;
-    if (B < 1e-7f) return d;  // no inharmonicity
-
-    // Empirical fit: a1 controls dispersion slope
-    float N = sr / f0;  // delay in samples
-    float beta = B * N * N;
-    // Keep coefficient magnitude bounded for stability
-    float ab = std::min(beta * 0.5f, 0.9f);
-    d.a1 = -ab;
-    d.a2 = ab * 0.3f;  // mild second-order correction
-    return d;
-}
-
-/// Process one sample through dispersion allpass (second-order).
-///   w[n] = x[n] - a1*w[n-1] - a2*w[n-2]
-///   y[n] = a2*w[n] + a1*w[n-1] + w[n-2]
-inline float dispersion_tick(float x, DispersionFilter& d) {
-    float w = x - d.a1 * d.s1 - d.a2 * d.s2;
-    float y = d.a2 * w + d.a1 * d.s1 + d.s2;
-    d.s2 = d.s1;
-    d.s1 = w;
-    return y;
-}
-
-/// Approximate total group delay of dispersion filter at fundamental (samples).
-inline float dispersion_delay(const DispersionFilter& d) {
-    // For allpass, group delay at DC ~ (a1 + 2*a2) / (1 + a1 + a2)
-    float num = -d.a1 + 2.f * (-d.a2);
-    float den = 1.f - d.a1 - d.a2;
-    return std::abs(num / std::max(std::abs(den), 0.01f));
-}
-
-// -- Multi-string detuning (beating) ------------------------------------------
-
-/// Compute detuning in Hz for each string of a unison group.
-///
-///   n_strings = 1, 2, or 3
-///   detune_cents = total detuning spread (cents)
-///   f0 = fundamental frequency (Hz)
-///
-/// Returns array of frequency offsets from f0.
 struct StringDetuning {
-    float offsets[MAX_STRINGS] = {};
+    float f0s[MAX_STRINGS] = {};
+    float pan_l[MAX_STRINGS] = {};
+    float pan_r[MAX_STRINGS] = {};
     int   count = 1;
 };
 
+/// Compute detuned frequencies and stereo panning for multi-string group.
 inline StringDetuning compute_detuning(int n_strings, float detune_cents,
-                                        float f0) {
+                                        float f0, float stereo_spread) {
     StringDetuning sd;
     sd.count = std::max(1, std::min(n_strings, MAX_STRINGS));
 
-    if (sd.count == 1) {
-        sd.offsets[0] = 0.f;
-    } else {
-        // Convert cents to Hz: df = f0 * (2^(cents/1200) - 1)
-        float df = f0 * (std::pow(2.f, detune_cents / 1200.f) - 1.f);
-        if (sd.count == 2) {
-            sd.offsets[0] = -df * 0.5f;
-            sd.offsets[1] =  df * 0.5f;
+    for (int si = 0; si < sd.count; si++) {
+        // Detune
+        if (sd.count > 1) {
+            float offset = ((float)si - (float)(sd.count - 1) / 2.f) * detune_cents;
+            sd.f0s[si] = f0 * std::pow(2.f, offset / 1200.f);
         } else {
-            sd.offsets[0] = -df;
-            sd.offsets[1] =  0.f;
-            sd.offsets[2] =  df;
+            sd.f0s[si] = f0;
         }
+
+        // Pan (cos/sin equal-power)
+        float pan;
+        if (sd.count > 1) {
+            float spread_norm = ((float)si - (float)(sd.count - 1) / 2.f)
+                              / ((float)(sd.count - 1) / 2.f);
+            pan = 0.5f + stereo_spread * spread_norm * 0.5f;
+        } else {
+            pan = 0.5f;
+        }
+        sd.pan_l[si] = std::cos(pan * dsp::PI / 2.f);
+        sd.pan_r[si] = std::sin(pan * dsp::PI / 2.f);
     }
     return sd;
 }
 
-// -- Keyboard mapping helpers -------------------------------------------------
+// ── Keyboard mapping helpers ─────────────────────────────────────────────
 
-/// Compute physical parameters from MIDI note.
-/// These are default heuristics; can be overridden from JSON.
-
-/// Hammer stiffness K_H: exponential from bass to treble.
-///   MIDI 21 -> 4e8, MIDI 108 -> 2.3e11
-inline float default_K_H(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return std::pow(10.f, 8.6f + t * 2.76f);  // 10^8.6 to 10^11.36
+/// Inharmonicity B (physics-based defaults for dual-rail).
+inline float default_B(int midi) {
+    if (midi <= 48)
+        return hammer::lerp(2e-3f, 1e-3f, (float)(midi - 21) / 27.f);
+    else if (midi <= 72)
+        return hammer::lerp(1e-3f, 4e-4f, (float)(midi - 48) / 24.f);
+    else
+        return hammer::lerp(4e-4f, 5e-5f, (float)(midi - 72) / 36.f);
 }
 
-/// Nonlinear exponent p: 2.27 (bass) to 3.0 (treble).
-inline float default_p(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return 2.27f + t * 0.73f;
-}
-
-/// Hammer mass M_H: 12 g (bass) to 6.77 g (treble).
-inline float default_M_H(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return 0.012f - t * 0.00523f;
+/// String gauge (thickness multiplier).
+inline float default_gauge(int midi) {
+    if (midi <= 48)
+        return hammer::lerp(3.0f, 2.0f, (float)(midi - 21) / 27.f);
+    else if (midi <= 72)
+        return hammer::lerp(2.0f, 1.2f, (float)(midi - 48) / 24.f);
+    else
+        return hammer::lerp(1.2f, 0.8f, (float)(midi - 72) / 36.f);
 }
 
 /// String count per note.
@@ -510,69 +469,16 @@ inline int default_n_strings(int midi) {
     return (midi <= 27) ? 1 : (midi <= 48) ? 2 : 3;
 }
 
-/// Detuning in cents: larger for audible beating.
-///   Bass: ~3 cents (slow beating), Treble: ~0.5 cents (fast shimmer)
+/// Detuning in cents.
 inline float default_detune_cents(int midi) {
     float t = (float)(midi - 21) / 87.f;
-    return 3.f - t * 2.5f;  // 3 -> 0.5 cents
+    return 2.5f - t * 2.2f;
 }
 
-/// Impedance ratio Z_s/Z_b: governs sustain length and coupling.
-/// Must be very small: each round-trip loses ~k_t of amplitude to the
-/// soundboard.  At f0=262 Hz, impedance_ratio=0.01 would give 2% loss
-/// per trip → effective tau ≈ 0.2 s (way too fast).
-///   Bass: ~0.0002 (very long sustain), Treble: ~0.002 (shorter)
-inline float default_impedance_ratio(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return 0.0002f + t * 0.0018f;
-}
-
-/// T60 of fundamental (s): bass ~10s, middle ~4s, treble ~1s.
-inline float default_tau_fund(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return 10.f - t * 9.f;  // 10 -> 1
-}
-
-/// T60 at Nyquist (s): much gentler than before — the waveguide should
-/// produce a bright, harmonically rich tone. Soundboard IR provides
-/// the warm piano character.
-///   Bass: ~0.25s, treble: ~0.08s
-/// Targets ~20 dB spectral tilt between fundamental and k=15 after 1s.
-inline float default_tau_high(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return 0.25f - t * 0.17f;  // 250ms -> 80ms
-}
-
-/// Inharmonicity B: bass ~5e-4, treble ~5e-5.
-inline float default_B(int midi) {
-    float t = (float)(midi - 21) / 87.f;
-    return 5e-4f * std::pow(10.f, -t);
-}
-
-/// Default soundboard modes: 24 modes approximating grand piano response.
-/// Frequencies span 60 Hz to 8 kHz, covering the full radiating range.
-/// More modes = richer, less synthetic body resonance.
-struct SoundboardPreset {
-    float freqs[SOUNDBOARD_MODES];
-    float Qs[SOUNDBOARD_MODES];
-    float gains[SOUNDBOARD_MODES];
-};
-
-inline SoundboardPreset default_soundboard() {
-    return {
-        // freqs: 24 modes spanning 60 Hz - 8 kHz (measured Steinway-like)
-        {  60.f,  95.f, 120.f, 155.f, 195.f, 240.f, 300.f, 370.f,
-          450.f, 550.f, 670.f, 820.f, 1000.f, 1200.f, 1500.f, 1800.f,
-         2200.f, 2700.f, 3300.f, 4000.f, 4800.f, 5800.f, 7000.f, 8000.f },
-        // Qs: higher in mid-range (more resonant), lower at extremes
-        {  10.f, 15.f, 18.f, 22.f, 25.f, 28.f, 30.f, 32.f,
-           35.f, 32.f, 30.f, 28.f, 25.f, 22.f, 20.f, 18.f,
-           16.f, 14.f, 12.f, 10.f,  8.f,  7.f,  6.f,  5.f },
-        // gains: bell-shaped, peak in 200-800 Hz (soundboard resonance region)
-        { 0.008f, 0.012f, 0.016f, 0.020f, 0.024f, 0.026f, 0.028f, 0.026f,
-          0.024f, 0.022f, 0.020f, 0.018f, 0.015f, 0.012f, 0.010f, 0.008f,
-          0.006f, 0.005f, 0.004f, 0.003f, 0.002f, 0.0015f, 0.001f, 0.0008f }
-    };
+/// MIDI velocity to hammer velocity (m/s).
+///   vel 0..1 → v0 0.5..6.0 m/s
+inline float velocity_to_v0(float vel_norm) {
+    return std::max(0.5f, vel_norm * 6.f);
 }
 
 } // namespace physics

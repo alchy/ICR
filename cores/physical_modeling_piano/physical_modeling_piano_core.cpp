@@ -1,13 +1,13 @@
 /*
  * cores/physical_modeling_piano/physical_modeling_piano_core.cpp
  * --------------------------------------------------------------
- * Karplus-Strong string synthesis with per-note bank parameters.
+ * Dual-rail waveguide piano with Chaigne-Askenfelt hammer model.
  *
- * Validated model from Python prototype (tests/test_string.py):
- *   - Full-period delay, no sign inversion
- *   - Fourier excitation (two-stage knee rolloff, odd_boost, gauge)
- *   - One-pole loss filter from T60 (Smith/Bank design)
- *   - Allpass dispersion cascade (3-16 stages)
+ * v1.0: Complete rewrite from single-rail Fourier excitation to
+ * dual-rail (Teng 2012 / Smith 1992) with physics-based FD hammer.
+ * Multi-string (1-3) with detuning and stereo panning.
+ *
+ * Validated against Python prototype (tools-physical/generate_teng_v2.py).
  */
 
 #include "physical_modeling_piano_core.h"
@@ -26,13 +26,12 @@ using json = nlohmann::json;
 REGISTER_SYNTH_CORE("PhysicalModelingPianoCore", PhysicalModelingPianoCore)
 
 static constexpr float PI = dsp::PI;
-static constexpr float TAU = dsp::TAU;
 
-// -- Constructor --------------------------------------------------------------
+// ── Constructor ──────────────────────────────────────────────────────────
 
 PhysicalModelingPianoCore::PhysicalModelingPianoCore() {}
 
-// -- Defaults -----------------------------------------------------------------
+// ── Defaults (physics-based, matching Python _default_note_params) ───────
 
 void PhysicalModelingPianoCore::populateDefaults(int midi_from, int midi_to) {
     for (int m = midi_from; m <= midi_to; m++) {
@@ -43,21 +42,14 @@ void PhysicalModelingPianoCore::populateDefaults(int midi_from, int midi_to) {
         float t = (float)(m - 21) / 87.f;
 
         np.B            = physics::default_B(m);
-        np.gauge        = (m <= 48) ? 4.f - t * 27.f / 87.f * 1.5f
-                        : (m <= 72) ? 2.5f - (float)(m-48)/24.f * 1.f
-                        : 1.5f - (float)(m-72)/36.f * 0.7f;
-        np.T60_fund     = 10.f - t * 9.f;
-        np.T60_nyq      = 0.35f - t * 0.2f;
-        np.exc_rolloff  = 0.1f;
+        np.gauge        = physics::default_gauge(m);
+        np.T60_fund     = physics::hammer::lerp(12.f, 1.5f, t);
+        np.T60_nyq      = physics::hammer::lerp(0.30f, 0.15f, t);
         np.exc_x0       = 1.f / 7.f;
-        np.odd_boost    = 2.f - t * 0.5f;
-        np.knee_k       = (int)(12.f - t * 4.f);
-        np.knee_slope   = 3.5f + t * 0.5f;
-        np.n_harmonics  = 80;
-        np.n_strings    = 1;  // single string in this iteration
-        np.detune_cents = 1.f;
+        np.n_strings    = physics::default_n_strings(m);
+        np.detune_cents = physics::default_detune_cents(m);
 
-        float N = 48000.f / np.f0_hz;
+        float N = sample_rate_ / np.f0_hz;
         float beta = np.B * N * N;
         int n_raw = (int)(beta * 0.5f);
         np.n_disp_stages = (n_raw < 3) ? 0 : (std::min)(n_raw, 16);
@@ -65,7 +57,7 @@ void PhysicalModelingPianoCore::populateDefaults(int midi_from, int midi_to) {
     }
 }
 
-// -- JSON loading -------------------------------------------------------------
+// ── JSON loading ─────────────────────────────────────────────────────────
 
 bool PhysicalModelingPianoCore::load(const std::string& params_path, float sr,
                                       Logger& logger, int midi_from, int midi_to) {
@@ -92,7 +84,7 @@ bool PhysicalModelingPianoCore::load(const std::string& params_path, float sr,
 
     loaded_ = true;
     logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
-               "Ready. SR=" + std::to_string((int)sr));
+               "Ready (v1.0 dual-rail). SR=" + std::to_string((int)sr));
     return true;
 }
 
@@ -119,12 +111,7 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.gauge         = s.value("gauge", np.gauge);
         np.T60_fund      = s.value("T60_fund", np.T60_fund);
         np.T60_nyq       = s.value("T60_nyq", np.T60_nyq);
-        np.exc_rolloff   = s.value("exc_rolloff", np.exc_rolloff);
         np.exc_x0        = s.value("exc_x0", np.exc_x0);
-        np.odd_boost     = s.value("odd_boost", np.odd_boost);
-        np.knee_k        = s.value("knee_k", np.knee_k);
-        np.knee_slope    = s.value("knee_slope", np.knee_slope);
-        np.n_harmonics   = s.value("n_harmonics", np.n_harmonics);
         np.n_disp_stages = s.value("n_disp_stages", np.n_disp_stages);
         np.disp_coeff    = s.value("disp_coeff", np.disp_coeff);
         np.n_strings     = s.value("n_strings", np.n_strings);
@@ -142,7 +129,7 @@ bool PhysicalModelingPianoCore::loadBankJson(const std::string& json_str) {
 
 void PhysicalModelingPianoCore::setSampleRate(float sr) { sample_rate_ = sr; }
 
-// -- MIDI ---------------------------------------------------------------------
+// ── MIDI ─────────────────────────────────────────────────────────────────
 
 void PhysicalModelingPianoCore::noteOn(uint8_t midi, uint8_t velocity) {
     if (midi >= PHYS_MAX_VOICES) return;
@@ -150,6 +137,7 @@ void PhysicalModelingPianoCore::noteOn(uint8_t midi, uint8_t velocity) {
     patch_mgr_.noteOn(midi, velocity, note_params_, voice_mgr_,
                       sample_rate_,
                       keyboard_spread_.load(std::memory_order_relaxed),
+                      stereo_spread_.load(std::memory_order_relaxed),
                       bank_mutex_);
 }
 
@@ -166,18 +154,20 @@ void PhysicalModelingPianoCore::allNotesOff() {
     patch_mgr_.allNotesOff(voice_mgr_, sample_rate_);
 }
 
-// -- PatchManager -------------------------------------------------------------
+// ── PatchManager ─────────────────────────────────────────────────────────
 
 void PhysicsPatchManager::noteOn(uint8_t midi, uint8_t velocity,
                                   PhysicsNoteParam note_params[],
                                   PhysicsVoiceManager& vm,
                                   float sr, float keyboard_spread,
+                                  float stereo_spread,
                                   std::mutex& bank_mutex) noexcept {
     std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
     if (!lk.owns_lock()) return;
     if (!note_params[midi].valid) return;
 
-    vm.initVoice(midi, velocity, note_params[midi], sr, keyboard_spread);
+    vm.initVoice(midi, velocity, note_params[midi], sr,
+                 keyboard_spread, stereo_spread);
     last_midi_.store(midi,     std::memory_order_relaxed);
     last_vel_ .store(velocity, std::memory_order_relaxed);
 }
@@ -210,7 +200,7 @@ void PhysicsPatchManager::allNotesOff(PhysicsVoiceManager& vm, float sr) noexcep
     sustain_.store(false, std::memory_order_relaxed);
 }
 
-// -- VoiceManager -------------------------------------------------------------
+// ── VoiceManager ─────────────────────────────────────────────────────────
 
 bool PhysicsVoiceManager::processBlock(float* out_l, float* out_r,
                                         int n_samples) noexcept {
@@ -236,9 +226,12 @@ void PhysicsVoiceManager::releaseAll(float sr) noexcept {
         if (voices_[m].active) releaseVoice(m, sr);
 }
 
+// ── initVoice — Chaigne hammer + dual-rail setup ─────────────────────────
+
 void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
                                      const PhysicsNoteParam& np, float sr,
-                                     float keyboard_spread) noexcept {
+                                     float keyboard_spread,
+                                     float stereo_spread) noexcept {
     PhysicsVoice& v = voices_[midi];
 
     v.active    = true;
@@ -260,95 +253,44 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Panning
-    float angle = (PI / 4.f) + ((float)midi - 64.5f) / 87.f * keyboard_spread * 0.5f;
-    v.pan_l = std::cos(angle);
-    v.pan_r = std::sin(angle);
-
-    // Output scale (velocity-dependent)
+    // Output scale
     v.output_scale = 0.4f * vel_norm;
 
-    // -- Loss filter (Smith/Bank T60 design) ----------------------------------
-    float T60_nyq_eff = np.T60_nyq / (std::max)(np.gauge, 0.1f);
-    v.loss = physics::compute_loss_filter(np.f0_hz, np.T60_fund, T60_nyq_eff, sr);
+    // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
+    float v0 = physics::velocity_to_v0(vel_norm);
+    v.hammer_len = physics::hammer::compute_force(
+        midi, v0, np.exc_x0, sr, v.hammer_v_in);
 
-    // -- Delay line -----------------------------------------------------------
-    float N_total = sr / np.f0_hz;
-    float filter_delay = v.loss.b / (std::max)(1.f - v.loss.b * v.loss.b, 0.01f);
-    // Dispersion cascade delay compensation: each allpass stage adds
-    // group delay ≈ (1-a^2) / (1+a^2+2a*cos(w)) samples at fundamental.
-    float disp_delay = 0.f;
-    if (np.n_disp_stages > 0) {
-        float w = dsp::TAU * np.f0_hz / sr;
-        float a = np.disp_coeff;
-        float per_stage = (1.f - a * a) / (1.f + a * a + 2.f * a * std::cos(w));
-        disp_delay = per_stage * (float)np.n_disp_stages;
-    }
-    float full_N = N_total - filter_delay - disp_delay;
-    int N_int = (std::max)(4, (int)full_N);
-    float frac = full_N - (float)N_int;
-    if (frac < 0.1f) { N_int -= 1; frac += 1.f; }
-    v.ap_frac_a = (1.f - frac) / (1.f + frac);
-    v.ap_frac_state = 0.f;
+    // ── Multi-string setup ──────────────────────────────────────────
+    v.n_strings = np.n_strings;
 
-    // Reset delay line
-    physics::DelayTuning dt = { N_int, v.ap_frac_a };
-    physics::delay_reset(v.delay, dt);
+    // Compute detuned frequencies and panning
+    physics::StringDetuning sd = physics::compute_detuning(
+        np.n_strings, np.detune_cents, np.f0_hz, stereo_spread);
 
+    // Dispersion
+    int   n_disp = np.n_disp_stages;
+    float a_disp = np.disp_coeff;
+    if (n_disp == 0) a_disp = 0.f;
 
+    for (int si = 0; si < sd.count; si++) {
+        // Initialize each dual-rail string
+        physics::dual_rail_init(v.strings[si], sd.f0s[si], sr,
+                                n_disp, a_disp, np.exc_x0,
+                                np.T60_fund, np.T60_nyq, np.gauge);
 
-    // -- Dispersion cascade ---------------------------------------------------
-    v.n_disp     = np.n_disp_stages;
-    v.disp_coeff = np.disp_coeff;
-    for (int i = 0; i < PHYS_MAX_DISP; i++) v.disp_states[i] = 0.f;
+        // Keyboard panning (base angle) + multi-string spread
+        float kb_angle = (PI / 4.f) +
+            ((float)midi - 64.5f) / 87.f * keyboard_spread * 0.5f;
+        float kb_pan_l = std::cos(kb_angle);
+        float kb_pan_r = std::sin(kb_angle);
 
-    // -- Fourier excitation (matching Python make_string_v2) ------------------
-    float exc_x0    = np.exc_x0;
-    float rolloff   = np.exc_rolloff;
-    float odd_b     = np.odd_boost;
-    int   knee_k    = np.knee_k;
-    float knee_sl   = np.knee_slope;
-    float gauge     = np.gauge;
-    int   n_harm    = (std::min)(np.n_harmonics, N_int / 2);
-
-    for (int k = 1; k <= n_harm; k++) {
-        float modal = std::sin((float)k * PI * exc_x0);
-        float ak;
-        if (k <= knee_k) {
-            ak = (rolloff > 0.f) ? modal / std::pow((float)k, rolloff) : modal;
-        } else {
-            float ak_knee = (rolloff > 0.f) ? modal / std::pow((float)knee_k, rolloff) : modal;
-            ak = ak_knee * std::pow((float)knee_k / (float)k, knee_sl);
-        }
-        // Odd boost
-        if (k % 2 != 0) ak *= odd_b;
-        // Gauge effect
-        if (gauge != 1.f) ak *= std::pow(gauge, 1.f - (float)k * 0.05f);
-        // Inharmonicity in excitation
-        float f_k_ratio = (np.B > 0.f) ? (float)k * std::sqrt(1.f + np.B * (float)(k * k))
-                                        : (float)k;
-        // Write into delay
-        for (int i = 0; i < N_int; i++) {
-            v.delay.buf[i] += ak * std::sin(TAU * f_k_ratio * (float)i / (float)N_int);
-        }
+        // Combine keyboard pan with multi-string pan
+        v.str_pan_l[si] = kb_pan_l * sd.pan_l[si] / 0.707f;
+        v.str_pan_r[si] = kb_pan_r * sd.pan_r[si] / 0.707f;
     }
 
-    // Remove DC + normalize
-    float dc = 0.f;
-    for (int i = 0; i < N_int; i++) dc += v.delay.buf[i];
-    dc /= (float)N_int;
-    float peak = 0.f;
-    for (int i = 0; i < N_int; i++) {
-        v.delay.buf[i] -= dc;
-        float a = std::abs(v.delay.buf[i]);
-        if (a > peak) peak = a;
-    }
-    if (peak > 0.f) {
-        float scale = vel_norm * 0.5f / peak;
-        for (int i = 0; i < N_int; i++) v.delay.buf[i] *= scale;
-    }
-
-    // -- Hammer noise ---------------------------------------------------------
+    // ── Hammer noise (percussive attack) ─────────────────────────────
     v.noise_amp   = 0.3f * vel_norm * vel_norm;
     v.noise_env   = 1.f;
     float noise_tau_ms = 12.f - (float)(midi - 21) / 87.f * 8.f;
@@ -360,11 +302,9 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     v.rng.seed((unsigned)(midi * 1000 + velocity));
 }
 
-// -- Voice::process -----------------------------------------------------------
+// ── Voice::process — dual-rail synthesis loop ────────────────────────────
 
 bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
-    int N = delay.len;
-
     for (int i = 0; i < n_samples; i++) {
         // Onset gate
         float gate = 1.f;
@@ -374,52 +314,40 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
             gate = onset_gain;
         }
 
-        // Read oldest sample from delay
-        int read_ptr = (delay.write_ix + 1) % N;
-        float sample = delay.buf[read_ptr];
+        // Hammer input for this sample
+        float h_in = (t_samples < (uint32_t)hammer_len) ? hammer_v_in[t_samples] : 0.f;
 
-        // Fractional delay allpass
-        float y = ap_frac_a * sample + ap_frac_state;
-        ap_frac_state = sample - ap_frac_a * y;
-
-        // Dispersion cascade
-        float x = y;
-        for (int di = 0; di < n_disp; di++) {
-            float dy = disp_coeff * x + disp_states[di];
-            disp_states[di] = x - disp_coeff * dy;
-            x = dy;
+        // Sum all strings through dual-rail waveguide
+        float sum_l = 0.f, sum_r = 0.f;
+        for (int si = 0; si < n_strings; si++) {
+            float sample = physics::dual_rail_tick(strings[si], h_in);
+            sum_l += sample * str_pan_l[si];
+            sum_r += sample * str_pan_r[si];
         }
 
-        // Loss filter
-        float filtered = loss.g * ((1.f - loss.b) * x + loss.b * loss.s);
-        loss.s = filtered;
-
-        // Write back (no sign inversion)
-        delay.buf[delay.write_ix] = filtered;
-        delay.write_ix = (delay.write_ix + 1) % N;
-
-        // Output = bridge sample * scale * gate
-        float out = sample * output_scale * gate;
+        float out_val_l = sum_l * output_scale * gate;
+        float out_val_r = sum_r * output_scale * gate;
 
         // Release
         if (releasing) {
-            out *= rel_gain;
+            out_val_l *= rel_gain;
+            out_val_r *= rel_gain;
             rel_gain += rel_step;
             if (rel_gain <= 0.f) { rel_gain = 0.f; active = false; }
         }
 
-        // Hammer noise
+        // Hammer noise (bandpass-filtered white noise)
         if (noise_env > 1e-5f) {
             float white = noise_amp * noise_env * ndist(rng);
             noise_env *= noise_decay;
             float nL = dsp::biquad_df2_tick(white, noise_bpf, noise_wL);
             float nR = dsp::biquad_df2_tick(white, noise_bpf, noise_wR);
-            out_l[i] += nL * gate;
-            out_r[i] += nR * gate;
+            out_val_l += nL * gate;
+            out_val_r += nR * gate;
         }
 
-        out_l[i] += out * pan_l;
-        out_r[i] += out * pan_r;
+        out_l[i] += out_val_l;
+        out_r[i] += out_val_r;
 
         t_samples++;
         if (!active) break;
@@ -428,14 +356,14 @@ bool PhysicsVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
     return active;
 }
 
-// -- processBlock (RT) --------------------------------------------------------
+// ── processBlock (RT) ────────────────────────────────────────────────────
 
 bool PhysicalModelingPianoCore::processBlock(float* out_l, float* out_r,
                                               int n_samples) noexcept {
     return voice_mgr_.processBlock(out_l, out_r, n_samples);
 }
 
-// -- Parameters ---------------------------------------------------------------
+// ── Parameters ───────────────────────────────────────────────────────────
 
 bool PhysicalModelingPianoCore::setParam(const std::string& key, float value) {
     if (key == "brightness") {
@@ -454,8 +382,8 @@ bool PhysicalModelingPianoCore::setParam(const std::string& key, float value) {
         keyboard_spread_.store((std::max)(0.f, (std::min)(3.14159f, value)), std::memory_order_relaxed);
         return true;
     }
-    if (key == "odd_scale") {
-        odd_scale_.store((std::max)(0.5f, (std::min)(3.f, value)), std::memory_order_relaxed);
+    if (key == "stereo_spread") {
+        stereo_spread_.store((std::max)(0.f, (std::min)(1.f, value)), std::memory_order_relaxed);
         return true;
     }
     if (key == "gauge_scale") {
@@ -470,29 +398,29 @@ bool PhysicalModelingPianoCore::getParam(const std::string& key, float& out) con
     if (key == "stiffness_scale") { out = stiffness_scale_.load(std::memory_order_relaxed); return true; }
     if (key == "sustain_scale")   { out = sustain_scale_.load(std::memory_order_relaxed);   return true; }
     if (key == "keyboard_spread") { out = keyboard_spread_.load(std::memory_order_relaxed); return true; }
-    if (key == "odd_scale")       { out = odd_scale_.load(std::memory_order_relaxed);       return true; }
+    if (key == "stereo_spread")   { out = stereo_spread_.load(std::memory_order_relaxed);   return true; }
     if (key == "gauge_scale")     { out = gauge_scale_.load(std::memory_order_relaxed);     return true; }
     return false;
 }
 
 std::vector<CoreParamDesc> PhysicalModelingPianoCore::describeParams() const {
     return {
-        { "brightness",      "Brightness",      "Timbre",  "",
+        { "brightness",      "Brightness",        "Timbre",  "",
           brightness_.load(),      0.1f, 4.f, false },
-        { "stiffness_scale", "Stiffness",       "Timbre",  "",
+        { "stiffness_scale", "Stiffness",         "Timbre",  "",
           stiffness_scale_.load(), 0.1f, 4.f, false },
-        { "sustain_scale",   "Sustain",         "Timbre",  "",
+        { "sustain_scale",   "Sustain",           "Timbre",  "",
           sustain_scale_.load(),   0.1f, 4.f, false },
-        { "odd_scale",       "Odd Emphasis",    "Timbre",  "",
-          odd_scale_.load(),       0.5f, 3.f, false },
-        { "gauge_scale",     "Gauge Scale",     "String",  "",
+        { "gauge_scale",     "Gauge Scale",       "String",  "",
           gauge_scale_.load(),     0.5f, 4.f, false },
-        { "keyboard_spread", "Keyboard Spread", "Stereo",  "rad",
+        { "keyboard_spread", "Keyboard Spread",   "Stereo",  "rad",
           keyboard_spread_.load(), 0.f,  3.14159f, false },
+        { "stereo_spread",   "Multi-String Spread","Stereo",  "",
+          stereo_spread_.load(),   0.f,  1.f, false },
     };
 }
 
-// -- Visualization ------------------------------------------------------------
+// ── Visualization ────────────────────────────────────────────────────────
 
 CoreVizState PhysicalModelingPianoCore::getVizState() const {
     CoreVizState vs;
@@ -508,10 +436,10 @@ CoreVizState PhysicalModelingPianoCore::getVizState() const {
     if (last_midi >= 0 && last_midi < 128) {
         const PhysicsNoteParam& np = note_params_[last_midi];
         CoreVoiceViz vv;
-        vv.midi   = last_midi;
-        vv.vel    = last_vel;
-        vv.f0_hz  = np.f0_hz;
-        vv.B      = np.B;
+        vv.midi      = last_midi;
+        vv.vel       = last_vel;
+        vv.f0_hz     = np.f0_hz;
+        vv.B         = np.B;
         vv.n_strings = np.n_strings;
         vs.last_note       = std::move(vv);
         vs.last_note_valid = true;
