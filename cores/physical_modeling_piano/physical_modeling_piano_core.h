@@ -53,14 +53,12 @@ struct PhysicsNoteParam {
     float hammer_mass    = 1.0f;        // Mh scale (1.0 = Chaigne default, <1 = lighter)
     float string_mass    = 1.0f;        // Ms scale (1.0 = Chaigne default, affects impedance)
 
-    // Bridge admittance
-    float bridge_freq    = 400.f;       // bridge/soundboard resonance (Hz)
-    float bridge_Q       = 8.f;         // resonance Q factor
-    float bridge_mix     = 0.15f;       // 0=rigid (-1), 1=full resonator
+    // Bridge termination (-1=rigid, like Teng; loss handled by loss filter)
+    float bridge_refl    = -1.f;
 
     // Dispersion
     int   n_disp_stages  = 0;           // allpass cascade count
-    float disp_coeff     = -0.15f;      // allpass coefficient
+    float disp_coeff     = -0.30f;      // allpass coefficient (Teng: -0.30)
 
     // Multi-string
     int   n_strings      = 3;

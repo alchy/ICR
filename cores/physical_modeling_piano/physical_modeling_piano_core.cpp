@@ -49,11 +49,14 @@ void PhysicalModelingPianoCore::populateDefaults(int midi_from, int midi_to) {
         np.n_strings    = physics::default_n_strings(m);
         np.detune_cents = physics::default_detune_cents(m);
 
-        float N = sample_rate_ / np.f0_hz;
-        float beta = np.B * N * N;
-        int n_raw = (int)(beta * 0.5f);
-        np.n_disp_stages = (n_raw < 3) ? 0 : (std::min)(n_raw, 16);
-        np.disp_coeff    = -0.15f;
+        // Teng-style dispersion: ~4 stages per octave below 3 kHz
+        if (np.f0_hz > 3000.f) {
+            np.n_disp_stages = 0;
+        } else {
+            int n = (int)(-std::log2(np.f0_hz / 3000.f) * 4.f);
+            np.n_disp_stages = (std::max)(0, (std::min)(n, 16));
+        }
+        np.disp_coeff    = -0.30f;
     }
 }
 
@@ -121,9 +124,7 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.hammer_mass   = s.value("hammer_mass", np.hammer_mass);
         np.string_mass   = s.value("string_mass", np.string_mass);
         np.output_scale  = s.value("output_scale", np.output_scale);
-        np.bridge_freq   = s.value("bridge_freq", np.bridge_freq);
-        np.bridge_Q      = s.value("bridge_Q", np.bridge_Q);
-        np.bridge_mix    = s.value("bridge_mix", np.bridge_mix);
+        np.bridge_refl   = s.value("bridge_refl", np.bridge_refl);
         count++;
     }
     return count > 0;
@@ -171,9 +172,7 @@ bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
             {"hammer_mass",   np.hammer_mass},
             {"string_mass",   np.string_mass},
             {"output_scale",  np.output_scale},
-            {"bridge_freq",   np.bridge_freq},
-            {"bridge_Q",      np.bridge_Q},
-            {"bridge_mix",    np.bridge_mix}
+            {"bridge_refl",   np.bridge_refl}
         };
     }
     root["notes"] = notes_j;
@@ -207,9 +206,7 @@ bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
     if (key == "hammer_mass")   { np.hammer_mass   = value; return true; }
     if (key == "string_mass")   { np.string_mass   = value; return true; }
     if (key == "output_scale")  { np.output_scale  = value; return true; }
-    if (key == "bridge_freq")   { np.bridge_freq   = value; return true; }
-    if (key == "bridge_Q")      { np.bridge_Q      = value; return true; }
-    if (key == "bridge_mix")    { np.bridge_mix    = value; return true; }
+    if (key == "bridge_refl")   { np.bridge_refl   = value; return true; }
 
     return false;
 }
@@ -340,10 +337,7 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Output scale — compensate for bridge resonator energy addition.
-    // Higher bridge_mix → more energy in loop → reduce output to prevent clipping.
-    float bridge_comp = 1.f / (1.f + np.bridge_mix * 3.f);  // mix=0→1.0, mix=0.3→0.52
-    v.output_scale = np.output_scale * bridge_comp;
+    v.output_scale = np.output_scale;
 
     // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
     float v0 = physics::velocity_to_v0(vel_norm);
@@ -369,7 +363,7 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
         physics::dual_rail_init(v.strings[si], sd.f0s[si], sr,
                                 n_disp, a_disp, np.exc_x0,
                                 np.T60_fund, np.T60_nyq, np.gauge,
-                                np.bridge_freq, np.bridge_Q, np.bridge_mix);
+                                np.bridge_refl);
 
         // Keyboard panning (base angle) + multi-string spread
         float kb_angle = (PI / 4.f) +
