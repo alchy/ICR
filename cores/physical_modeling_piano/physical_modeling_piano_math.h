@@ -88,51 +88,6 @@ inline float allpass_delay_dc(float a) {
 
 // ── Dual-rail string ─────────────────────────────────────────────────────
 
-// ── Bridge reflection filter ─────────────────────────────────────────
-//
-// Real piano bridge: frequency-dependent reflection coefficient.
-// Low frequencies reflect almost fully (rigid, -1). High frequencies
-// lose more energy to the soundboard (bridge is more compliant at HF).
-//
-// This is modeled as a one-pole low-pass on the reflected signal:
-//   H_bridge(z) = -1 × [ (1-b_mix) + b_mix × LP(z) ]
-//
-// The effect: HF partials decay faster from the bridge side (additional
-// damping beyond the nut-side loss filter), while LF sustains normally.
-// This creates the asymmetric spectral decay characteristic of piano
-// (bright attack, warm sustain) that distinguishes it from guitar/mandolin.
-
-struct BridgeFilter {
-    float state = 0.f;    // one-pole LPF state
-    float coeff = 0.5f;   // pole coefficient (0=bypass, →1=more LF emphasis)
-    float mix   = 0.15f;  // 0=rigid (-1), 1=full bridge LPF
-};
-
-/// Initialize bridge filter.
-///   bridge_freq: cutoff frequency (Hz) — below this, reflection ≈ -1
-///   bridge_mix:  how much HF is lost at bridge (0=rigid, 0.3=strong)
-inline void bridge_filter_init(BridgeFilter& bf, float bridge_freq,
-                               float /*bridge_Q*/, float bridge_mix,
-                               float sr) {
-    // One-pole coefficient from cutoff frequency
-    float w = dsp::TAU * bridge_freq / sr;
-    bf.coeff = std::exp(-w);
-    bf.mix   = bridge_mix;
-    bf.state = 0.f;
-}
-
-/// Apply bridge reflection: frequency-dependent, energy-conserving.
-///   Returns reflected signal (always ≤ input magnitude).
-inline float bridge_filter_tick(float x, BridgeFilter& bf) {
-    // Low-pass filtered version of input
-    bf.state = bf.coeff * bf.state + (1.f - bf.coeff) * x;
-
-    // Mix: rigid reflection + bridge-filtered reflection
-    // At DC (x ≈ state): output ≈ -x (rigid)
-    // At HF (state ≈ 0): output ≈ -(1-mix)*x (attenuated)
-    return -((1.f - bf.mix) * x + bf.mix * bf.state);
-}
-
 // ── Dual-rail string ─────────────────────────────────────────────────────
 
 /// One dual-rail waveguide string with circular-buffer shift.
@@ -157,13 +112,13 @@ struct DualRailString {
     int   n_disp     = 0;
     float a_disp     = -0.15f;
 
+    // Bridge reflection scalar (-1=rigid, -0.98=lossy asymmetric)
+    float bridge_refl = -1.f;
+
     // Per-string filter states
     float lp_state   = 0.f;
     AllpassState ap_tune;
     AllpassState disp_st[MAX_DISP_STAGES];
-
-    // Bridge admittance filter
-    BridgeFilter bridge;
 
     // -- Circular buffer accessors --
     inline float  upper_at(int i) const { return upper[(upper_base + i) % M]; }
@@ -182,8 +137,7 @@ struct DualRailString {
 inline void dual_rail_init(DualRailString& s, float f0, float sr,
                            int n_disp, float a_disp, float exc_x0,
                            float T60_fund, float T60_nyq, float gauge,
-                           float bridge_freq = 400.f, float bridge_Q = 8.f,
-                           float bridge_mix = 0.15f) {
+                           float bridge_refl = -0.98f) {
     float N_period = sr / f0;
 
     // Loss filter
@@ -219,8 +173,7 @@ inline void dual_rail_init(DualRailString& s, float f0, float sr,
     s.ap_tune.s = 0.f;
     for (int i = 0; i < MAX_DISP_STAGES; i++) s.disp_st[i].s = 0.f;
 
-    // Bridge admittance filter
-    bridge_filter_init(s.bridge, bridge_freq, bridge_Q, bridge_mix, sr);
+    s.bridge_refl = bridge_refl;
 }
 
 /// Process one sample through the dual-rail waveguide.
@@ -253,7 +206,7 @@ inline float dual_rail_tick(DualRailString& s, float hammer_in) {
 
     // 5. Shift lower ← (new sample at position M-1)
     s.shift_lower();
-    s.lower_at(s.M - 1) = -x;   // rigid bridge reflection
+    s.lower_at(s.M - 1) = s.bridge_refl * x;  // bridge reflection (asymmetric)
 
     // 6. Inject hammer force at n0
     s.upper_at(s.n0) += hammer_in;
