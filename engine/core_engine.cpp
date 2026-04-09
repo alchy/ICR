@@ -733,18 +733,19 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
 
 // ── Offline batch render ──────────────────────────────────────────────────────
 
-// Minimal mono int16 WAV writer — no external dependencies.
-static bool _writeWavMono16(const std::string& path,
-                             const std::vector<float>& samples,
-                             int sr)
+// Stereo int16 WAV writer — no external dependencies.
+static bool _writeWavStereo16(const std::string& path,
+                               const std::vector<float>& left,
+                               const std::vector<float>& right,
+                               int sr)
 {
-    uint32_t n         = (uint32_t)samples.size();
-    uint32_t data_size = n * 2u;
+    uint32_t n         = (uint32_t)left.size();
+    uint32_t data_size = n * 4u;          // 2 channels × 2 bytes
     uint32_t riff_size = 36u + data_size;
-    uint32_t byte_rate = (uint32_t)sr * 2u;
-    uint16_t block_al  = 2u;
+    uint32_t byte_rate = (uint32_t)sr * 4u;
+    uint16_t block_al  = 4u;
     uint16_t bits      = 16u;
-    uint16_t channels  = 1u;
+    uint16_t channels  = 2u;
     uint16_t fmt_type  = 1u;   // PCM
     uint32_t fmt_size  = 16u;
     uint32_t sr_u      = (uint32_t)sr;
@@ -752,11 +753,9 @@ static bool _writeWavMono16(const std::string& path,
     std::FILE* f = std::fopen(path.c_str(), "wb");
     if (!f) return false;
 
-    // RIFF / WAVE header
     std::fwrite("RIFF",    1, 4, f);
     std::fwrite(&riff_size, 4, 1, f);
     std::fwrite("WAVE",    1, 4, f);
-    // fmt chunk
     std::fwrite("fmt ",    1, 4, f);
     std::fwrite(&fmt_size,  4, 1, f);
     std::fwrite(&fmt_type,  2, 1, f);
@@ -765,14 +764,18 @@ static bool _writeWavMono16(const std::string& path,
     std::fwrite(&byte_rate, 4, 1, f);
     std::fwrite(&block_al,  2, 1, f);
     std::fwrite(&bits,      2, 1, f);
-    // data chunk
     std::fwrite("data",    1, 4, f);
     std::fwrite(&data_size, 4, 1, f);
-    // PCM samples — clamp and convert float → int16
-    for (float s : samples) {
-        float clamped = s > 1.f ? 1.f : (s < -1.f ? -1.f : s);
-        int16_t v = static_cast<int16_t>(clamped * 32767.f);
-        std::fwrite(&v, 2, 1, f);
+
+    for (uint32_t i = 0; i < n; i++) {
+        auto clamp16 = [](float s) -> int16_t {
+            float c = s > 1.f ? 1.f : (s < -1.f ? -1.f : s);
+            return static_cast<int16_t>(c * 32767.f);
+        };
+        int16_t vl = clamp16(left[i]);
+        int16_t vr = clamp16(right[i]);
+        std::fwrite(&vl, 2, 1, f);
+        std::fwrite(&vr, 2, 1, f);
     }
     std::fclose(f);
     return true;
@@ -855,8 +858,9 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
         int tail_samples    = static_cast<int>(TAIL_S * (float)sr);
         int total_samples   = sustain_samples + tail_samples;
 
-        std::vector<float> mono;
-        mono.reserve((size_t)total_samples);
+        std::vector<float> out_left, out_right;
+        out_left.reserve((size_t)total_samples);
+        out_right.reserve((size_t)total_samples);
 
         active_core_->allNotesOff();
         active_core_->noteOn(midi_u, vel_u);
@@ -867,8 +871,10 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
             std::fill(buf_l.begin(), buf_l.begin() + n, 0.f);
             std::fill(buf_r.begin(), buf_r.begin() + n, 0.f);
             active_core_->processBlock(buf_l.data(), buf_r.data(), n);
-            for (int j = 0; j < n; j++)
-                mono.push_back((buf_l[j] + buf_r[j]) * 0.5f);
+            for (int j = 0; j < n; j++) {
+                out_left.push_back(buf_l[j]);
+                out_right.push_back(buf_r[j]);
+            }
             s += n;
         }
 
@@ -880,17 +886,20 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
             std::fill(buf_l.begin(), buf_l.begin() + n, 0.f);
             std::fill(buf_r.begin(), buf_r.begin() + n, 0.f);
             active_core_->processBlock(buf_l.data(), buf_r.data(), n);
-            for (int j = 0; j < n; j++)
-                mono.push_back((buf_l[j] + buf_r[j]) * 0.5f);
+            for (int j = 0; j < n; j++) {
+                out_left.push_back(buf_l[j]);
+                out_right.push_back(buf_r[j]);
+            }
             s += n;
         }
 
-        // Build output filename: m060_vel3.wav
+        // Build output filename: m060-v03-f48.wav
+        int sr_k = sr / 1000;
         char fname[32];
-        std::snprintf(fname, sizeof(fname), "m%03d_vel%d.wav", midi, vel_idx);
+        std::snprintf(fname, sizeof(fname), "m%03d-v%02d-f%d.wav", midi, vel_idx, sr_k);
         std::string out_path = out_dir + "/" + fname;
 
-        if (_writeWavMono16(out_path, mono, sr)) {
+        if (_writeWavStereo16(out_path, out_left, out_right, sr)) {
             rendered++;
             logger_.log("ICR", LogSeverity::Info,
                         "  Rendered " + std::string(fname)

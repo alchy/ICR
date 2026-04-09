@@ -253,8 +253,11 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Output scale
-    v.output_scale = 0.4f * vel_norm;
+    // Output scale — must guarantee no clipping on a single note.
+    // Chaigne hammer produces peak amplitude ~11 * vel_norm at full velocity.
+    // Target: peak ≈ -3 dB (0.7) at vel_idx=7.
+    // Scale = 0.065 gives: 11 * 0.953 * 0.065 ≈ 0.68 → -3.3 dB headroom.
+    v.output_scale = 0.065f;
 
     // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
     float v0 = physics::velocity_to_v0(vel_norm);
