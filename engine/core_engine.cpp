@@ -227,6 +227,7 @@ bool CoreEngine::initialize(const std::string& core_name,
 
     // Auto-load soundboard IR from config (if not already loaded via --ir)
     loadIrFromConfig(core_name);
+    applyDspDefaults(core_name);
 
     logger_.log("CoreEngine", LogSeverity::Info,
         std::string("Ready. Core=") + active_core_->coreName() +
@@ -245,6 +246,43 @@ void CoreEngine::loadIrFromConfig(const std::string& core_name) {
         logger_.log("CoreEngine", LogSeverity::Info,
                     "Auto-loaded IR from config: " + ir);
     }
+}
+
+void CoreEngine::applyDspDefaults(const std::string& core_name) {
+    // Apply per-core DSP defaults from icr-config.json "dsp_defaults" sub-object.
+    // Any key not present keeps its current value.
+    auto get = [&](const std::string& key, int fallback) -> int {
+        std::string v = coreConfigValue(core_name, key);
+        if (v.empty()) return fallback;
+        try { return std::stoi(v); } catch (...) { return fallback; }
+    };
+
+    int gain = get("master_gain", -1);
+    if (gain >= 0) setMasterGain((uint8_t)(std::min)(127, gain), logger_);
+
+    int pan = get("master_pan", -1);
+    if (pan >= 0) setMasterPan((uint8_t)(std::min)(127, pan));
+
+    int lfo_spd = get("lfo_speed", -1);
+    if (lfo_spd >= 0) setPanSpeed((uint8_t)(std::min)(127, lfo_spd));
+
+    int lfo_dep = get("lfo_depth", -1);
+    if (lfo_dep >= 0) setPanDepth((uint8_t)(std::min)(127, lfo_dep));
+
+    int lim_thr = get("limiter_threshold", -1);
+    if (lim_thr >= 0) setLimiterThreshold((uint8_t)(std::min)(127, lim_thr));
+
+    int lim_rel = get("limiter_release", -1);
+    if (lim_rel >= 0) setLimiterRelease((uint8_t)(std::min)(127, lim_rel));
+
+    int lim_ena = get("limiter_enabled", -1);
+    if (lim_ena >= 0) dsp_.setLimiterEnabled((uint8_t)(lim_ena >= 64 ? 127 : 0));
+
+    int bbe_def = get("bbe_definition", -1);
+    if (bbe_def >= 0) setBBEDefinition((uint8_t)(std::min)(127, bbe_def));
+
+    int bbe_bas = get("bbe_bass_boost", -1);
+    if (bbe_bas >= 0) setBBEBassBoost((uint8_t)(std::min)(127, bbe_bas));
 }
 
 // ── switchCore ────────────────────────────────────────────────────────────────
@@ -285,8 +323,9 @@ bool CoreEngine::switchCore(const std::string& core_name,
     active_core_name_ = core_name;
     active_core_      = cores_[core_name].get();
 
-    // Load IR for the new active core (if configured and not already loaded)
+    // Load IR and DSP defaults for the new active core
     loadIrFromConfig(core_name);
+    applyDspDefaults(core_name);
 
     logger_.log("CoreEngine", LogSeverity::Info,
         std::string("Active core: ") + active_core_->coreName()

@@ -157,6 +157,7 @@ private:
     void pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcept;
 
     void loadIrFromConfig(const std::string& core_name);
+    void applyDspDefaults(const std::string& core_name);
 
     static void audioCallback(ma_device* device, void* output,
                                const void* input, uint32_t frame_count);

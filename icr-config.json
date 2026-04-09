@@ -8,16 +8,43 @@
     "AdditiveSynthesisPianoCore": {
       "params_path": "",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive",
-      "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive/pl-grand-04071611-soundboard.wav"
+      "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
+      "master_gain": "100",
+      "master_pan": "64",
+      "lfo_speed": "0",
+      "lfo_depth": "0",
+      "limiter_threshold": "100",
+      "limiter_release": "50",
+      "limiter_enabled": "0",
+      "bbe_definition": "0",
+      "bbe_bass_boost": "0"
     },
     "PhysicalModelingPianoCore": {
       "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/teng-v2-default.json",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical",
-      "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive/pl-grand-04071611-soundboard.wav"
+      "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
+      "master_gain": "100",
+      "master_pan": "64",
+      "lfo_speed": "0",
+      "lfo_depth": "0",
+      "limiter_threshold": "110",
+      "limiter_release": "50",
+      "limiter_enabled": "64",
+      "bbe_definition": "30",
+      "bbe_bass_boost": "20"
     },
     "SineCore": {
       "params_path": "",
-      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-sine"
+      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-sine",
+      "master_gain": "100",
+      "master_pan": "64",
+      "lfo_speed": "0",
+      "lfo_depth": "0",
+      "limiter_threshold": "127",
+      "limiter_release": "50",
+      "limiter_enabled": "0",
+      "bbe_definition": "0",
+      "bbe_bass_boost": "0"
     }
   }
 }

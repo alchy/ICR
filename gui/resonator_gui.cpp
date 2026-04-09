@@ -833,6 +833,22 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                             const std::string& name = gs.core_names[i];
                             if (engine.switchCore(name, "")) {
                                 gs.active_core_name = name;
+                                // Sync GUI sliders to engine DSP state
+                                auto cv = [&](const std::string& k, int fb) -> int {
+                                    std::string v = engine.coreConfigValue(name, k);
+                                    if (v.empty()) return fb;
+                                    try { return std::stoi(v); } catch(...) { return fb; }
+                                };
+                                gs.master_gain      = (uint8_t)cv("master_gain", gs.master_gain);
+                                gs.pan              = (uint8_t)cv("master_pan",  gs.pan);
+                                gs.lfo_speed        = (uint8_t)cv("lfo_speed",   gs.lfo_speed);
+                                gs.lfo_depth        = (uint8_t)cv("lfo_depth",   gs.lfo_depth);
+                                gs.limiter_thr      = (uint8_t)cv("limiter_threshold", gs.limiter_thr);
+                                gs.limiter_rel      = (uint8_t)cv("limiter_release",   gs.limiter_rel);
+                                gs.limiter_enabled  = cv("limiter_enabled", 0) >= 64;
+                                gs.bbe_def          = (uint8_t)cv("bbe_definition",  gs.bbe_def);
+                                gs.bbe_bass         = (uint8_t)cv("bbe_bass_boost",  gs.bbe_bass);
+                                gs.bbe_enabled      = (gs.bbe_def > 0 || gs.bbe_bass > 0);
                             } else {
                                 // revert selection on failure
                                 for (int j = 0; j < (int)gs.core_names.size(); j++) {
