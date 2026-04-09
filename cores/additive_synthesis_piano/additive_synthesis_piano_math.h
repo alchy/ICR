@@ -48,7 +48,8 @@ inline float partial_frequency(int k, float f0_hz, float B) {
 
 /// Spectral weight for partial k at velocity vel_norm (0..1).
 /// Returns 1.0 for forte, < 1.0 for piano (higher k = more reduction).
-inline float vel_spectral_weight(int k, float vel_norm, float slope = 0.15f) {
+/// slope=0.06: gentle tilt (k=10 → 65% at ppp, 87% at mp).
+inline float vel_spectral_weight(int k, float vel_norm, float slope = 0.06f) {
     if (k <= 1) return 1.f;
     float tilt = 1.f - 1.f / (1.f + slope * (float)(k - 1));
     return 1.f - tilt * (1.f - vel_norm);
@@ -190,6 +191,21 @@ inline void eq_cascade_stereo(float& samp_L, float& samp_R,
         wetL = dsp::biquad_df2_tick(wetL, eq_coeffs[bi], eq_wL[bi]);
         wetR = dsp::biquad_df2_tick(wetR, eq_coeffs[bi], eq_wR[bi]);
     }
+
+    // Gain floor: prevent EQ from cutting more than ~3 dB.
+    // If wetL/R would be below 0.7× dry signal, clamp it.
+    // This stops aggressive EQ (from deficient source recordings)
+    // from muffling the sound when harmonic content has been corrected.
+    static constexpr float GAIN_FLOOR = 0.7f;   // -3 dB
+    if (std::abs(samp_L) > 1e-12f) {
+        float ratio_L = wetL / samp_L;
+        if (ratio_L < GAIN_FLOOR) wetL = samp_L * GAIN_FLOOR;
+    }
+    if (std::abs(samp_R) > 1e-12f) {
+        float ratio_R = wetR / samp_R;
+        if (ratio_R < GAIN_FLOOR) wetR = samp_R * GAIN_FLOOR;
+    }
+
     float dry = 1.f - eq_strength;
     samp_L = samp_L * dry + wetL * eq_strength;
     samp_R = samp_R * dry + wetR * eq_strength;
@@ -306,6 +322,38 @@ inline float rise_tau_from_midi(int midi) {
 inline float rise_envelope_tick(float& rise_env, float rise_coeff) {
     rise_env = 1.f - (1.f - rise_env) * rise_coeff;
     return rise_env;
+}
+
+// ── Physics-based hammer noise parameters ───────────────────────────────────
+//
+// Real piano hammer noise centroid and attack duration depend on register
+// and velocity:
+//   - Bass: heavy hammer → lower centroid (~2 kHz), longer contact (~5 ms)
+//   - Treble: light hard hammer → high centroid (~6 kHz), short contact (~1 ms)
+//   - Forte: harder hit → higher centroid, shorter attack
+//   - Piano: softer hit → lower centroid, longer attack
+//
+// These functions provide physics-based floors/overrides when the
+// extracted bank values are unreliable (e.g. contaminated by harmonics).
+
+/// Physics-based noise centroid (Hz) from MIDI note and velocity.
+///   Bass (21): ~2000 Hz → Treble (108): ~6000 Hz
+///   Forte multiplier: centroid × (1 + 0.3 × vel_norm)
+inline float hammer_noise_centroid(int midi, float vel_norm = 0.5f) {
+    float t = (float)(midi - 21) / 87.f;
+    t = (std::max)(0.f, (std::min)(1.f, t));
+    float base = 2000.f + t * 4000.f;   // 2000 → 6000 Hz
+    return base * (1.f + 0.3f * vel_norm);
+}
+
+/// Physics-based attack decay time (seconds) from MIDI note and velocity.
+///   Bass: ~5ms → Treble: ~1ms.  Forte: 30% shorter than piano.
+inline float hammer_attack_tau(int midi, float vel_norm = 0.5f) {
+    float t = (float)(midi - 21) / 87.f;
+    t = (std::max)(0.f, (std::min)(1.f, t));
+    float base_ms = 5.f - t * 4.f;            // 5ms → 1ms
+    float vel_scale = 1.f - 0.3f * vel_norm;   // forte = 30% shorter
+    return base_ms * vel_scale * 0.001f;
 }
 
 } // namespace piano

@@ -232,6 +232,38 @@ void PianoPatchManager::noteOn(
                                   note_params[midi][hi_valid], frac);
     }
 
+    // Use forte layer (vel=7) as reference for both rms_gain AND
+    // spectral shape.  Bank velocity layers have inconsistent A0 ratios
+    // (extracted from different recordings with varying SNR).
+    // Forte has best SNR → most reliable spectral content.
+    // vel_gain curve handles dynamics; layer interpolation is only for
+    // the continuous A0(k1) scaling.
+    int ref_vel = -1;
+    for (int v = 7; v >= 0; v--) {
+        if (note_params[midi][v].valid) { ref_vel = v; break; }
+    }
+    if (ref_vel >= 0) {
+        const PianoNoteParam& ref = note_params[midi][ref_vel];
+        np.rms_gain = ref.rms_gain;
+
+        // Normalize spectral shape: preserve np.A0(k1) magnitude but
+        // use forte's A0 ratios (k>1 relative to k=1).
+        if (np.K > 1 && ref.K > 1 && np.partials[0].A0 > 1e-12f
+                                   && ref.partials[0].A0 > 1e-12f) {
+            float np_k1  = np.partials[0].A0;
+            float ref_k1 = ref.partials[0].A0;
+            int minK = (std::min)(np.K, ref.K);
+            for (int ki = 1; ki < minK; ki++) {
+                // ratio_ref = ref.A0(k) / ref.A0(k=1)
+                float ref_ratio = ref.partials[ki].A0 / ref_k1;
+                float target_a0 = np_k1 * ref_ratio;
+                // Only boost — never cut below current value
+                if (target_a0 > np.partials[ki].A0)
+                    np.partials[ki].A0 = target_a0;
+            }
+        }
+    }
+
     vm.initVoice(midi, vel_idx, np, beat_scale, noise_level, rng_seed,
                  pan_spread, stereo_decorr, keyboard_spread,
                  sample_rate, eq_strength, vel_f / 7.f);
@@ -368,11 +400,30 @@ void PianoVoiceManager::initVoice(int midi, int vel_idx,
     v.vel_idx    = vel_idx;
     v.t_samples  = 0;
 
-    // Noise — biquad bandpass at centroid_hz, Q=1.5 for natural hammer shape
-    v.A_noise_sc  = np.A_noise * np.rms_gain * noise_level;
+    // Velocity dynamics curve — bank rms_gain normalizes layers to
+    // similar loudness (for spectral accuracy), so we re-introduce
+    // piano dynamics here.  pow(vel, 1.5) gives ~23 dB range.
+    float vel_clamped = (std::min)(vel_norm, 1.f);
+    float vel_gain    = vel_clamped * std::sqrt(vel_clamped);  // = pow(v, 1.5)
+
+    // Noise — physics-based centroid and attack tau override.
+    // Bank values are often contaminated by harmonic leakage (centroid
+    // too low → soft thud instead of metallic hit).  Physics floor
+    // ensures minimum brightness.
+    float phys_centroid = piano::hammer_noise_centroid(midi);
+    float phys_tau      = piano::hammer_attack_tau(midi);
+    float use_centroid  = (std::max)(np.noise_centroid_hz, phys_centroid);
+    float use_tau       = (std::min)(np.attack_tau, phys_tau);
+
+    // Scale noise amplitude down when centroid is raised significantly —
+    // higher-frequency noise is perceptually brighter and cuts through more.
+    float centroid_ratio = np.noise_centroid_hz / (std::max)(use_centroid, 1.f);
+    float noise_scale = std::sqrt(centroid_ratio);   // -3 dB per 2× centroid rise
+
+    v.A_noise_sc  = np.A_noise * np.rms_gain * noise_level * noise_scale * vel_gain;
     v.noise_env   = 1.f;
-    v.noise_decay = dsp::decay_coeff(np.attack_tau, sample_rate);
-    v.noise_bpf   = dsp::rbj_bandpass(np.noise_centroid_hz, 1.5f, sample_rate);
+    v.noise_decay = dsp::decay_coeff(use_tau, sample_rate);
+    v.noise_bpf   = dsp::rbj_bandpass(use_centroid, 1.5f, sample_rate);
     v.noise_bpf_L = {};
     v.noise_bpf_R = {};
     v.rng.seed((uint32_t)(rng_seed + midi * 256 + vel_idx));
@@ -412,8 +463,7 @@ void PianoVoiceManager::initVoice(int midi, int vel_idx,
         ps.env_slow   = 1.f;
         ps.decay_fast = dsp::decay_coeff(pp.tau1, sample_rate);
         ps.decay_slow = dsp::decay_coeff(pp.tau2, sample_rate);
-        ps.A0_scaled  = pp.A0 * np.rms_gain
-                      * piano::vel_spectral_weight(pp.k, vel_norm);
+        ps.A0_scaled  = pp.A0 * np.rms_gain * vel_gain;
         ps.a1         = pp.a1;
         ps.f_hz       = pp.f_hz;
         ps.beat_hz_h  = pp.beat_hz * beat_scale * 0.5f;

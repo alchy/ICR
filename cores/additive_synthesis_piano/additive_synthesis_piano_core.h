@@ -315,7 +315,7 @@ private:
     std::atomic<float> pan_spread_      {0.55f};
     std::atomic<float> stereo_decorr_  {1.0f};
     std::atomic<float> keyboard_spread_{0.60f};
-    std::atomic<float> eq_strength_    {1.0f};
+    std::atomic<float> eq_strength_    {0.5f};
 
     // Protects note_params_ during full bank reload.
     mutable std::mutex bank_mutex_;
