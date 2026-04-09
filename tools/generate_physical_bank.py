@@ -64,23 +64,8 @@ def generate_note_params(midi):
 
     # --- Excitation parameters ---
 
-    # Rolloff: nearly flat (0.1) for bright metallic character
-    exc_rolloff = 0.1
-
-    # Odd harmonic boost: gives metallic/bell character
-    odd_boost = lerp(2.0, 1.5, t)  # stronger in bass
-
-    # Knee: harmonics are flat below knee, steep drop above
-    knee_k = int(lerp(12, 8, t))
-
-    # Knee slope: steeper = cleaner waveform
-    knee_slope = lerp(3.5, 4.0, t)
-
     # Strike position: 1/7 of string (slightly off 1/8 for richer spectrum)
     exc_x0 = 1.0 / 7.0
-
-    # Number of harmonics in excitation
-    n_harmonics = 80
 
     # --- Multi-string ---
 
@@ -94,15 +79,14 @@ def generate_note_params(midi):
     # Detuning: bass=2 cents, treble=0.3 cents
     detune_cents = lerp(2.5, 0.3, t)
 
-    # --- Dispersion ---
+    # --- Dispersion (Teng-style) ---
 
-    # Number of allpass stages: proportional to B * N^2
-    N_total = 48000.0 / f0
-    beta = B * N_total * N_total
-    n_raw = int(beta * 0.5)
-    # Minimum 3 stages or 0 — single/dual allpass creates buzz artifacts
-    n_disp_stages = 0 if n_raw < 3 else min(n_raw, 16)
-    disp_coeff = -0.15
+    # ~4 stages per octave below 3 kHz, capped at 16
+    if f0 > 3000.0:
+        n_disp_stages = 0
+    else:
+        n_disp_stages = max(0, min(int(-math.log2(f0 / 3000.0) * 4.0), 16))
+    disp_coeff = -0.30
 
     return {
         "midi": midi,
@@ -111,16 +95,17 @@ def generate_note_params(midi):
         "gauge": round(gauge, 2),
         "T60_fund": round(T60_fund, 2),
         "T60_nyq": round(T60_nyq, 3),
-        "exc_rolloff": round(exc_rolloff, 2),
-        "odd_boost": round(odd_boost, 2),
-        "knee_k": knee_k,
-        "knee_slope": round(knee_slope, 1),
         "exc_x0": round(exc_x0, 4),
-        "n_harmonics": n_harmonics,
         "n_strings": n_strings,
         "detune_cents": round(detune_cents, 2),
         "n_disp_stages": n_disp_stages,
         "disp_coeff": disp_coeff,
+        "K_hardening": 1.5,
+        "p_hardening": 0.3,
+        "hammer_mass": 1.0,
+        "string_mass": 1.0,
+        "output_scale": 0.045,
+        "bridge_refl": -1.0,
     }
 
 
@@ -133,7 +118,7 @@ def generate_bank(midi_from=21, midi_to=108):
             "sr": 48000,
             "model": "PhysicalModelingPianoCore",
             "created": datetime.now().isoformat(timespec="seconds"),
-            "description": "Default physical piano bank from listening test optimization (R1-R8)",
+            "description": "Teng-audit-2 corrected: bridge_refl=-1, disp_coeff=-0.30, no even-harmonic inject",
         },
         "notes": {}
     }
@@ -170,9 +155,9 @@ if __name__ == "__main__":
     print(f"Generated {n} notes -> {out_path} ({size_kb:.1f} KB)")
 
     # Print sample params for key notes
-    for midi in [36, 48, 60, 72, 84]:
+    for midi in [36, 48, 60, 72, 84, 96]:
         p = bank["notes"][f"m{midi:03d}"]
         print(f"  MIDI {midi}: gauge={p['gauge']:.1f} B={p['B']:.1e} "
               f"T60f={p['T60_fund']:.1f}s T60n={p['T60_nyq']:.3f}s "
-              f"odd={p['odd_boost']:.1f} knee={p['knee_k']}/s{p['knee_slope']:.1f} "
-              f"disp={p['n_disp_stages']} strings={p['n_strings']}")
+              f"disp={p['n_disp_stages']}×{p['disp_coeff']:.2f} "
+              f"bridge={p['bridge_refl']:.1f} strings={p['n_strings']}")

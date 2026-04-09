@@ -49,11 +49,14 @@ void PhysicalModelingPianoCore::populateDefaults(int midi_from, int midi_to) {
         np.n_strings    = physics::default_n_strings(m);
         np.detune_cents = physics::default_detune_cents(m);
 
-        float N = sample_rate_ / np.f0_hz;
-        float beta = np.B * N * N;
-        int n_raw = (int)(beta * 0.5f);
-        np.n_disp_stages = (n_raw < 3) ? 0 : (std::min)(n_raw, 16);
-        np.disp_coeff    = -0.15f;
+        // Teng-style dispersion: ~4 stages per octave below 3 kHz
+        if (np.f0_hz > 3000.f) {
+            np.n_disp_stages = 0;
+        } else {
+            int n = (int)(-std::log2(np.f0_hz / 3000.f) * 4.f);
+            np.n_disp_stages = (std::max)(0, (std::min)(n, 16));
+        }
+        np.disp_coeff    = -0.30f;
     }
 }
 

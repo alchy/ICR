@@ -136,13 +136,13 @@ struct DualRailString {
 ///   bridge_freq/Q/mix: bridge admittance filter params (0 mix = rigid, old behavior)
 inline void dual_rail_init(DualRailString& s, float f0, float sr,
                            int n_disp, float a_disp, float exc_x0,
-                           float T60_fund, float T60_nyq, float gauge,
-                           float bridge_refl = -0.98f) {
+                           float T60_fund, float T60_nyq, float /*gauge*/,
+                           float bridge_refl = -1.f) {
     float N_period = sr / f0;
 
-    // Loss filter
-    float T60_nyq_eff = T60_nyq / std::max(gauge, 0.1f);
-    LossFilter lf = compute_loss_filter(f0, T60_fund, T60_nyq_eff, sr);
+    // Loss filter (T60 values from bank used directly — gauge no
+    // longer modifies decay; Chaigne anchors have correct physics)
+    LossFilter lf = compute_loss_filter(f0, T60_fund, T60_nyq, sr);
     s.g_dc = lf.g;
     s.pole = lf.b;
     s.lp_state = 0.f;
@@ -289,9 +289,14 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
                          float* v_in,
                          float K_hardening = 1.5f,
                          float p_hardening = 0.3f,
-                         float gauge = 1.0f,
+                         float /*gauge*/ = 1.0f,
                          float hammer_mass_scale = 1.0f,
                          float string_mass_scale = 1.0f) {
+    // Teng §4.2: "the force signal for the C4 string is used as input
+    // to be fed into the digital waveguide model" for notes where the
+    // FD grid is unstable.  We always use the interpolated anchor
+    // params (physical Chaigne masses) — gauge is NOT applied here.
+
     AnchorParams ap = interp_params(midi);
 
     // Velocity-dependent felt hardness
@@ -300,11 +305,9 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     ap.K_stiff *= (1.f + K_hardening * vel_norm);
     ap.p_exp   += p_hardening * vel_norm;
 
-    // Scale string and hammer mass from bank parameters.
-    // gauge: thicker string = more mass = higher impedance
-    // string_mass: direct scale of Ms (independent of gauge)
-    // hammer_mass: lighter hammer = less momentum = shorter contact
-    ap.Ms_g *= gauge * string_mass_scale;
+    // Only user overrides — gauge removed (Chaigne anchors have
+    // correct physical mass; gauge was double-counting)
+    ap.Ms_g *= string_mass_scale;
     ap.Mh_g *= hammer_mass_scale;
 
     float Ms = ap.Ms_g * 0.001f;       // g → kg
@@ -319,18 +322,45 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     static constexpr float b3 = 6.25e-9f;
     static constexpr float epsilon = 3.82e-5f;
 
-    float rho_L = Ms / L;              // linear density
+    float rho_L = Ms / L;
     float R0 = std::sqrt(T * rho_L);   // wave impedance
     float c  = std::sqrt(T / rho_L);   // wave speed
 
-    // Spatial grid: find largest stable N for stiff string
-    // Courant: r ≤ 1/sqrt(1 + 4*epsilon*N²)
-    int N = 15;
+    // ── Courant stability check ─────────────────────────────────
+    // For high notes (short string, high wave speed), no FD grid
+    // satisfies the Courant condition.  Fall back to C4 params
+    // (always stable) — same approach as Teng §4.2.
+    int N = 0;
     for (int N_try = 120; N_try >= 15; N_try--) {
         float r_try = c * (float)N_try / (sr * L);
         float r_max = 1.f / std::sqrt(1.f + 4.f * epsilon * (float)(N_try * N_try));
         if (r_try <= 0.9f * r_max) { N = N_try; break; }
     }
+
+    if (N == 0) {
+        // FD unstable for this note — use C4 physical params for
+        // the simulation, keeping the user's velocity & hardening.
+        AnchorParams c4 = ANCHOR_C4;
+        c4.Ms_g *= string_mass_scale;
+        c4.Mh_g *= hammer_mass_scale;
+        Ms = c4.Ms_g * 0.001f;
+        L  = c4.L_m;
+        Mh = c4.Mh_g * 0.001f;
+        T  = c4.T_N;
+        // Keep p and K from the original note (they're still valid)
+
+        rho_L = Ms / L;
+        R0 = std::sqrt(T * rho_L);
+        c  = std::sqrt(T / rho_L);
+
+        // Re-search for stable N with C4 params (guaranteed to find one)
+        for (int N_try = 120; N_try >= 15; N_try--) {
+            float r_try = c * (float)N_try / (sr * L);
+            float r_max = 1.f / std::sqrt(1.f + 4.f * epsilon * (float)(N_try * N_try));
+            if (r_try <= 0.9f * r_max) { N = N_try; break; }
+        }
+    }
+    if (N < 15) N = 15;  // absolute safety floor
 
     int i0 = std::max(2, std::min(N - 3, (int)std::round(exc_x0 * (float)N)));
     float dt = 1.f / sr;
@@ -351,13 +381,16 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     float yh[MAX_HAMMER_SAMPLES] = {};
     float F[MAX_HAMMER_SAMPLES]  = {};
 
+    // Force safety clamp (real piano: max ~200N at extreme ff)
+    static constexpr float F_MAX = 500.f;
+
     // t=0: all zero
     // t=1
     yh[1] = v0 * dt;
     for (int i = 1; i < N-1; i++)
         y[1][i] = (y[0][i+1] + y[0][i-1]) / 2.f;
     float delta = yh[1] - y[1][i0];
-    if (delta > 0.f) F[1] = K * std::pow(delta, p);
+    if (delta > 0.f) F[1] = (std::min)(K * std::pow(delta, p), F_MAX);
 
     // t=2
     for (int i = 1; i < N-1; i++)
@@ -365,7 +398,7 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     y[2][i0] += dt2 * (float)N * F[1] / Ms;
     yh[2] = 2.f*yh[1] - yh[0] - dt2 * F[1] / Mh;
     delta = yh[2] - y[2][i0];
-    if (delta > 0.f) F[2] = K * std::pow(delta, p);
+    if (delta > 0.f) F[2] = (std::min)(K * std::pow(delta, p), F_MAX);
 
     // Main FD loop (t=3..max)
     int max_steps = std::min((int)(0.010f * sr), MAX_HAMMER_SAMPLES - 1);
@@ -416,7 +449,7 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
         // Nonlinear felt compression
         delta = yh[n] - y[cur][i0];
         if (delta > 0.f) {
-            F[n] = K * std::pow(delta, p);
+            F[n] = (std::min)(K * std::pow(delta, p), F_MAX);
             no_contact = 0;
         } else {
             F[n] = 0.f;
@@ -431,40 +464,21 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     for (int i = 0; i < actual_len; i++)
         v_in[i] = F[i] * inv_2R0;
 
-    // ── Spectral enrichment of hammer force ─────────────────────────
+    // ── Broadband noise on hammer force ─────────────────────────────
     //
-    // The Chaigne FD model with coarse grid produces too few harmonics.
-    // Real piano hammer impact has:
-    //   1. Broadband noise (felt impact transient)
-    //   2. Strong even harmonics (from bridge/soundboard coupling)
-    //
-    // We add both to the force signal, shaped by the force envelope.
+    // Subtle noise shaped by force envelope — models felt impact
+    // transient and adds attack brightness.
 
-    // Broadband noise (subtle — just attack brightness)
     float noise_level = 0.02f * (1.f + K_hardening * vel_norm);
     uint32_t rng_state = (uint32_t)(midi * 7919 + (int)(v0 * 1000.f));
-
-    // Even-harmonic enrichment: add 2nd and 4th harmonic of f0 into
-    // the force signal. This compensates for the waveguide's natural
-    // odd-harmonic bias (rigid terminations favor odd modes).
-    float f0_note = 440.f * std::pow(2.f, ((float)midi - 69.f) / 12.f);
-    float dt_sr = 1.f / sr;
-    float even_level = 0.12f;  // strength of even harmonic injection
 
     for (int i = 0; i < actual_len; i++) {
         if (F[i] < 1e-6f) continue;
         float env = F[i] * inv_2R0;
 
-        // Noise component
         rng_state = rng_state * 1664525u + 1013904223u;
         float white = ((float)(rng_state >> 8) / 16777216.f - 0.5f) * 2.f;
         v_in[i] += white * env * noise_level;
-
-        // Even harmonic injection (2nd + 4th harmonics)
-        float t = (float)i * dt_sr;
-        float h2 = std::sin(dsp::TAU * 2.f * f0_note * t);
-        float h4 = std::sin(dsp::TAU * 4.f * f0_note * t) * 0.5f;
-        v_in[i] += (h2 + h4) * env * even_level;
     }
 
     return actual_len;
