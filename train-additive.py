@@ -116,43 +116,23 @@ def main() -> int:
         print()
 
         from training_additive.pipeline_v2 import run
-        out = run(
+        result = run(
             bank_dir=args.bank,
             out_path=out_path,
             workers=args.workers,
             skip_eq=args.skip_eq,
+            skip_ir=args.skip_ir,
             sr_tag=args.sr_tag,
             config=cfg,
         )
-        print(f"\nSoundbank -> {out}")
-
-        # Extract soundboard IR
-        if not args.skip_ir:
-            ir_path = out_path.replace(".json", "-soundboard.wav")
-            print(f"\nExtracting soundboard IR...")
-            try:
-                from tools.extract_soundboard_ir import main as ir_main
-                import sys as _sys
-                orig_argv = _sys.argv
-                _sys.argv = ["extract_soundboard_ir", out_path,
-                             "--bank", args.bank, "--out", ir_path,
-                             "--sr-tag", args.sr_tag]
-                ir_main()
-                _sys.argv = orig_argv
-                print(f"Soundboard IR -> {ir_path}")
-            except Exception as e:
-                print(f"Soundboard IR extraction failed: {e}")
-                ir_path = None
-        else:
-            ir_path = None
 
         print(f"\n{'='*60}")
-        print(f"Soundbank:     {out}")
-        if ir_path:
-            print(f"Soundboard IR: {ir_path}")
+        print(f"Soundbank:     {result['bank_path']}")
+        for ir in result.get("ir_paths", []):
+            print(f"Soundboard IR: {ir}")
         print(f"\nRun with:")
-        ir_arg = f' --ir {ir_path}' if ir_path else ''
-        print(f"  icrgui --core AdditiveSynthesisPianoCore --params {out}{ir_arg}")
+        ir_arg = f" --ir {result['ir_paths'][0]}" if result.get("ir_paths") else ""
+        print(f"  icrgui --core AdditiveSynthesisPianoCore --params {result['bank_path']}{ir_arg}")
 
     finally:
         tee.close()

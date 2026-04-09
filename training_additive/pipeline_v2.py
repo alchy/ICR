@@ -65,22 +65,43 @@ def _relax_extraction(params: dict, cfg: ExtractionConfig) -> dict:
     return params
 
 
+def _extract_soundboard_ir(out_path: str, bank_dir: str, sr_tag: str) -> str | None:
+    """Extract soundboard IR for a given sample rate tag. Returns IR path or None."""
+    ir_path = out_path.replace(".json", f"-soundboard-{sr_tag}.wav")
+    try:
+        import sys as _sys
+        from tools.extract_soundboard_ir import main as ir_main
+        orig_argv = _sys.argv
+        _sys.argv = ["extract_soundboard_ir", out_path,
+                     "--bank", bank_dir, "--out", ir_path,
+                     "--sr-tag", sr_tag]
+        ir_main()
+        _sys.argv = orig_argv
+        return ir_path
+    except Exception as e:
+        print(f"  IR extraction failed ({sr_tag}): {e}")
+        return None
+
+
 def run(bank_dir: str, out_path: str,
         workers: int = None,
         skip_eq: bool = False,
+        skip_ir: bool = False,
         sr_tag: str = "f48",
-        config: ExtractionConfig = None) -> str:
+        config: ExtractionConfig = None) -> dict:
     """
-    v2 pipeline: Extract → relax → filter → EQ → export.
+    v2 pipeline: Extract → relax → filter → EQ → export → IR.
 
     All thresholds are controlled by `config` (ExtractionConfig).
     Default = RELAXED (trust extraction, minimal corrections).
+
+    Returns dict with keys: bank_path, ir_paths (list of extracted IRs).
     """
     if config is None:
         config = RELAXED
 
     # 1. Extract partials (uses v1 extractor internally)
-    print("Step 1/4: Extracting partials from WAV files...")
+    print("Step 1/5: Extracting partials from WAV files...")
     params = ParamExtractor().extract_bank(bank_dir, workers, sr_tag=sr_tag)
 
     # 1b. Relax v1 over-corrections based on config
@@ -88,24 +109,37 @@ def run(bank_dir: str, out_path: str,
 
     # 2. Outlier filter (optional, relaxed sigma)
     if config.outlier_enabled:
-        print(f"Step 2/4: Outlier filter (sigma={config.outlier_sigma})...")
+        print(f"Step 2/5: Outlier filter (sigma={config.outlier_sigma})...")
         params = StructuralOutlierFilter().filter(
             params, sigma=config.outlier_sigma)
     else:
-        print("Step 2/4: Outlier filter SKIPPED")
+        print("Step 2/5: Outlier filter SKIPPED")
 
     # 3. Spectral EQ fitting (optional)
     if not skip_eq:
-        print("Step 3/4: Fitting spectral EQ...")
+        print("Step 3/5: Fitting spectral EQ...")
         params = EQFitter().fit_bank(params, bank_dir, workers)
     else:
-        print("Step 3/4: EQ fitting SKIPPED")
+        print("Step 3/5: EQ fitting SKIPPED")
 
     # 4. Export JSON bank (with relaxed constraints)
-    print("Step 4/4: Exporting JSON bank...")
+    print("Step 4/5: Exporting JSON bank...")
     SoundbankExporter().from_params(
         params, out_path,
         skip_physics_floor=not config.physics_floor_enabled,
     )
 
-    return out_path
+    # 5. Extract soundboard IR for both sample rates (f48 + f44)
+    ir_paths = []
+    if not skip_ir:
+        print("Step 5/5: Extracting soundboard IR...")
+        for tag in ["f48", "f44"]:
+            print(f"  IR for {tag}...")
+            ir = _extract_soundboard_ir(out_path, bank_dir, tag)
+            if ir:
+                ir_paths.append(ir)
+                print(f"  -> {ir}")
+    else:
+        print("Step 5/5: IR extraction SKIPPED")
+
+    return {"bank_path": out_path, "ir_paths": ir_paths}
