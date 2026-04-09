@@ -2,17 +2,17 @@
 /*
  * cores/physical_modeling_piano/physical_modeling_piano_core.h
  * ------------------------------------------------------------
- * PhysicalModelingPianoCore -- Karplus-Strong string synthesis.
+ * PhysicalModelingPianoCore v1.0 — Dual-rail waveguide with
+ * Chaigne-Askenfelt hammer model.
  *
- * Single-loop waveguide per voice:
- *   [Delay N] -> [Fractional Allpass] -> [Dispersion Cascade] -> [Loss LPF] -> loop
+ * Topology per string:
+ *   [upper rail →]  hammer@n0  [→ bridge]
+ *   [lower rail ←]             [← loss → disp → tune → -1]
  *
- * Excitation: Fourier series with two-stage rolloff, odd harmonic boost,
- * gauge-dependent spectral shaping.  Per-note params from JSON bank.
+ * Multi-string (1-3 per note) with detuning and stereo panning.
+ * Hammer: nonlinear FD model (F = K|δ|^p) with wave feedback.
  *
- * Current: one string per voice (multi-string beating in future iteration).
- *
- * Threading: same as ISynthCore -- see i_synth_core.h.
+ * Soundboard: external IR convolution via DspChain (already wired).
  */
 
 #include "engine/i_synth_core.h"
@@ -27,14 +27,13 @@
 #include <string>
 #include <vector>
 
-// -- Constants ----------------------------------------------------------------
+// ── Constants ────────────────────────────────────────────────────────────
 
-static constexpr int PHYS_MAX_VOICES     = 128;
-static constexpr int PHYS_MAX_DISP       = 16;    // max dispersion allpass stages
+static constexpr int   PHYS_MAX_VOICES   = 128;
 static constexpr float PHYS_RELEASE_MS   = 200.f;
 static constexpr float PHYS_ONSET_MS     = 0.3f;
 
-// -- Per-note bank parameters -------------------------------------------------
+// ── Per-note bank parameters ─────────────────────────────────────────────
 
 struct PhysicsNoteParam {
     bool  valid          = false;
@@ -42,29 +41,24 @@ struct PhysicsNoteParam {
     float f0_hz          = 261.6f;
 
     // String
-    float B              = 4e-4f;    // inharmonicity
-    float gauge          = 1.5f;     // string thickness
-    float T60_fund       = 5.f;      // fundamental T60 (s)
-    float T60_nyq        = 0.25f;    // Nyquist T60 (s)
+    float B              = 4e-4f;       // inharmonicity
+    float gauge          = 1.5f;        // string thickness
+    float T60_fund       = 5.f;         // fundamental T60 (s)
+    float T60_nyq        = 0.25f;       // Nyquist T60 (s)
 
-    // Excitation
-    float exc_rolloff    = 0.1f;     // harmonic rolloff (0=flat, 2=triangle)
-    float exc_x0         = 1.f/7.f;  // strike position
-    float odd_boost      = 1.8f;
-    int   knee_k         = 10;
-    float knee_slope     = 3.5f;
-    int   n_harmonics    = 80;
+    // Hammer
+    float exc_x0         = 1.f/7.f;     // strike position (fraction)
 
     // Dispersion
-    int   n_disp_stages  = 0;
-    float disp_coeff     = -0.15f;
+    int   n_disp_stages  = 0;           // allpass cascade count
+    float disp_coeff     = -0.15f;      // allpass coefficient
 
-    // Multi-string (future)
-    int   n_strings      = 1;        // currently always 1
+    // Multi-string
+    int   n_strings      = 3;
     float detune_cents   = 1.f;
 };
 
-// -- Voice --------------------------------------------------------------------
+// ── Voice ────────────────────────────────────────────────────────────────
 
 class PhysicsVoice {
 public:
@@ -76,43 +70,38 @@ public:
     uint32_t t_samples   = 0;
     uint64_t max_t_samp  = 0;
 
-    // Waveguide delay line
-    physics::DelayLine delay;
+    // Multi-string dual-rail
+    int   n_strings      = 1;
+    physics::DualRailString strings[physics::MAX_STRINGS];
+    float str_pan_l[physics::MAX_STRINGS] = {};
+    float str_pan_r[physics::MAX_STRINGS] = {};
 
-    // Loop filters
-    physics::LossFilter  loss;
-    float  ap_frac_a     = 0.f;    // fractional delay allpass coeff
-    float  ap_frac_state = 0.f;
-
-    // Dispersion cascade
-    int    n_disp        = 0;
-    float  disp_coeff    = -0.15f;
-    float  disp_states[PHYS_MAX_DISP] = {};
+    // Shared hammer velocity input
+    float hammer_v_in[physics::MAX_HAMMER_SAMPLES] = {};
+    int   hammer_len = 0;
 
     // Output
-    float  output_scale  = 1.f;
-    float  pan_l         = 0.707f;
-    float  pan_r         = 0.707f;
+    float output_scale   = 1.f;
 
     // Envelope
-    float  rel_gain      = 1.f;
-    float  rel_step      = 0.f;
-    float  onset_gain    = 0.f;
-    float  onset_step    = 0.f;
-    bool   in_onset      = false;
+    float rel_gain       = 1.f;
+    float rel_step       = 0.f;
+    float onset_gain     = 0.f;
+    float onset_step     = 0.f;
+    bool  in_onset       = false;
 
-    // Hammer noise
-    float  noise_amp     = 0.f;
-    float  noise_env     = 1.f;
-    float  noise_decay   = 0.f;
+    // Hammer noise (percussive attack)
+    float noise_amp      = 0.f;
+    float noise_env      = 1.f;
+    float noise_decay    = 0.f;
     dsp::BiquadCoeffs noise_bpf;
-    float  noise_wL[2]   = {};
-    float  noise_wR[2]   = {};
+    float noise_wL[2]    = {};
+    float noise_wR[2]    = {};
     std::mt19937 rng;
     std::normal_distribution<float> ndist{0.f, 1.f};
 };
 
-// -- VoiceManager -------------------------------------------------------------
+// ── VoiceManager ─────────────────────────────────────────────────────────
 
 class PhysicsVoiceManager {
 public:
@@ -120,7 +109,7 @@ public:
 
     void initVoice(int midi, uint8_t velocity,
                    const PhysicsNoteParam& np, float sr,
-                   float keyboard_spread) noexcept;
+                   float keyboard_spread, float stereo_spread) noexcept;
 
     void releaseVoice(int midi, float sr) noexcept;
     void releaseAll(float sr) noexcept;
@@ -132,7 +121,7 @@ private:
     PhysicsVoice voices_[PHYS_MAX_VOICES];
 };
 
-// -- PatchManager -------------------------------------------------------------
+// ── PatchManager ─────────────────────────────────────────────────────────
 
 class PhysicsPatchManager {
 public:
@@ -141,6 +130,7 @@ public:
                 PhysicsVoiceManager& vm,
                 float sample_rate,
                 float keyboard_spread,
+                float stereo_spread,
                 std::mutex& bank_mutex) noexcept;
 
     void noteOff(uint8_t midi, PhysicsVoiceManager& vm, float sr) noexcept;
@@ -157,7 +147,7 @@ private:
     std::atomic<int>  last_vel_{0};
 };
 
-// -- PhysicalModelingPianoCore ------------------------------------------------
+// ── PhysicalModelingPianoCore ────────────────────────────────────────────
 
 class PhysicalModelingPianoCore final : public ISynthCore {
 public:
@@ -179,11 +169,15 @@ public:
     std::vector<CoreParamDesc> describeParams()        const override;
 
     bool loadBankJson(const std::string& json_str) override;
+    bool exportBankJson(const std::string& path) override;
+
+    bool setNoteParam(int midi, int vel,
+                      const std::string& key, float value) override;
 
     CoreVizState getVizState() const override;
 
     std::string coreName()    const override { return "PhysicalModelingPianoCore"; }
-    std::string coreVersion() const override { return "0.3"; }
+    std::string coreVersion() const override { return "1.0"; }
     bool        isLoaded()    const override { return loaded_; }
 
 private:
@@ -198,12 +192,12 @@ private:
     float sample_rate_ = 48000.f;
     bool  loaded_      = false;
 
-    // GUI-settable global scalers
+    // GUI-settable global scalers (atomic for RT-safe writes)
     std::atomic<float> brightness_       {1.0f};   // scales T60_nyq
     std::atomic<float> stiffness_scale_  {1.0f};   // scales B
     std::atomic<float> sustain_scale_    {1.0f};   // scales T60_fund
-    std::atomic<float> keyboard_spread_  {0.60f};
-    std::atomic<float> odd_scale_        {1.0f};   // scales odd_boost
+    std::atomic<float> keyboard_spread_  {0.60f};  // stereo from keyboard position
+    std::atomic<float> stereo_spread_    {0.30f};  // stereo from multi-string panning
     std::atomic<float> gauge_scale_      {1.0f};   // scales gauge
 
     mutable std::mutex bank_mutex_;
