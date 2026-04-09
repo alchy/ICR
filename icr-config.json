@@ -3,7 +3,16 @@
   "default_core": "SineCore",
   "cores": {
     "SamplerCore": {
-      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-sampler"
+      "params_path": "C:/SoundBanks/IthacaPlayer",
+      "master_gain": "100",
+      "master_pan": "64",
+      "lfo_speed": "0",
+      "lfo_depth": "0",
+      "limiter_threshold": "100",
+      "limiter_release": "50",
+      "limiter_enabled": "0",
+      "bbe_definition": "0",
+      "bbe_bass_boost": "0"
     },
     "AdditiveSynthesisPianoCore": {
       "params_path": "",

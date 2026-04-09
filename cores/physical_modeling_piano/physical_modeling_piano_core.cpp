@@ -116,6 +116,12 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.disp_coeff    = s.value("disp_coeff", np.disp_coeff);
         np.n_strings     = s.value("n_strings", np.n_strings);
         np.detune_cents  = s.value("detune_cents", np.detune_cents);
+        np.K_hardening   = s.value("K_hardening", np.K_hardening);
+        np.p_hardening   = s.value("p_hardening", np.p_hardening);
+        np.output_scale  = s.value("output_scale", np.output_scale);
+        np.bridge_freq   = s.value("bridge_freq", np.bridge_freq);
+        np.bridge_Q      = s.value("bridge_Q", np.bridge_Q);
+        np.bridge_mix    = s.value("bridge_mix", np.bridge_mix);
         count++;
     }
     return count > 0;
@@ -157,7 +163,13 @@ bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
             {"n_disp_stages", np.n_disp_stages},
             {"disp_coeff",    np.disp_coeff},
             {"n_strings",     np.n_strings},
-            {"detune_cents",  np.detune_cents}
+            {"detune_cents",  np.detune_cents},
+            {"K_hardening",   np.K_hardening},
+            {"p_hardening",   np.p_hardening},
+            {"output_scale",  np.output_scale},
+            {"bridge_freq",   np.bridge_freq},
+            {"bridge_Q",      np.bridge_Q},
+            {"bridge_mix",    np.bridge_mix}
         };
     }
     root["notes"] = notes_j;
@@ -186,6 +198,12 @@ bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
     if (key == "disp_coeff")    { np.disp_coeff    = value; return true; }
     if (key == "n_strings")     { np.n_strings     = (int)value; return true; }
     if (key == "detune_cents")  { np.detune_cents  = value; return true; }
+    if (key == "K_hardening")   { np.K_hardening   = value; return true; }
+    if (key == "p_hardening")   { np.p_hardening   = value; return true; }
+    if (key == "output_scale")  { np.output_scale  = value; return true; }
+    if (key == "bridge_freq")   { np.bridge_freq   = value; return true; }
+    if (key == "bridge_Q")      { np.bridge_Q      = value; return true; }
+    if (key == "bridge_mix")    { np.bridge_mix    = value; return true; }
 
     return false;
 }
@@ -316,16 +334,16 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Output scale — must guarantee no clipping on a single note.
-    // Chaigne hammer produces peak amplitude ~11 * vel_norm at full velocity.
-    // Target: peak ≈ -3 dB (0.7) at vel_idx=7.
-    // Scale = 0.065 gives: 11 * 0.953 * 0.065 ≈ 0.68 → -3.3 dB headroom.
-    v.output_scale = 0.065f;
+    // Output scale — compensate for bridge resonator energy addition.
+    // Higher bridge_mix → more energy in loop → reduce output to prevent clipping.
+    float bridge_comp = 1.f / (1.f + np.bridge_mix * 3.f);  // mix=0→1.0, mix=0.3→0.52
+    v.output_scale = np.output_scale * bridge_comp;
 
     // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
     float v0 = physics::velocity_to_v0(vel_norm);
     v.hammer_len = physics::hammer::compute_force(
-        midi, v0, np.exc_x0, sr, v.hammer_v_in);
+        midi, v0, np.exc_x0, sr, v.hammer_v_in,
+        np.K_hardening, np.p_hardening);
 
     // ── Multi-string setup ──────────────────────────────────────────
     v.n_strings = np.n_strings;
@@ -343,7 +361,8 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
         // Initialize each dual-rail string
         physics::dual_rail_init(v.strings[si], sd.f0s[si], sr,
                                 n_disp, a_disp, np.exc_x0,
-                                np.T60_fund, np.T60_nyq, np.gauge);
+                                np.T60_fund, np.T60_nyq, np.gauge,
+                                np.bridge_freq, np.bridge_Q, np.bridge_mix);
 
         // Keyboard panning (base angle) + multi-string spread
         float kb_angle = (PI / 4.f) +

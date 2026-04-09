@@ -318,7 +318,8 @@ bool CoreEngine::switchCore(const std::string& core_name,
         core_params_paths_[core_name] = resolved;
     }
 
-    // Switch active — no audio interruption. Old core's voices dozvuk naturally.
+    // Switch active — old core's voices continue to dozvuk naturally
+    // (all cores must have finite decay / max duration).
     active_core_name_ = core_name;
     active_core_      = cores_[core_name].get();
 

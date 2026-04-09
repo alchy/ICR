@@ -121,6 +121,15 @@ def chaigne_hammer(midi, v0, exc_x0=0.12):
     p  = _interp_anchor(midi, 4)             # exponent
     K  = _interp_anchor(midi, 5)             # stiffness
 
+    # Velocity-dependent felt hardness:
+    # Forte → harder felt → higher K, higher p
+    V_MAX = 6.0
+    K_HARDENING = 1.5    # K scales up to 2.5× at ff
+    P_HARDENING = 0.3    # p increases by up to 0.3 at ff
+    vel_norm = min(v0 / V_MAX, 1.0)
+    K *= (1.0 + K_HARDENING * vel_norm)
+    p += P_HARDENING * vel_norm
+
     # Damping and stiffness (Chaigne & Askenfelt values)
     b1 = 0.5
     b3 = 6.25e-9

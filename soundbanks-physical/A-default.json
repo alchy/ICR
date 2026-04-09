@@ -4,8 +4,7 @@
     "version": 2,
     "sr": 48000,
     "model": "teng-dual-rail-v2",
-    "created": "2026-04-08T22:07:46",
-    "description": "Dual-rail waveguide with Chaigne hammer. Velocity-dependent felt hardness. Per-note output_scale."
+    "description": "Default physics (current mandolin-like sound)"
   },
   "notes": {
     "m021": {

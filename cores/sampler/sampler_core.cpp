@@ -237,15 +237,18 @@ void SamplerCore::noteOn(uint8_t midi, uint8_t velocity) {
 
 void SamplerCore::noteOff(uint8_t midi) {
     if (midi >= SAMPLER_MAX_VOICES) return;
-    patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_);
+    float rel_ms = release_time_.load(std::memory_order_relaxed) * 1000.f;
+    patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_, rel_ms);
 }
 
 void SamplerCore::sustainPedal(bool down) {
-    patch_mgr_.sustainPedal(down, voice_mgr_, sample_rate_);
+    float rel_ms = release_time_.load(std::memory_order_relaxed) * 1000.f;
+    patch_mgr_.sustainPedal(down, voice_mgr_, sample_rate_, rel_ms);
 }
 
 void SamplerCore::allNotesOff() {
-    patch_mgr_.allNotesOff(voice_mgr_, sample_rate_);
+    float rel_ms = release_time_.load(std::memory_order_relaxed) * 1000.f;
+    patch_mgr_.allNotesOff(voice_mgr_, sample_rate_, rel_ms);
 }
 
 // -- PatchManager -------------------------------------------------------------
@@ -293,28 +296,29 @@ void SamplerPatchManager::noteOn(
 }
 
 void SamplerPatchManager::noteOff(uint8_t midi, SamplerVoiceManager& vm,
-                                   float sr) noexcept {
+                                   float sr, float release_ms) noexcept {
     if (sustain_.load(std::memory_order_relaxed))
         delayed_offs_[midi].store(true, std::memory_order_relaxed);
     else
-        vm.releaseVoice(midi, sr);
+        vm.releaseVoice(midi, sr, release_ms);
 }
 
 void SamplerPatchManager::sustainPedal(bool down, SamplerVoiceManager& vm,
-                                        float sr) noexcept {
+                                        float sr, float release_ms) noexcept {
     sustain_.store(down, std::memory_order_relaxed);
     if (!down) {
         for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
             if (delayed_offs_[m].load(std::memory_order_relaxed)) {
-                vm.releaseVoice(m, sr);
+                vm.releaseVoice(m, sr, release_ms);
                 delayed_offs_[m].store(false, std::memory_order_relaxed);
             }
         }
     }
 }
 
-void SamplerPatchManager::allNotesOff(SamplerVoiceManager& vm, float sr) noexcept {
-    vm.releaseAll(sr);
+void SamplerPatchManager::allNotesOff(SamplerVoiceManager& vm, float sr,
+                                       float release_ms) noexcept {
+    vm.releaseAll(sr, release_ms);
     for (int m = 0; m < SAMPLER_MAX_VOICES; m++)
         delayed_offs_[m].store(false, std::memory_order_relaxed);
     sustain_.store(false, std::memory_order_relaxed);
@@ -389,17 +393,17 @@ void SamplerVoiceManager::initVoice(int midi, uint8_t velocity,
     v.pan_r = std::sin(angle);
 }
 
-void SamplerVoiceManager::releaseVoice(int midi, float sr) noexcept {
+void SamplerVoiceManager::releaseVoice(int midi, float sr, float release_ms) noexcept {
     SamplerVoice& v = voices_[midi];
     if (!v.active) return;
     v.releasing = true;
     v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
-    v.rel_step  = -v.rel_gain / (SAMPLER_RELEASE_MS * 0.001f * sr);
+    v.rel_step  = -v.rel_gain / (release_ms * 0.001f * sr);
 }
 
-void SamplerVoiceManager::releaseAll(float sr) noexcept {
+void SamplerVoiceManager::releaseAll(float sr, float release_ms) noexcept {
     for (int m = 0; m < SAMPLER_MAX_VOICES; m++)
-        if (voices_[m].active) releaseVoice(m, sr);
+        if (voices_[m].active) releaseVoice(m, sr, release_ms);
 }
 
 // -- Voice::process -----------------------------------------------------------
@@ -473,7 +477,16 @@ bool SamplerVoice::process(float* out_l, float* out_r, int n_samples,
 
 bool SamplerCore::processBlock(float* out_l, float* out_r,
                                 int n_samples) noexcept {
-    return voice_mgr_.processBlock(out_l, out_r, n_samples, sample_rate_);
+    bool any = voice_mgr_.processBlock(out_l, out_r, n_samples, sample_rate_);
+    // Apply master gain (was not connected before — bug fix)
+    float g = gain_.load(std::memory_order_relaxed);
+    if (any && std::abs(g - 1.f) > 0.001f) {
+        for (int i = 0; i < n_samples; i++) {
+            out_l[i] *= g;
+            out_r[i] *= g;
+        }
+    }
+    return any;
 }
 
 // -- Parameters ---------------------------------------------------------------

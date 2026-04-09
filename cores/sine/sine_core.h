@@ -45,16 +45,23 @@ public:
     bool process(float* out_l, float* out_r, int n_samples) noexcept;
 
     // ── Stav (veřejný pro inicializaci — bude zapouzdřen později) ──
-    bool  active     = false;    // hlas aktivní (produkuje zvuk)
-    bool  releasing  = false;    // ve fázi dohasínání
-    bool  in_onset   = false;    // ve fázi náběhu (click prevention)
-    float phase      = 0.f;     // aktuální fáze oscilátoru (rad)
-    float omega      = 0.f;     // úhlová frekvence per sample (rad/sample)
-    float amp        = 0.f;     // cílová amplituda (vel-scaled)
-    float onset_gain = 0.f;     // stav onset rampy 0→1
-    float onset_step = 0.f;     // per-sample inkrement onset rampy
-    float rel_gain   = 1.f;     // stav release rampy 1→0
-    float rel_step   = 0.f;     // per-sample dekrement (záporný)
+    bool     active     = false;
+    bool     releasing  = false;
+    bool     in_onset   = false;
+    float    phase      = 0.f;
+    float    omega      = 0.f;
+    float    amp        = 0.f;
+    float    pan_l      = 0.707f;
+    float    pan_r      = 0.707f;
+    float    onset_gain = 0.f;
+    float    onset_step = 0.f;
+    float    rel_gain   = 1.f;
+    float    rel_step   = 0.f;
+    // Natural decay (sine should not ring forever)
+    float    decay_coeff = 0.99998f;  // per-sample decay (~3s at 48kHz)
+    float    env         = 1.f;       // current decay envelope
+    uint32_t t_samples   = 0;
+    uint32_t max_t_samp  = 0;        // auto-off after this many samples
 };
 
 // ── VoiceManager — životní cyklus hlasů ──────────────────────────────────────
@@ -69,7 +76,8 @@ public:
     bool processBlock(float* out_l, float* out_r, int n_samples) noexcept;
 
     /// Inicializuje hlas s nativními parametry.
-    void initVoice(int midi, float omega, float amp, float sample_rate) noexcept;
+    void initVoice(int midi, float omega, float amp, float sample_rate,
+                   float keyboard_spread) noexcept;
 
     /// Zahájí release fázi hlasu.
     void releaseVoice(int midi, float sample_rate) noexcept;
@@ -98,7 +106,8 @@ public:
     /// Přeloží MIDI noteOn a aktivuje hlas.
     void noteOn(uint8_t midi, uint8_t velocity,
                 SineVoiceManager& vm,
-                float sample_rate, float gain, float detune_cents) noexcept;
+                float sample_rate, float gain, float detune_cents,
+                float keyboard_spread) noexcept;
 
     /// Přeloží MIDI noteOff (s ohledem na sustain pedál).
     void noteOff(uint8_t midi, SineVoiceManager& vm, float sample_rate) noexcept;
@@ -165,6 +174,7 @@ private:
     bool  loaded_      = false;
 
     // GUI-nastavitelné parametry (atomické: GUI vlákno píše, RT vlákno čte)
-    std::atomic<float> gain_        {1.0f};
-    std::atomic<float> detune_cents_{0.0f};
+    std::atomic<float> gain_            {1.0f};
+    std::atomic<float> detune_cents_    {0.0f};
+    std::atomic<float> keyboard_spread_ {0.60f};
 };

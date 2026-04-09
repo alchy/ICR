@@ -88,6 +88,53 @@ inline float allpass_delay_dc(float a) {
 
 // ── Dual-rail string ─────────────────────────────────────────────────────
 
+// ── Bridge reflection filter ─────────────────────────────────────────
+//
+// Real piano bridge: frequency-dependent reflection coefficient.
+// Low frequencies reflect almost fully (rigid, -1). High frequencies
+// lose more energy to the soundboard (bridge is more compliant at HF).
+//
+// This is modeled as a one-pole low-pass on the reflected signal:
+//   H_bridge(z) = -1 × [ (1-b_mix) + b_mix × LP(z) ]
+//
+// The effect: HF partials decay faster from the bridge side (additional
+// damping beyond the nut-side loss filter), while LF sustains normally.
+// This creates the asymmetric spectral decay characteristic of piano
+// (bright attack, warm sustain) that distinguishes it from guitar/mandolin.
+
+struct BridgeFilter {
+    float state = 0.f;    // one-pole LPF state
+    float coeff = 0.5f;   // pole coefficient (0=bypass, →1=more LF emphasis)
+    float mix   = 0.15f;  // 0=rigid (-1), 1=full bridge LPF
+};
+
+/// Initialize bridge filter.
+///   bridge_freq: cutoff frequency (Hz) — below this, reflection ≈ -1
+///   bridge_mix:  how much HF is lost at bridge (0=rigid, 0.3=strong)
+inline void bridge_filter_init(BridgeFilter& bf, float bridge_freq,
+                               float /*bridge_Q*/, float bridge_mix,
+                               float sr) {
+    // One-pole coefficient from cutoff frequency
+    float w = dsp::TAU * bridge_freq / sr;
+    bf.coeff = std::exp(-w);
+    bf.mix   = bridge_mix;
+    bf.state = 0.f;
+}
+
+/// Apply bridge reflection: frequency-dependent, energy-conserving.
+///   Returns reflected signal (always ≤ input magnitude).
+inline float bridge_filter_tick(float x, BridgeFilter& bf) {
+    // Low-pass filtered version of input
+    bf.state = bf.coeff * bf.state + (1.f - bf.coeff) * x;
+
+    // Mix: rigid reflection + bridge-filtered reflection
+    // At DC (x ≈ state): output ≈ -x (rigid)
+    // At HF (state ≈ 0): output ≈ -(1-mix)*x (attenuated)
+    return -((1.f - bf.mix) * x + bf.mix * bf.state);
+}
+
+// ── Dual-rail string ─────────────────────────────────────────────────────
+
 /// One dual-rail waveguide string with circular-buffer shift.
 ///
 /// Two rails model physically traveling waves:
@@ -95,26 +142,28 @@ inline float allpass_delay_dc(float a) {
 ///   lower: left-traveling  (bridge → nut), length M
 ///
 /// Circular buffer avoids O(M) memmove per sample.
-/// upper_at(i) = upper[(upper_base + i) % M]
 struct DualRailString {
     float upper[MAX_RAIL_LEN] = {};
     float lower[MAX_RAIL_LEN] = {};
-    int   M          = 0;        // rail length (half compensated period)
-    int   upper_base = 0;        // circular pointer for upper[0]
-    int   lower_base = 0;        // circular pointer for lower[0]
-    int   n0         = 0;        // hammer injection position
+    int   M          = 0;
+    int   upper_base = 0;
+    int   lower_base = 0;
+    int   n0         = 0;
 
     // Per-string filter coefficients
-    float g_dc       = 0.999f;   // loss filter DC gain
-    float pole       = 0.3f;     // loss filter pole
-    float ap_a       = 0.f;      // tuning allpass coefficient
-    int   n_disp     = 0;        // dispersion stages
-    float a_disp     = -0.15f;   // dispersion allpass coefficient
+    float g_dc       = 0.999f;
+    float pole       = 0.3f;
+    float ap_a       = 0.f;
+    int   n_disp     = 0;
+    float a_disp     = -0.15f;
 
     // Per-string filter states
-    float lp_state   = 0.f;      // loss filter
-    AllpassState ap_tune;         // tuning allpass
+    float lp_state   = 0.f;
+    AllpassState ap_tune;
     AllpassState disp_st[MAX_DISP_STAGES];
+
+    // Bridge admittance filter
+    BridgeFilter bridge;
 
     // -- Circular buffer accessors --
     inline float  upper_at(int i) const { return upper[(upper_base + i) % M]; }
@@ -129,9 +178,12 @@ struct DualRailString {
 };
 
 /// Initialize a dual-rail string for a given f0 with delay compensation.
+///   bridge_freq/Q/mix: bridge admittance filter params (0 mix = rigid, old behavior)
 inline void dual_rail_init(DualRailString& s, float f0, float sr,
                            int n_disp, float a_disp, float exc_x0,
-                           float T60_fund, float T60_nyq, float gauge) {
+                           float T60_fund, float T60_nyq, float gauge,
+                           float bridge_freq = 400.f, float bridge_Q = 8.f,
+                           float bridge_mix = 0.15f) {
     float N_period = sr / f0;
 
     // Loss filter
@@ -166,6 +218,9 @@ inline void dual_rail_init(DualRailString& s, float f0, float sr,
     s.lower_base = 0;
     s.ap_tune.s = 0.f;
     for (int i = 0; i < MAX_DISP_STAGES; i++) s.disp_st[i].s = 0.f;
+
+    // Bridge admittance filter
+    bridge_filter_init(s.bridge, bridge_freq, bridge_Q, bridge_mix, sr);
 }
 
 /// Process one sample through the dual-rail waveguide.
@@ -198,7 +253,7 @@ inline float dual_rail_tick(DualRailString& s, float hammer_in) {
 
     // 5. Shift lower ← (new sample at position M-1)
     s.shift_lower();
-    s.lower_at(s.M - 1) = -x;   // bridge reflection (negated)
+    s.lower_at(s.M - 1) = -x;   // rigid bridge reflection
 
     // 6. Inject hammer force at n0
     s.upper_at(s.n0) += hammer_in;
@@ -262,6 +317,13 @@ inline AnchorParams interp_params(int midi) {
 /// interaction. The force is converted to velocity input (F / 2Z)
 /// ready for waveguide injection.
 ///
+/// Velocity-dependent felt hardness:
+///   Real piano felt compresses more at forte → effective stiffness
+///   and nonlinearity exponent increase with velocity.
+///   K_eff = K_base × (1 + vel_hardening × vel_norm)
+///   p_eff = p_base + vel_hardening_p × vel_norm
+///   where vel_norm = v0 / V_MAX (0..1)
+///
 /// Args:
 ///   midi    — MIDI note (for parameter interpolation)
 ///   v0      — initial hammer velocity (m/s)
@@ -271,8 +333,16 @@ inline AnchorParams interp_params(int midi) {
 ///
 /// Returns: number of samples written to v_in
 inline int compute_force(int midi, float v0, float exc_x0, float sr,
-                         float* v_in) {
+                         float* v_in,
+                         float K_hardening = 1.5f,
+                         float p_hardening = 0.3f) {
     AnchorParams ap = interp_params(midi);
+
+    // Velocity-dependent felt hardness
+    static constexpr float V_MAX = 6.0f;
+    float vel_norm = (std::min)(v0 / V_MAX, 1.f);
+    ap.K_stiff *= (1.f + K_hardening * vel_norm);
+    ap.p_exp   += p_hardening * vel_norm;
 
     float Ms = ap.Ms_g * 0.001f;       // g → kg
     float L  = ap.L_m;
@@ -397,6 +467,23 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     float inv_2R0 = 1.f / (2.f * R0);
     for (int i = 0; i < actual_len; i++)
         v_in[i] = F[i] * inv_2R0;
+
+    // Add broadband HF content to hammer pulse.
+    // The Chaigne FD model with coarse grid (N~40-60) produces only
+    // low-frequency force. Real hammer felt impact has broadband
+    // energy up to 4-8 kHz. We add shaped noise proportional to
+    // the force envelope to inject this missing HF content.
+    //
+    // noise_level: controlled by K_hardening (harder felt = more HF)
+    float noise_level = 0.15f * (1.f + K_hardening * vel_norm);
+    uint32_t rng_state = (uint32_t)(midi * 7919 + (int)(v0 * 1000.f));
+    for (int i = 0; i < actual_len; i++) {
+        if (F[i] < 1e-6f) continue;
+        // Simple LCG pseudo-random
+        rng_state = rng_state * 1664525u + 1013904223u;
+        float white = ((float)(rng_state >> 8) / 16777216.f - 0.5f) * 2.f;
+        v_in[i] += white * F[i] * inv_2R0 * noise_level;
+    }
 
     return actual_len;
 }

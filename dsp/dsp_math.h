@@ -178,4 +178,22 @@ inline BiquadCoeffs rbj_bandpass(float fc, float Q, float sr) {
     return c;
 }
 
+// ── Keyboard pan (shared by all cores) ───────────────────────────────────
+
+/// Compute pan angle from MIDI note and keyboard spread.
+///   midi 21 (A0) → leftmost, midi 108 (C8) → rightmost.
+///   keyboard_spread: 0 = mono center, π = full L/R.
+///   Returns angle in [0, π/2] for constant-power pan.
+inline float keyboard_pan_angle(int midi, float keyboard_spread) {
+    return (PI / 4.f) + ((float)midi - 64.5f) / 87.f
+           * keyboard_spread * 0.5f;
+}
+
+/// Constant-power pan: angle → L/R gains.
+///   angle=0 → L=1,R=0; angle=π/4 → L=R=0.707; angle=π/2 → L=0,R=1.
+inline void constant_power_pan(float angle, float& gl, float& gr) {
+    gl = std::cos(angle);
+    gr = std::sin(angle);
+}
+
 } // namespace dsp
