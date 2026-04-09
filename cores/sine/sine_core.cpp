@@ -24,34 +24,40 @@ static constexpr float TAU = 2.f * 3.14159265358979f;
 
 bool SineVoice::process(float* out_l, float* out_r, int n_samples) noexcept {
     for (int i = 0; i < n_samples; i++) {
-        // Obálka: onset rampa (click prevention 0→1)
-        float env = 1.f;
+        // Onset ramp
+        float gate = 1.f;
         if (in_onset) {
             onset_gain += onset_step;
             if (onset_gain >= 1.f) { onset_gain = 1.f; in_onset = false; }
-            env = onset_gain;
+            gate = onset_gain;
         }
 
-        // Obálka: release rampa (fade-out 1→0)
+        // Release ramp
         if (releasing) {
             rel_gain += rel_step;
             if (rel_gain <= 0.f) {
                 active = releasing = false;
                 rel_gain = 0.f;
             }
-            env *= rel_gain;
+            gate *= rel_gain;
         }
 
-        // Syntéza: sinusový oscilátor
-        float s = amp * env * std::sin(phase);
+        // Natural decay envelope (sine decays like a damped string)
+        env *= decay_coeff;
+        gate *= env;
+
+        // Sine oscillator
+        float s = amp * gate * std::sin(phase);
         out_l[i] += s * pan_l;
         out_r[i] += s * pan_r;
 
-        // Posun fáze (akumulace)
         phase += omega;
         if (phase >= TAU) phase -= TAU;
 
+        t_samples++;
         if (!active) break;
+        // Auto-off when envelope dies or max duration reached
+        if (env < 1e-5f || t_samples >= max_t_samp) { active = false; break; }
     }
     return active;
 }
@@ -84,6 +90,13 @@ void SineVoiceManager::initVoice(int midi, float omega, float amp,
     v.releasing  = false;
     v.rel_gain   = 1.f;
     v.active     = true;
+
+    // Natural decay: ~3s T60 at 48kHz
+    float T60 = 3.f;
+    v.decay_coeff = std::pow(10.f, -3.f / (T60 * sample_rate));
+    v.env         = 1.f;
+    v.t_samples   = 0;
+    v.max_t_samp  = (uint32_t)(T60 * 3.f * sample_rate);  // auto-off at 3×T60
 
     // Keyboard spread pan
     float angle = dsp::keyboard_pan_angle(midi, keyboard_spread);

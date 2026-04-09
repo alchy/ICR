@@ -45,18 +45,23 @@ public:
     bool process(float* out_l, float* out_r, int n_samples) noexcept;
 
     // ── Stav (veřejný pro inicializaci — bude zapouzdřen později) ──
-    bool  active     = false;
-    bool  releasing  = false;
-    bool  in_onset   = false;
-    float phase      = 0.f;
-    float omega      = 0.f;
-    float amp        = 0.f;
-    float pan_l      = 0.707f;  // stereo pan (keyboard spread)
-    float pan_r      = 0.707f;
-    float onset_gain = 0.f;
-    float onset_step = 0.f;
-    float rel_gain   = 1.f;
-    float rel_step   = 0.f;
+    bool     active     = false;
+    bool     releasing  = false;
+    bool     in_onset   = false;
+    float    phase      = 0.f;
+    float    omega      = 0.f;
+    float    amp        = 0.f;
+    float    pan_l      = 0.707f;
+    float    pan_r      = 0.707f;
+    float    onset_gain = 0.f;
+    float    onset_step = 0.f;
+    float    rel_gain   = 1.f;
+    float    rel_step   = 0.f;
+    // Natural decay (sine should not ring forever)
+    float    decay_coeff = 0.99998f;  // per-sample decay (~3s at 48kHz)
+    float    env         = 1.f;       // current decay envelope
+    uint32_t t_samples   = 0;
+    uint32_t max_t_samp  = 0;        // auto-off after this many samples
 };
 
 // ── VoiceManager — životní cyklus hlasů ──────────────────────────────────────
