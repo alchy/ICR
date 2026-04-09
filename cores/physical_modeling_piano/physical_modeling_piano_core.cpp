@@ -119,6 +119,9 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.K_hardening   = s.value("K_hardening", np.K_hardening);
         np.p_hardening   = s.value("p_hardening", np.p_hardening);
         np.output_scale  = s.value("output_scale", np.output_scale);
+        np.bridge_freq   = s.value("bridge_freq", np.bridge_freq);
+        np.bridge_Q      = s.value("bridge_Q", np.bridge_Q);
+        np.bridge_mix    = s.value("bridge_mix", np.bridge_mix);
         count++;
     }
     return count > 0;
@@ -163,7 +166,10 @@ bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
             {"detune_cents",  np.detune_cents},
             {"K_hardening",   np.K_hardening},
             {"p_hardening",   np.p_hardening},
-            {"output_scale",  np.output_scale}
+            {"output_scale",  np.output_scale},
+            {"bridge_freq",   np.bridge_freq},
+            {"bridge_Q",      np.bridge_Q},
+            {"bridge_mix",    np.bridge_mix}
         };
     }
     root["notes"] = notes_j;
@@ -195,6 +201,9 @@ bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
     if (key == "K_hardening")   { np.K_hardening   = value; return true; }
     if (key == "p_hardening")   { np.p_hardening   = value; return true; }
     if (key == "output_scale")  { np.output_scale  = value; return true; }
+    if (key == "bridge_freq")   { np.bridge_freq   = value; return true; }
+    if (key == "bridge_Q")      { np.bridge_Q      = value; return true; }
+    if (key == "bridge_mix")    { np.bridge_mix    = value; return true; }
 
     return false;
 }
@@ -352,7 +361,8 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
         // Initialize each dual-rail string
         physics::dual_rail_init(v.strings[si], sd.f0s[si], sr,
                                 n_disp, a_disp, np.exc_x0,
-                                np.T60_fund, np.T60_nyq, np.gauge);
+                                np.T60_fund, np.T60_nyq, np.gauge,
+                                np.bridge_freq, np.bridge_Q, np.bridge_mix);
 
         // Keyboard panning (base angle) + multi-string spread
         float kb_angle = (PI / 4.f) +

@@ -21,7 +21,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m022": {
       "midi": 22,
@@ -37,7 +40,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m023": {
       "midi": 23,
@@ -53,7 +59,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m024": {
       "midi": 24,
@@ -69,7 +78,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m025": {
       "midi": 25,
@@ -85,7 +97,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m026": {
       "midi": 26,
@@ -101,7 +116,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m027": {
       "midi": 27,
@@ -117,7 +135,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m028": {
       "midi": 28,
@@ -133,7 +154,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m029": {
       "midi": 29,
@@ -149,7 +173,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m030": {
       "midi": 30,
@@ -165,7 +192,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m031": {
       "midi": 31,
@@ -181,7 +211,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m032": {
       "midi": 32,
@@ -197,7 +230,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m033": {
       "midi": 33,
@@ -213,7 +249,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m034": {
       "midi": 34,
@@ -229,7 +268,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m035": {
       "midi": 35,
@@ -245,7 +287,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m036": {
       "midi": 36,
@@ -261,7 +306,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m037": {
       "midi": 37,
@@ -277,7 +325,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m038": {
       "midi": 38,
@@ -293,7 +344,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m039": {
       "midi": 39,
@@ -309,7 +363,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m040": {
       "midi": 40,
@@ -325,7 +382,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m041": {
       "midi": 41,
@@ -341,7 +401,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m042": {
       "midi": 42,
@@ -357,7 +420,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m043": {
       "midi": 43,
@@ -373,7 +439,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m044": {
       "midi": 44,
@@ -389,7 +458,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m045": {
       "midi": 45,
@@ -405,7 +477,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m046": {
       "midi": 46,
@@ -421,7 +496,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m047": {
       "midi": 47,
@@ -437,7 +515,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m048": {
       "midi": 48,
@@ -453,7 +534,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m049": {
       "midi": 49,
@@ -469,7 +553,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m050": {
       "midi": 50,
@@ -485,7 +572,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m051": {
       "midi": 51,
@@ -501,7 +591,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m052": {
       "midi": 52,
@@ -517,7 +610,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m053": {
       "midi": 53,
@@ -533,7 +629,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m054": {
       "midi": 54,
@@ -549,7 +648,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m055": {
       "midi": 55,
@@ -565,7 +667,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m056": {
       "midi": 56,
@@ -581,7 +686,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m057": {
       "midi": 57,
@@ -597,7 +705,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m058": {
       "midi": 58,
@@ -613,7 +724,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m059": {
       "midi": 59,
@@ -629,7 +743,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m060": {
       "midi": 60,
@@ -645,7 +762,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m061": {
       "midi": 61,
@@ -661,7 +781,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m062": {
       "midi": 62,
@@ -677,7 +800,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m063": {
       "midi": 63,
@@ -693,7 +819,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m064": {
       "midi": 64,
@@ -709,7 +838,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m065": {
       "midi": 65,
@@ -725,7 +857,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m066": {
       "midi": 66,
@@ -741,7 +876,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m067": {
       "midi": 67,
@@ -757,7 +895,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m068": {
       "midi": 68,
@@ -773,7 +914,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m069": {
       "midi": 69,
@@ -789,7 +933,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m070": {
       "midi": 70,
@@ -805,7 +952,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m071": {
       "midi": 71,
@@ -821,7 +971,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m072": {
       "midi": 72,
@@ -837,7 +990,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m073": {
       "midi": 73,
@@ -853,7 +1009,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m074": {
       "midi": 74,
@@ -869,7 +1028,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m075": {
       "midi": 75,
@@ -885,7 +1047,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m076": {
       "midi": 76,
@@ -901,7 +1066,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m077": {
       "midi": 77,
@@ -917,7 +1085,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m078": {
       "midi": 78,
@@ -933,7 +1104,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m079": {
       "midi": 79,
@@ -949,7 +1123,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m080": {
       "midi": 80,
@@ -965,7 +1142,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m081": {
       "midi": 81,
@@ -981,7 +1161,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m082": {
       "midi": 82,
@@ -997,7 +1180,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m083": {
       "midi": 83,
@@ -1013,7 +1199,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m084": {
       "midi": 84,
@@ -1029,7 +1218,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m085": {
       "midi": 85,
@@ -1045,7 +1237,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m086": {
       "midi": 86,
@@ -1061,7 +1256,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m087": {
       "midi": 87,
@@ -1077,7 +1275,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m088": {
       "midi": 88,
@@ -1093,7 +1294,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m089": {
       "midi": 89,
@@ -1109,7 +1313,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m090": {
       "midi": 90,
@@ -1125,7 +1332,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m091": {
       "midi": 91,
@@ -1141,7 +1351,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m092": {
       "midi": 92,
@@ -1157,7 +1370,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m093": {
       "midi": 93,
@@ -1173,7 +1389,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m094": {
       "midi": 94,
@@ -1189,7 +1408,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m095": {
       "midi": 95,
@@ -1205,7 +1427,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m096": {
       "midi": 96,
@@ -1221,7 +1446,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m097": {
       "midi": 97,
@@ -1237,7 +1465,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m098": {
       "midi": 98,
@@ -1253,7 +1484,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m099": {
       "midi": 99,
@@ -1269,7 +1503,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m100": {
       "midi": 100,
@@ -1285,7 +1522,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m101": {
       "midi": 101,
@@ -1301,7 +1541,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m102": {
       "midi": 102,
@@ -1317,7 +1560,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m103": {
       "midi": 103,
@@ -1333,7 +1579,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m104": {
       "midi": 104,
@@ -1349,7 +1598,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m105": {
       "midi": 105,
@@ -1365,7 +1617,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m106": {
       "midi": 106,
@@ -1381,7 +1636,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m107": {
       "midi": 107,
@@ -1397,7 +1655,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     },
     "m108": {
       "midi": 108,
@@ -1413,7 +1674,10 @@
       "disp_coeff": -0.15,
       "K_hardening": 2.5,
       "p_hardening": 0.5,
-      "output_scale": 0.065
+      "output_scale": 0.065,
+      "bridge_freq": 400.0,
+      "bridge_Q": 8.0,
+      "bridge_mix": 0.15
     }
   }
 }

@@ -51,6 +51,11 @@ struct PhysicsNoteParam {
     float K_hardening    = 1.5f;        // K scales: K_eff = K × (1 + K_hardening × vel)
     float p_hardening    = 0.3f;        // p offset: p_eff = p + p_hardening × vel
 
+    // Bridge admittance
+    float bridge_freq    = 400.f;       // bridge/soundboard resonance (Hz)
+    float bridge_Q       = 8.f;         // resonance Q factor
+    float bridge_mix     = 0.15f;       // 0=rigid (-1), 1=full resonator
+
     // Dispersion
     int   n_disp_stages  = 0;           // allpass cascade count
     float disp_coeff     = -0.15f;      // allpass coefficient
