@@ -121,7 +121,7 @@ def main() -> int:
         print(f"SR tag: {args.sr_tag}")
         print()
 
-        from training_additive.pipeline_simple import run
+        from training.pipeline_simple import run
         out = run(
             bank_dir=args.bank,
             out_path=out_path,

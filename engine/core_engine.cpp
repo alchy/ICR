@@ -34,11 +34,7 @@ using json = nlohmann::json;
 #include <memory>
 #include <fstream>
 #include <chrono>
-#ifdef _WIN32
-#  include <direct.h>   // _mkdir
-#else
-#  include <sys/stat.h> // mkdir
-#endif
+#include <filesystem>
 
 #ifdef _WIN32
   #include <conio.h>
@@ -55,7 +51,10 @@ using json = nlohmann::json;
 void CoreEngine::pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcept {
     int w    = midi_w_.load(std::memory_order_relaxed);
     int next = (w + 1) % MIDI_Q_SIZE;
-    if (next == midi_r_.load(std::memory_order_acquire)) return;  // full, drop
+    if (next == midi_r_.load(std::memory_order_acquire)) {
+        logger_.log("CoreEngine", LogSeverity::Warning, "MIDI queue full, event dropped");
+        return;
+    }
     midi_q_[w] = {t, midi, val};
     midi_w_.store(next, std::memory_order_release);
 }
@@ -241,7 +240,7 @@ void CoreEngine::loadIrFromConfig(const std::string& core_name) {
     if (ir.empty()) return;
     // Don't reload if same IR is already loaded
     if (dsp_.isConvolverLoaded() && dsp_.convolver().isEnabled()) return;
-    if (dsp_.loadConvolverIR(ir, 0)) {
+    if (dsp_.loadConvolverIR(ir, (float)sample_rate_)) {
         dsp_.setConvolverEnabled(true);
         logger_.log("CoreEngine", LogSeverity::Info,
                     "Auto-loaded IR from config: " + ir);
@@ -826,13 +825,8 @@ static inline uint8_t _velIdxToMidi(int vel_idx) {
     return static_cast<uint8_t>(9 + (std::min)(7, (std::max)(0, vel_idx)) * 16);
 }
 
-// Cross-platform mkdir (single level)
 static void _mkdirP(const std::string& dir) {
-#ifdef _WIN32
-    ::_mkdir(dir.c_str());
-#else
-    ::mkdir(dir.c_str(), 0755);
-#endif
+    std::filesystem::create_directories(dir);
 }
 
 int CoreEngine::renderBatch(const std::string& batch_json_path,

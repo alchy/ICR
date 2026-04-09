@@ -21,12 +21,7 @@
 #include "../dsp/dsp_chain.h"
 
 #include <fstream>
-
-#ifdef _WIN32
-#  include <windows.h>
-#else
-#  include <dirent.h>
-#endif
+#include <filesystem>
 
 #include "imgui.h"
 #include "imgui_impl_glfw.h"
@@ -158,33 +153,17 @@ static void glfwErrorCb(int /*err*/, const char* desc) {
     if (g_glfw_logger) g_glfw_logger->log("GLFW", LogSeverity::Error, desc);
 }
 
-// ── Soundbank file discovery ──────────────────────────────────────────────
+// ── Soundbank file discovery (cross-platform via std::filesystem) ─────────
 static std::vector<std::string> discoverSoundbankJsonFiles(const std::string& dir_path) {
     std::vector<std::string> result;
-    const char* dir = dir_path.c_str();
-#ifdef _WIN32
-    std::string pattern = std::string(dir) + "\\*.json";
-    WIN32_FIND_DATAA fd;
-    HANDLE h = FindFirstFileA(pattern.c_str(), &fd);
-    if (h != INVALID_HANDLE_VALUE) {
-        do {
-            if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
-                result.push_back(fd.cFileName);
-        } while (FindNextFileA(h, &fd));
-        FindClose(h);
+    namespace fs = std::filesystem;
+    std::error_code ec;
+    for (const auto& entry : fs::directory_iterator(dir_path, ec)) {
+        if (ec) break;
+        if (!entry.is_regular_file()) continue;
+        if (entry.path().extension() == ".json")
+            result.push_back(entry.path().filename().string());
     }
-#else
-    DIR* d = opendir(dir);
-    if (d) {
-        struct dirent* ent;
-        while ((ent = readdir(d))) {
-            std::string name(ent->d_name);
-            if (name.size() > 5 && name.substr(name.size()-5) == ".json")
-                result.push_back(name);
-        }
-        closedir(d);
-    }
-#endif
     std::sort(result.begin(), result.end(), std::greater<std::string>());
     return result;
 }

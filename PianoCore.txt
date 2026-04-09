@@ -1,0 +1,5 @@
+.\icrgui.exe --core PianoCore --params .\soundbanks\vv-rhodes-raw-nn-icreval-hybrid.json --midi-range-limit-from 40 --midi-range-limit-to 80
+
+note 64
+RS858
+Methos 

@@ -81,7 +81,7 @@ static bool readWavMono(const std::string& path, std::vector<float>& out, int& s
     return true;
 }
 
-bool Convolver::loadIR(const std::string& path, float /*sample_rate*/) {
+bool Convolver::loadIR(const std::string& path, float engine_sr) {
     std::vector<float> ir_data;
     int ir_sr = 0;
     if (!readWavMono(path, ir_data, ir_sr))
@@ -89,8 +89,28 @@ bool Convolver::loadIR(const std::string& path, float /*sample_rate*/) {
     if (ir_data.empty())
         return false;
 
-    // Note: no sample rate conversion — IR must match the engine SR.
-    setIR(ir_data.data(), (int)ir_data.size());
+    // Resample IR if sample rates differ (linear interpolation).
+    // Soundboard IRs are short (~100 ms) so linear is adequate.
+    if (engine_sr > 0.f && ir_sr > 0 && std::abs((float)ir_sr - engine_sr) > 1.f) {
+        float ratio = engine_sr / (float)ir_sr;
+        int new_len = (int)((float)ir_data.size() * ratio);
+        if (new_len < 2) new_len = 2;
+        std::vector<float> resampled(new_len);
+        for (int i = 0; i < new_len; i++) {
+            float src_pos = (float)i / ratio;
+            int idx = (int)src_pos;
+            float frac = src_pos - (float)idx;
+            if (idx + 1 < (int)ir_data.size())
+                resampled[i] = ir_data[idx] * (1.f - frac) + ir_data[idx + 1] * frac;
+            else if (idx < (int)ir_data.size())
+                resampled[i] = ir_data[idx] * (1.f - frac);
+            else
+                resampled[i] = 0.f;
+        }
+        setIR(resampled.data(), new_len);
+    } else {
+        setIR(ir_data.data(), (int)ir_data.size());
+    }
     return true;
 }
 

@@ -1,132 +1,94 @@
-# macOS — Required Changes
+# macOS Port Notes
 
-Status: **pre-implementation / parking lot**
-Target: port ICR training pipeline to macOS
-
----
-
-## Co funguje bez změn
-
-- `tempfile.mkdtemp()` — cross-platform, na macOS použije `$TMPDIR`
-- Python pipeline (extrakce, NN trénink, spline_fix) — čistý Python/PyTorch
-- Všechny cesty přes `pathlib.Path` — cross-platform
-- CMakeLists.txt — GLFW a ImGui mají macOS support
+Status: **ready to build** (no code changes needed for C++ engine)
 
 ---
 
-## Potřebné změny
+## What works without changes
 
-### 1. ICR.exe → ICR (bez přípony)
+### C++ engine (fully portable)
+- CMakeLists.txt handles macOS via `icr_platform_setup()` macro
+- CoreAudio + CoreMIDI frameworks linked automatically
+- GLFW + OpenGL work on macOS (including Apple Silicon via Rosetta/compat)
+- All file I/O uses `std::filesystem` (no `#ifdef` for directory scanning)
+- All threading uses `std::atomic` / `std::mutex` (POSIX-compatible)
+- miniaudio auto-detects CoreAudio backend
 
-Na Unixu binárky nemají `.exe`. Default cesta v `_resolve_icr_exe()` je
-hardcoded na Windows:
-
-```python
-# training/pipeline_icr_eval.py
-# training/pipeline_smooth_icr_eval.py
-# training/pipeline_full_spline_icr_eval.py
-
-icr_exe = "build/bin/Release/ICR.exe"   # ← Windows only
-```
-
-**Fix:**
-
-```python
-import platform
-
-def _default_icr_exe() -> str:
-    if platform.system() == "Windows":
-        return "build/bin/Release/ICR.exe"
-    return "build/bin/Release/ICR"
-```
-
-Použít místo hardcoded stringu ve všech třech pipeline souborech
-a v `run-extract-additive.py` defaults.
-
-Totéž v `_resolve_icr_exe()` v `pipeline_icr_eval.py`:
-
-```python
-def _resolve_icr_exe(icr_exe: str) -> str:
-    p = Path(icr_exe)
-    if p.is_absolute():
-        return str(p)
-    repo_root = Path(__file__).parent.parent
-    # Try both .exe and no-extension variants
-    for candidate in [repo_root / icr_exe,
-                      repo_root / icr_exe.replace(".exe", "")]:
-        if candidate.exists():
-            return str(candidate)
-    return icr_exe
-```
-
-### 2. CMake build na macOS
+### Build
 
 ```bash
 cmake -B build -DCMAKE_BUILD_TYPE=Release
-cmake --build build --target ICR
-# binárka: build/bin/Release/ICR  (bez .exe)
+cmake --build build
 ```
 
-Potenciální problémy:
-- OpenGL/GLFW na macOS vyžaduje `-framework OpenGL -framework Cocoa`
-  — CMakeLists.txt to pravděpodobně řeší přes `find_package(OpenGL)`
-- Metal backend (Apple Silicon) — GLFW standardně používá OpenGL přes
-  Compatibility profile, mělo by fungovat
+Binaries: `build/bin/Release/icr`, `build/bin/Release/icrgui` (no `.exe`)
 
-### 3. run-extract-additive.py — default pro --icr-exe
+### Python pipeline
+- `pathlib.Path` used throughout (cross-platform)
+- `tempfile.mkdtemp()` uses `$TMPDIR` on macOS
+- `soundfile` (libsndfile) works on macOS via Homebrew
+
+---
+
+## Known issues / things to verify
+
+### 1. Python `--icr-exe` default has `.exe` extension
+
+Training pipeline scripts hardcode `build/bin/Release/ICR.exe`:
+
+| File | Fix |
+|------|-----|
+| `training/pipeline_icr_eval.py` | `_resolve_icr_exe()` tries both `.exe` and no-extension |
+| `training/pipeline_smooth_icr_eval.py` | Default `icr_exe` parameter |
+| `training/pipeline_full_spline_icr_eval.py` | Default `icr_exe` parameter |
+| `run-extract-additive.py` | `--icr-exe` default for 3 subcommands |
+
+Fix: pass `--icr-exe build/bin/Release/icr` explicitly, or update defaults:
 
 ```python
-# Aktuálně v run-extract-additive.py:
-icr.add_argument("--icr-exe", default="build/bin/Release/ICR.exe", ...)
-
-# Změnit na:
 import platform
-_ICR_DEFAULT = ("build/bin/Release/ICR.exe"
+_ICR_DEFAULT = ("build/bin/Release/icr.exe"
                 if platform.system() == "Windows"
-                else "build/bin/Release/ICR")
-
-icr.add_argument("--icr-exe", default=_ICR_DEFAULT, ...)
-# totéž pro smooth-icr-eval a full-spline-icr-eval subcommands
+                else "build/bin/Release/icr")
 ```
 
-### 4. Subprocess — ICR.exe spouštění
+### 2. OpenGL deprecation on macOS
 
-`subprocess.run([self.icr_exe, ...])` funguje cross-platform bez změn,
-pokud je binárka executable (`chmod +x build/bin/Release/ICR` po buildu).
+Apple deprecated OpenGL in macOS 10.14 but still ships it. GLFW uses
+the Compatibility profile which works through at least macOS 14 (Sonoma).
+Long-term: ImGui supports Metal backend if needed.
 
-CMake by měl nastavit executable bit automaticky, ale pro jistotu:
+### 3. Executable permission
+
+CMake sets executable bit automatically. If manual build:
+```bash
+chmod +x build/bin/Release/icr build/bin/Release/icrgui
+```
+
+### 4. Homebrew dependencies (if building GUI)
 
 ```bash
-chmod +x build/bin/Release/ICR
+brew install cmake
+# GLFW and ImGui are fetched by CMake (FetchContent), no Homebrew needed
+# OpenGL ships with Xcode command line tools
 ```
 
-### 5. Audio knihovny
+### 5. Apple Silicon (M1/M2/M3/M4)
 
-Pokud ICR používá pro přehrávání PortAudio nebo CoreAudio:
-- PortAudio má macOS backend
-- CoreAudio je nativní macOS API
-
-Tréninková pipeline WAV soubory jen čte/zapisuje přes `soundfile`
-(libsndfile) — cross-platform bez změn.
-
----
-
-## Soubory které vyžadují změny
-
-| Soubor | Změna |
-|---|---|
-| `training/pipeline_icr_eval.py` | `_resolve_icr_exe()` + default |
-| `training/pipeline_smooth_icr_eval.py` | default `icr_exe` parametr |
-| `training/pipeline_full_spline_icr_eval.py` | default `icr_exe` parametr |
-| `run-extract-additive.py` | `--icr-exe` default pro 3 subcommands |
-| `CMakeLists.txt` | ověřit macOS build (OpenGL/Metal) |
+- AVX2 not available on ARM — CMake auto-skips (`ICR_USE_AVX2` only
+  activates on `x86_64` processor)
+- NEON auto-vectorization available via `-O3` (GCC/Clang)
+- Performance is excellent — Apple Silicon is fast enough for full
+  polyphony without SIMD intrinsics
 
 ---
 
-## Co ověřit po portu
+## Verification checklist
 
-1. `cmake --build` projde bez chyb na Apple Silicon (M1/M2/M3)
-2. `ICR --render-batch` renderuje správně (WAV výstup identický s Windows)
-3. Celý `icr-eval` pipeline projde end-to-end
-4. Temp adresáře se vytváří a mažou správně (`$TMPDIR`)
-5. Cesty s mezerami fungují (macOS uživatelské adresáře je mohou obsahovat)
+1. `cmake -B build && cmake --build build` completes without errors
+2. `./build/bin/Release/icr --list-cores` shows all 4 cores
+3. `./build/bin/Release/icrgui --core PhysicalModelingPianoCore` launches GUI
+4. MIDI input works (CoreMIDI port appears in dropdown)
+5. Audio output works (CoreAudio, speakers/headphones)
+6. Soundboard IR loads and convolver enables
+7. Batch render produces valid stereo WAV files

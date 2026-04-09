@@ -20,8 +20,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
-from training.modules.eq_fitter import _eq_to_biquads
-from training.modules.exporter import (
+from training_additive.modules.eq_fitter import _eq_to_biquads
+from training_additive.modules.exporter import (
     _render_note_rms_ref,
     VEL_GAMMA,
     TARGET_RMS_DEFAULT,

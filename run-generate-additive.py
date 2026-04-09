@@ -68,7 +68,7 @@ def _load_source(source_path: str):
     if not path.exists():
         raise FileNotFoundError(f"Source not found: {source_path}")
     if path.suffix.lower() == ".pt":
-        from training.modules.profile_trainer import ProfileTrainer
+        from training_additive.modules.profile_trainer import ProfileTrainer
         print(f"Loading model: {source_path}")
         return ProfileTrainer().load(source_path)
     if path.suffix.lower() == ".json":
@@ -153,7 +153,7 @@ def main() -> int:
         target_rms  = args.target_rms,
     )
 
-    from training.modules.generator import SampleGenerator
+    from training_additive.modules.generator import SampleGenerator
     gen = SampleGenerator()
 
     # ── Single note ───────────────────────────────────────────────────────────

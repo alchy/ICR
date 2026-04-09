@@ -431,7 +431,7 @@ def _render_differentiable(
                             noise_net, df_net, phi_net.
     """
     import torch
-    from training.modules.profile_trainer import midi_feat, vel_feat, k_feat, midi_to_hz
+    from training_additive.modules.profile_trainer import midi_feat, vel_feat, k_feat, midi_to_hz
 
     device = next(model.parameters()).device
 

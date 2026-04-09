@@ -21,7 +21,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from training.modules.exporter import SoundbankExporter
+from training_additive.modules.exporter import SoundbankExporter
 
 
 def main():
