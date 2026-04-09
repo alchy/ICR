@@ -65,7 +65,7 @@ struct PhysicsNoteParam {
     float detune_cents   = 1.f;
 
     // Output
-    float output_scale   = 0.065f;      // per-note gain (headroom calibration)
+    float output_scale   = 0.020f;      // per-note gain (headroom calibration)
 };
 
 // ── Voice ────────────────────────────────────────────────────────────────

@@ -156,12 +156,14 @@ inline float bridge_filter_tick(float x, BridgeFilter& bf) {
     bf.hp_state += (1.f - bf.hp_coeff) * hp;
 
     // Mix: rigid dominates, resonator adds spectral color
-    // Clamp output magnitude to prevent any possibility of divergence
     float mixed = rigid * (1.f - bf.mix) + hp * bf.mix;
+
+    // Energy conservation: output magnitude must not exceed input.
+    // Bridge transfers energy to soundboard, never creates it.
     float mag = std::abs(mixed);
     float in_mag = std::abs(x);
-    if (mag > in_mag * 1.05f && in_mag > 1e-8f)
-        mixed *= in_mag * 1.05f / mag;
+    if (mag > in_mag && in_mag > 1e-10f)
+        mixed *= in_mag / mag;
 
     return mixed;
 }

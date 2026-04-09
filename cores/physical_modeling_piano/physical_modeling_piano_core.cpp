@@ -334,10 +334,10 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Output scale — must guarantee no clipping on a single note.
-    // Chaigne hammer produces peak amplitude ~11 * vel_norm at full velocity.
-    // Target: peak ≈ -3 dB (0.7) at vel_idx=7.
-    v.output_scale = np.output_scale;
+    // Output scale — compensate for bridge resonator energy addition.
+    // Higher bridge_mix → more energy in loop → reduce output to prevent clipping.
+    float bridge_comp = 1.f / (1.f + np.bridge_mix * 3.f);  // mix=0→1.0, mix=0.3→0.52
+    v.output_scale = np.output_scale * bridge_comp;
 
     // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
     float v0 = physics::velocity_to_v0(vel_norm);
