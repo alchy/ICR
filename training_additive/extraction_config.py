@@ -64,6 +64,26 @@ class ExtractionConfig:
 
 RELAXED = ExtractionConfig()  # defaults above = relaxed v2
 
+RAW = ExtractionConfig(
+    tau1_floor=0.005,
+    tau1_max_s=120.0,
+    biexp_ratio_min=1.01,
+    biexp_improvement=0.95,
+    damping_law_enabled=False,
+    physics_floor_enabled=False,
+    a1_blend_enabled=False,
+    attack_tau_max=0.100,
+    noise_amp_max=5.0,
+    noise_centroid_use_floor=False,
+    beat_hz_fallback=0.0,
+    outlier_enabled=False,
+    outlier_sigma=99.0,
+    eq_sub_fundamental_clamp=False,
+    eq_stereo_width_range=(0.01, 10.0),
+    keyboard_smoothing_enabled=False,
+    keyboard_smoothing_threshold=99.0,
+)
+
 STRICT = ExtractionConfig(
     tau1_floor=0.050,
     tau1_max_s=20.0,

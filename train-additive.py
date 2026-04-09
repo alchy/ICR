@@ -127,7 +127,8 @@ def main() -> int:
         )
 
         print(f"\n{'='*60}")
-        print(f"Soundbank:     {result['bank_path']}")
+        print(f"Relaxed bank:  {result['bank_path']}")
+        print(f"Raw bank:      {result['raw_path']}")
         for ir in result.get("ir_paths", []):
             print(f"Soundboard IR: {ir}")
         print(f"\nRun with:")
