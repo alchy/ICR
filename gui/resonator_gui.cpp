@@ -18,6 +18,7 @@
 #include "../engine/synth_core_registry.h"
 #include "../cores/sampler/sampler_core.h"
 #include "../cores/additive_synthesis_piano/additive_synthesis_piano_core.h"
+#include "../cores/physical_modeling_piano/physical_modeling_piano_core.h"
 #include "../dsp/dsp_chain.h"
 
 #include <fstream>
@@ -112,10 +113,14 @@ struct GuiState {
     int  selected_core   = 0;
     std::string active_core_name;
 
-    // Soundbank selector (for AdditiveSynthesisPianoCore)
+    // Soundbank selector (per-core)
     std::string soundbank_dir;                  // from engine config
     std::vector<std::string> soundbank_files;   // filenames (no path)
     std::string active_soundbank;               // currently loaded
+
+    std::string phys_soundbank_dir;
+    std::vector<std::string> phys_soundbank_files;
+    std::string phys_active_soundbank;
 
     std::vector<std::string> ports;
     int  selected_port   = 0;
@@ -761,6 +766,10 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
     if (gs.soundbank_dir.empty()) gs.soundbank_dir = "soundbanks-additive";
     gs.soundbank_files = discoverSoundbankJsonFiles(gs.soundbank_dir);
 
+    gs.phys_soundbank_dir = engine.coreConfigValue("PhysicalModelingPianoCore", "soundbank_dir");
+    if (gs.phys_soundbank_dir.empty()) gs.phys_soundbank_dir = "soundbanks-physical";
+    gs.phys_soundbank_files = discoverSoundbankJsonFiles(gs.phys_soundbank_dir);
+
     // Sync convolver state from engine (--ir may have loaded it)
     if (DspChain* dsp = engine.getDspChain()) {
         if (dsp->isConvolverLoaded()) {
@@ -898,6 +907,43 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                                                 gs.active_soundbank = fname;
                                                 engine.getLogger().log("GUI", LogSeverity::Info,
                                                     "Loaded soundbank: " + fname);
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if (sel) ImGui::SetItemDefaultFocus();
+                        }
+                        ImGui::EndCombo();
+                    }
+                    ImGui::SameLine(0, 20.f);
+                }
+            }
+
+            // ── Soundbank selector (PhysicalModelingPianoCore) ──────────────
+            if (dynamic_cast<PhysicalModelingPianoCore*>(engine.core())) {
+                if (!gs.phys_soundbank_files.empty()) {
+                    ImGui::Text("Soundbank:");
+                    ImGui::SameLine();
+                    ImGui::SetNextItemWidth(220.f);
+                    const char* sb_preview = gs.phys_active_soundbank.empty()
+                                           ? "(select...)" : gs.phys_active_soundbank.c_str();
+                    if (ImGui::BeginCombo("##phys_soundbank", sb_preview)) {
+                        for (const auto& fname : gs.phys_soundbank_files) {
+                            bool sel = (fname == gs.phys_active_soundbank);
+                            if (ImGui::Selectable(fname.c_str(), sel)) {
+                                if (fname != gs.phys_active_soundbank) {
+                                    std::string path = gs.phys_soundbank_dir + "/" + fname;
+                                    auto* core = dynamic_cast<PhysicalModelingPianoCore*>(engine.core());
+                                    if (core) {
+                                        std::ifstream f(path);
+                                        if (f.is_open()) {
+                                            std::string json_str((std::istreambuf_iterator<char>(f)),
+                                                                  std::istreambuf_iterator<char>());
+                                            if (core->loadBankJson(json_str)) {
+                                                gs.phys_active_soundbank = fname;
+                                                engine.getLogger().log("GUI", LogSeverity::Info,
+                                                    "Loaded physical bank: " + fname);
                                             }
                                         }
                                     }

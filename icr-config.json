@@ -11,7 +11,7 @@
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive/pl-grand-04071611-soundboard.wav"
     },
     "PhysicalModelingPianoCore": {
-      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/physical-piano-04081305.json",
+      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/teng-v2-default.json",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical",
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive/pl-grand-04071611-soundboard.wav"
     },
