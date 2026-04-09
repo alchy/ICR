@@ -107,11 +107,13 @@ struct GuiState {
     int  selected_core   = 0;
     std::string active_core_name;
 
-    // Soundbank selector (generic, per core name)
+    // Soundbank selector (unified, per core name)
     struct CoreBankState {
         std::string dir;
-        std::vector<std::string> files;
+        std::vector<std::string> files;   // JSON files or subdirectory names
         std::string active;
+        bool is_sampler = false;          // uses selectBank() instead of loadBankJson()
+        bool loading = false;             // async loading indicator
     };
     std::unordered_map<std::string, CoreBankState> core_banks;
 
@@ -738,13 +740,43 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             break;
         }
     }
-    // Discover soundbank JSON files for AdditiveSynthesisPianoCore
-    // Discover soundbanks for all registered cores
+    // Discover soundbanks for all registered cores (unified)
     for (const auto& cname : gs.core_names) {
         GuiState::CoreBankState cbs;
         cbs.dir = engine.coreConfigValue(cname, "soundbank_dir");
-        if (!cbs.dir.empty())
+
+        // SamplerCore uses subdirectories as banks (via selectBank API)
+        if (cname == "SamplerCore") {
+            cbs.is_sampler = true;
+            std::string sample_dir = engine.coreConfigValue(cname, "params_path");
+            if (!sample_dir.empty()) {
+                cbs.dir = sample_dir;
+                // Discover subdirectories as bank names
+                namespace fs = std::filesystem;
+                std::error_code ec;
+                for (const auto& entry : fs::directory_iterator(sample_dir, ec)) {
+                    if (ec) break;
+                    if (entry.is_directory() && entry.path().filename().string()[0] != '.')
+                        cbs.files.push_back(entry.path().filename().string());
+                }
+                std::sort(cbs.files.begin(), cbs.files.end());
+            }
+        } else if (!cbs.dir.empty()) {
             cbs.files = discoverSoundbankJsonFiles(cbs.dir);
+        }
+
+        // Log status
+        if (cbs.dir.empty()) {
+            engine.getLogger().log("GUI", LogSeverity::Info,
+                cname + ": no soundbank_dir configured");
+        } else if (cbs.files.empty()) {
+            engine.getLogger().log("GUI", LogSeverity::Warning,
+                cname + ": soundbank_dir empty or not found: " + cbs.dir);
+        } else {
+            engine.getLogger().log("GUI", LogSeverity::Info,
+                cname + ": " + std::to_string(cbs.files.size()) + " banks in " + cbs.dir);
+        }
+
         gs.core_banks[cname] = std::move(cbs);
     }
 
@@ -845,63 +877,56 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             }
             ImGui::SameLine(0, 20.f);
 
-            // ── Bank selector (SamplerCore only) ─────────────────────────────
-            if (auto* sc = dynamic_cast<SamplerCore*>(engine.core())) {
-                const auto& banks = sc->bankNames();
-                if (!banks.empty()) {
-                    ImGui::Text("Bank:");
-                    ImGui::SameLine();
-                    ImGui::SetNextItemWidth(180.f);
-                    const char* bank_preview = sc->activeBankName().empty()
-                                             ? "(none)" : sc->activeBankName().c_str();
-                    bool loading = sc->isBankLoading();
-                    if (loading) ImGui::BeginDisabled();
-                    if (ImGui::BeginCombo("##bank", bank_preview)) {
-                        for (const auto& bname : banks) {
-                            bool sel = (bname == sc->activeBankName());
-                            if (ImGui::Selectable(bname.c_str(), sel)) {
-                                if (bname != sc->activeBankName()) {
-                                    sc->selectBank(bname, engine.getLogger());
-                                }
-                            }
-                            if (sel) ImGui::SetItemDefaultFocus();
-                        }
-                        ImGui::EndCombo();
-                    }
-                    if (loading) ImGui::EndDisabled();
-                    ImGui::SameLine(0, 8.f);
-                    if (loading) {
-                        ImGui::TextColored({1.f, 0.8f, 0.2f, 1.f}, "Loading...");
-                        ImGui::SameLine(0, 20.f);
-                    }
-                }
-            }
-
-            // ── Soundbank selector (generic, all cores) ──────────────────
+            // ── Soundbank selector (unified, all cores) ──────────────────
             if (engine.core()) {
                 std::string cname = engine.core()->coreName();
                 auto it = gs.core_banks.find(cname);
-                if (it != gs.core_banks.end() && !it->second.files.empty()) {
+                if (it != gs.core_banks.end()) {
                     auto& cbs = it->second;
                     ImGui::Text("Soundbank:");
                     ImGui::SameLine();
                     ImGui::SetNextItemWidth(220.f);
-                    const char* sb_preview = cbs.active.empty()
-                                           ? "(select...)" : cbs.active.c_str();
+
+                    const char* sb_preview;
+                    if (cbs.files.empty())
+                        sb_preview = "(no banks)";
+                    else if (cbs.active.empty())
+                        sb_preview = "(select...)";
+                    else
+                        sb_preview = cbs.active.c_str();
+
+                    // Sampler async loading indicator
+                    if (cbs.is_sampler) {
+                        auto* sc = dynamic_cast<SamplerCore*>(engine.core());
+                        if (sc) cbs.loading = sc->isBankLoading();
+                    }
+                    if (cbs.loading) ImGui::BeginDisabled();
+
                     if (ImGui::BeginCombo("##soundbank", sb_preview)) {
                         for (const auto& fname : cbs.files) {
                             bool sel = (fname == cbs.active);
                             if (ImGui::Selectable(fname.c_str(), sel)) {
                                 if (fname != cbs.active) {
-                                    std::string path = cbs.dir + "/" + fname;
-                                    std::ifstream f(path);
-                                    if (f.is_open()) {
-                                        std::string json_str((std::istreambuf_iterator<char>(f)),
-                                                              std::istreambuf_iterator<char>());
-                                        if (engine.core()->loadBankJson(json_str)) {
+                                    if (cbs.is_sampler) {
+                                        // SamplerCore: select by directory name
+                                        auto* sc = dynamic_cast<SamplerCore*>(engine.core());
+                                        if (sc) {
+                                            sc->selectBank(fname, engine.getLogger());
                                             cbs.active = fname;
-                                            engine.getLogger().log("GUI", LogSeverity::Info,
-                                                "Loaded bank: " + fname);
+                                        }
+                                    } else {
+                                        // All other cores: load JSON file
+                                        std::string path = cbs.dir + "/" + fname;
+                                        std::ifstream f(path);
+                                        if (f.is_open()) {
+                                            std::string json_str(
+                                                (std::istreambuf_iterator<char>(f)),
+                                                 std::istreambuf_iterator<char>());
+                                            if (engine.core()->loadBankJson(json_str)) {
+                                                cbs.active = fname;
+                                                engine.getLogger().log("GUI", LogSeverity::Info,
+                                                    "Loaded bank: " + fname);
+                                            }
                                         }
                                     }
                                 }
@@ -909,6 +934,12 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                             if (sel) ImGui::SetItemDefaultFocus();
                         }
                         ImGui::EndCombo();
+                    }
+
+                    if (cbs.loading) {
+                        ImGui::EndDisabled();
+                        ImGui::SameLine(0, 8.f);
+                        ImGui::TextColored({1.f, 0.8f, 0.2f, 1.f}, "Loading...");
                     }
                     ImGui::SameLine(0, 20.f);
                 }
