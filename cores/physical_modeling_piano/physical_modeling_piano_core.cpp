@@ -116,6 +116,9 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.disp_coeff    = s.value("disp_coeff", np.disp_coeff);
         np.n_strings     = s.value("n_strings", np.n_strings);
         np.detune_cents  = s.value("detune_cents", np.detune_cents);
+        np.K_hardening   = s.value("K_hardening", np.K_hardening);
+        np.p_hardening   = s.value("p_hardening", np.p_hardening);
+        np.output_scale  = s.value("output_scale", np.output_scale);
         count++;
     }
     return count > 0;
@@ -157,7 +160,10 @@ bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
             {"n_disp_stages", np.n_disp_stages},
             {"disp_coeff",    np.disp_coeff},
             {"n_strings",     np.n_strings},
-            {"detune_cents",  np.detune_cents}
+            {"detune_cents",  np.detune_cents},
+            {"K_hardening",   np.K_hardening},
+            {"p_hardening",   np.p_hardening},
+            {"output_scale",  np.output_scale}
         };
     }
     root["notes"] = notes_j;
@@ -186,6 +192,9 @@ bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
     if (key == "disp_coeff")    { np.disp_coeff    = value; return true; }
     if (key == "n_strings")     { np.n_strings     = (int)value; return true; }
     if (key == "detune_cents")  { np.detune_cents  = value; return true; }
+    if (key == "K_hardening")   { np.K_hardening   = value; return true; }
+    if (key == "p_hardening")   { np.p_hardening   = value; return true; }
+    if (key == "output_scale")  { np.output_scale  = value; return true; }
 
     return false;
 }
@@ -319,13 +328,13 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     // Output scale — must guarantee no clipping on a single note.
     // Chaigne hammer produces peak amplitude ~11 * vel_norm at full velocity.
     // Target: peak ≈ -3 dB (0.7) at vel_idx=7.
-    // Scale = 0.065 gives: 11 * 0.953 * 0.065 ≈ 0.68 → -3.3 dB headroom.
-    v.output_scale = 0.065f;
+    v.output_scale = np.output_scale;
 
     // ── Chaigne-Askenfelt hammer ─────────────────────────────────────
     float v0 = physics::velocity_to_v0(vel_norm);
     v.hammer_len = physics::hammer::compute_force(
-        midi, v0, np.exc_x0, sr, v.hammer_v_in);
+        midi, v0, np.exc_x0, sr, v.hammer_v_in,
+        np.K_hardening, np.p_hardening);
 
     // ── Multi-string setup ──────────────────────────────────────────
     v.n_strings = np.n_strings;

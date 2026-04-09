@@ -67,10 +67,12 @@ hammer speed directly in the Chaigne physics model).
 | Key | Type | Range | Default | Description |
 |-----|------|-------|---------|-------------|
 | `exc_x0` | float | 0.05-0.25 | 0.1429 (1/7) | Striking position as fraction of string length. Creates comb-filter notches at `k = 1/x0` multiples |
+| `K_hardening` | float | 0-5.0 | 1.5 | Velocity-dependent stiffness scaling: `K_eff = K × (1 + K_hardening × vel_norm)`. Higher = brighter forte |
+| `p_hardening` | float | 0-1.0 | 0.3 | Velocity-dependent exponent offset: `p_eff = p + p_hardening × vel_norm`. Higher = sharper forte |
 
-Note: Hammer stiffness (K), exponent (p), and mass (Mh) are interpolated
-internally from Chaigne & Askenfelt (1994) anchor measurements, not
-stored in the bank.
+Hammer base stiffness (K), exponent (p), and mass (Mh) are interpolated
+internally from Chaigne & Askenfelt (1994) anchor measurements.
+`K_hardening` and `p_hardening` control how much these change with velocity.
 
 ### Dispersion
 
@@ -78,6 +80,12 @@ stored in the bank.
 |-----|------|-------|---------|-------------|
 | `n_disp_stages` | int | 0-16 | from B | Allpass cascade stages. Auto: `min(16, int(B * N^2 * 0.5))`, minimum 3 or 0 |
 | `disp_coeff` | float | -0.3-0 | -0.15 | Per-stage allpass coefficient |
+
+### Output
+
+| Key | Type | Range | Default | Description |
+|-----|------|-------|---------|-------------|
+| `output_scale` | float | 0.01-0.5 | 0.065 | Per-note output gain. Adjust for loudness calibration across keyboard |
 
 ---
 

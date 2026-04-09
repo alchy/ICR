@@ -89,6 +89,9 @@ Accepts any bank key via `setNoteParam(midi, vel, key, value)`:
 | `disp_coeff` | Per-stage allpass coefficient |
 | `n_strings` | Unison strings (1-3) |
 | `detune_cents` | String detuning (cents) |
+| `K_hardening` | Velocity stiffness scaling (0-5) |
+| `p_hardening` | Velocity exponent offset (0-1) |
+| `output_scale` | Per-note output gain (0.01-0.5) |
 
 Note: Physical core uses string key names (not param IDs) in its
 `setNoteParam` implementation. SysEx param IDs 0x01-0x06 map to

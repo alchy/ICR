@@ -48,6 +48,8 @@ struct PhysicsNoteParam {
 
     // Hammer
     float exc_x0         = 1.f/7.f;     // strike position (fraction)
+    float K_hardening    = 1.5f;        // K scales: K_eff = K × (1 + K_hardening × vel)
+    float p_hardening    = 0.3f;        // p offset: p_eff = p + p_hardening × vel
 
     // Dispersion
     int   n_disp_stages  = 0;           // allpass cascade count
@@ -56,6 +58,9 @@ struct PhysicsNoteParam {
     // Multi-string
     int   n_strings      = 3;
     float detune_cents   = 1.f;
+
+    // Output
+    float output_scale   = 0.065f;      // per-note gain (headroom calibration)
 };
 
 // ── Voice ────────────────────────────────────────────────────────────────

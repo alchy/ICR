@@ -278,18 +278,16 @@ inline AnchorParams interp_params(int midi) {
 ///
 /// Returns: number of samples written to v_in
 inline int compute_force(int midi, float v0, float exc_x0, float sr,
-                         float* v_in) {
+                         float* v_in,
+                         float K_hardening = 1.5f,
+                         float p_hardening = 0.3f) {
     AnchorParams ap = interp_params(midi);
 
     // Velocity-dependent felt hardness
-    // v0 range: 0.5 (pp) to 6.0 (ff) → vel_norm 0..1
     static constexpr float V_MAX = 6.0f;
-    static constexpr float K_HARDENING = 1.5f;   // K scales up to 2.5× at ff
-    static constexpr float P_HARDENING = 0.3f;   // p increases by up to 0.3 at ff
-
     float vel_norm = (std::min)(v0 / V_MAX, 1.f);
-    ap.K_stiff *= (1.f + K_HARDENING * vel_norm);
-    ap.p_exp   += P_HARDENING * vel_norm;
+    ap.K_stiff *= (1.f + K_hardening * vel_norm);
+    ap.p_exp   += p_hardening * vel_norm;
 
     float Ms = ap.Ms_g * 0.001f;       // g → kg
     float L  = ap.L_m;
