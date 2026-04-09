@@ -1,4 +1,4 @@
-# ICR — TODO
+# ICR -- TODO
 
 Critical assessment informed by Chabassier, Chaigne & Joly (2012):
 *"Modeling and simulation of a grand piano"* (INRIA RR-8181),
@@ -10,7 +10,7 @@ listening tests, and bank inspector analysis.
 
 ### P1. Automated quality report (Phase 2b)
 
-**Why first:** We iterate by subjective listening — slow and inconsistent.
+**Why first:** We iterate by subjective listening -- slow and inconsistent.
 An automated spectral distance metric vs original WAV would give objective
 scores per note, identify worst offenders, and measure improvement between
 iterations without full listening sessions.
@@ -26,53 +26,54 @@ iterations without full listening sessions.
 
 **Problem from listening test:**
 - MIDI 21 (score 0.89): "good texture but weak hammer attack noise"
-- Bass A_noise = 0.33 vs treble A_noise = 0.98 — 3x weaker
-- noise_centroid = 1000 Hz everywhere below MIDI 91 (floor masks variation)
-- Real piano: bass hammer is heavier → stronger "thwack", not weaker
+- Bass A_noise = 0.33 vs treble A_noise = 0.98 -- 3x weaker
+- Real piano: bass hammer is heavier -> stronger "thwack", not weaker
 
-**Root cause:** Harmonic leakage in noise residual.  Even with sin()+cos()
-basis, the least-squares subtraction is imperfect for bass (many overlapping
-harmonics in 0-5 kHz band).  The residual energy is dominated by harmonic
-tails, not noise, so `A_noise` and `centroid_hz` are contaminated.
+**Root cause:** Harmonic leakage in noise residual. Even with sin()+cos()
+basis, the least-squares subtraction is imperfect for bass. The residual
+energy is dominated by harmonic tails, not noise, so A_noise and centroid_hz
+are contaminated.
 
-**Steps:**
+**Mitigation (DONE):** Physics-based noise centroid/tau override
+(`hammer_noise_centroid`, `hammer_attack_tau` in math.h) provides a floor
+for centroid and ceiling for tau at noteOn. This ensures minimum metallic
+brightness even when extracted values are contaminated. Noise amplitude is
+scaled down proportionally when centroid is raised (`sqrt(bank/phys)` ratio).
+
+**Remaining:**
 - [ ] Improve noise isolation: bandpass noise residual to 2-8 kHz before
       measuring A_noise and centroid (hammer noise lives above harmonics)
-- [ ] Remove centroid floor (1000 Hz) — let extraction measure naturally,
-      but validate against Chabassier hammer contact physics
-- [ ] Consider velocity-dependent centroid: harder hammer = higher centroid
 
 ### P3. "Hollow/bottle" tones in MIDI 50-65 range
 
 **Problem from listening test:**
-- MIDI 53 (score 0.25): "dutý ton, bez výrazných vyšších harmonických"
-- MIDI 55 (score 0.21): "symptom hraní na láhev"
-- MIDI 61 (score 0.34): "dutý, chybí průraznost"
+- MIDI 53 (score 0.25): "duty ton, bez vyraznych vyssich harmonickych"
+- MIDI 55 (score 0.21): "symptom hrani na lahev"
+- MIDI 61 (score 0.34): "duty, chybi pruraznost"
 
-**Possible causes (need investigation):**
-- Spectral EQ may be cutting upper harmonics (EQ fitted to compensate
-  for model deficiency, creating over-correction)
-- Onset/decay separation may lose A0 accuracy for some notes (main STFT
-  peak may be lower than true onset peak if hammer transient is very short)
-- These notes may need more partials with significant energy above k=20
+**Root cause identified:** Source recording (pl-grand) has genuinely weak
+upper harmonics for MIDI 50-65. Cross-piano comparison shows ks-grand (CFX)
+has 7-10x richer k5/k1 ratios. The extraction IS the measurement -- see
+[EXTRACTION_AUDIT.md](EXTRACTION_AUDIT.md) for details.
 
-**Steps:**
-- [ ] Use bank inspector to compare A0 spectral tilt of good vs bad notes
-- [ ] Check if EQ biquads have high-frequency cuts for these notes
-- [ ] Compare A0(k) between affected notes and their neighbors
+**Mitigations applied:**
+- Forte spectral shape normalization (DONE) -- higher-velocity layers
+  boost weak partials in lower-velocity layers
+- Hybrid bank generation (DONE) -- `tools/synthesize_hybrid_bank.py`
+  borrows spectral shape from ks-grand for deficient pl-grand notes
+
+**Remaining:**
+- [ ] Physics floor extraction option (re-extract with physics_floor_enabled)
+- [ ] Cross-note spectral shape borrowing (borrow from MIDI neighbors)
 
 ### P4. Weak bass notes (MIDI 25-30)
 
 **Problem from listening test:**
-- MIDI 25 (score 0.30), MIDI 27 (score 0.24): "slabý, obly, bez jasných harmonických"
+- MIDI 25 (score 0.30), MIDI 27 (score 0.24): "slaby, obly, bez jasnych harmonickych"
 - rms_gain = 0.00020-0.00022 (lowest in entire bank)
 
-**Root cause:** These are the deepest wound bass strings (f0 = 31-39 Hz).
-Few velocity layers available.  Low rms_gain means either A0 extraction
-underestimated the partials, or RMS calibration overcompensated.
-
 **Steps:**
-- [ ] Verify with quality report (P1) — spectral distance vs original
+- [ ] Verify with quality report (P1) -- spectral distance vs original
 - [ ] Check if spectral shape borrowing is working for these notes
 - [ ] Consider per-register rms_gain normalization
 
@@ -80,7 +81,7 @@ underestimated the partials, or RMS calibration overcompensated.
 
 ## Implementation Plan (Phases)
 
-### Phase 1 — Extraction robustness (MOSTLY DONE)
+### Phase 1 -- Extraction robustness (DONE)
 
 | Step | Status | What |
 |------|--------|------|
@@ -90,14 +91,14 @@ underestimated the partials, or RMS calibration overcompensated.
 | 1d | DONE | Bi-exp fitter: 8 initializations + random restarts |
 | 1e | DONE | Per-note fit_quality metric (propagated to JSON + GUI) |
 | 1f | DONE | Onset/decay separation (A0 from onset, fit from main STFT) |
-| 1g | DONE | Spectral shape borrowing (vel 5-7 avg → vel 0-4) |
+| 1g | DONE | Spectral shape borrowing (vel 5-7 avg -> vel 0-4) |
 | 1h | DONE | Hammer-contact skip (10ms post-peak) |
 
-**Remaining:** tau1 still hits 0.05 lower bound for ~12% of middle register
-notes (MIDI 61, 62, 65).  These may be genuine fast-coupling notes
-(soundboard resonance) — needs quality report (P1) to confirm.
+**Note:** tau1 still hits 0.05 lower bound for ~12% of middle register
+notes (MIDI 61, 62, 65). These may be genuine fast-coupling notes
+(soundboard resonance) -- needs quality report (P1) to confirm.
 
-### Phase 2 — Validation and tools (PARTIALLY DONE)
+### Phase 2 -- Validation and tools (PARTIALLY DONE)
 
 | Step | Status | What |
 |------|--------|------|
@@ -105,57 +106,68 @@ notes (MIDI 61, 62, 65).  These may be genuine fast-coupling notes
 | 2b | **NEXT** | Post-export quality report (spectral distance vs WAV) |
 | 2c | TODO | `--validate` flag on run-extract-additive.py |
 | 2d | TODO | Unit tests for dsp_math.h + additive_synthesis_piano_math.h |
+| 2e | DONE | Hybrid bank synthesis (`tools/synthesize_hybrid_bank.py`) |
 
-### Phase 3 — Longitudinal string model (TODO)
+### Phase 3 -- Velocity dynamics and normalization (DONE)
 
-Goal: metallic precursor "ping" in bass.  Details in previous version.
+| Step | Status | What |
+|------|--------|------|
+| 3a | DONE | vel_gain = pow(vel_norm, 1.5) curve (~23 dB range) |
+| 3b | DONE | Forte rms_gain reference (always use highest valid vel layer) |
+| 3c | DONE | Forte spectral shape normalization (A0 ratios from forte) |
+| 3d | REVERTED | Body parameter -- removed, sounds better without |
+| 3e | DONE | EQ gain floor (-3 dB, prevents over-muffling) |
+| 3f | DONE | Physics-based noise centroid/tau override (metallic attack) |
+| 3g | IMPL/OFF | vel_spectral_weight -- implemented in math.h but not called in core (forte normalization handles the need) |
+
+### Phase 4 -- Longitudinal string model (TODO)
+
+Goal: metallic precursor "ping" in bass.
 
 | Step | What |
 |------|------|
-| 3a | Extract non-harmonic peaks in first 10-20 ms |
-| 3b | Classify: longitudinal (f_longi series) vs phantom (f_m+f_n) vs noise |
-| 3c | C++ longitudinal partial synthesis (cosine sum, rapid decay) |
-| 3d | Export longitudinal_partials[] to JSON |
+| 4a | Extract non-harmonic peaks in first 10-20 ms |
+| 4b | Classify: longitudinal (f_longi series) vs phantom (f_m+f_n) vs noise |
+| 4c | C++ longitudinal partial synthesis (cosine sum, rapid decay) |
+| 4d | Export longitudinal_partials[] to JSON |
 
-### Phase 4 — Hammer excitation model (TODO)
+### Phase 5 -- Hammer excitation model (TODO)
 
 Goal: velocity-dependent timbre via nonlinear hammer force F = K_H*(xi-u)^p.
 
 | Step | What |
 |------|------|
-| 4a | Extract spectral tilt per velocity |
-| 4b | Fit p exponent per note from multi-vel data |
-| 4c | Store hammer_p, hammer_K_H per note in JSON |
-| 4d | C++ hammer_spectral_weight(k, velocity, p) at noteOn |
-| 4e | Replace static A0 with A0 * E(k,vel) |
-| 4f | Velocity-dependent noise_centroid |
+| 5a | Extract spectral tilt per velocity |
+| 5b | Fit p exponent per note from multi-vel data |
+| 5c | Store hammer_p, hammer_K_H per note in JSON |
+| 5d | C++ hammer_spectral_weight(k, velocity, p) at noteOn |
+| 5e | Replace static A0 with A0 * E(k,vel) |
 
 Chabassier reference: p = 2.27 (bass) to 3.0 (treble), K_H spans 3 orders
-of magnitude, hammer strikes at x0/L ≈ 1/8 (null at k=8,16,24).
+of magnitude, hammer strikes at x0/L ~ 1/8 (null at k=8,16,24).
 
-### Phase 5 — Soundboard and advanced (TODO)
+### Phase 6 -- Soundboard and advanced (TODO)
 
 | Step | What |
 |------|------|
-| 5a | Extract soundboard IR (deconvolution) |
-| 5b | Post-synthesis convolution stage |
-| 5c | Phantom partial extraction (f_m + f_n) |
-| 5d | Sympathetic resonance (open string coupling) |
+| 6a | Extract soundboard IR (deconvolution) |
+| 6b | Post-synthesis convolution stage |
+| 6c | Phantom partial extraction (f_m + f_n) |
+| 6d | Sympathetic resonance (open string coupling) |
 
-### Phase 6 — Stereo width extraction reform (TODO)
+### Phase 7 -- Stereo width extraction reform (TODO)
 
 **Current fix:** stereo_width clamped to [0.2, 2.0] in eq_fitter.py.
 
 **Root cause:** Python synthesis is nearly mono for centered notes
-(symmetric pan → S ≈ 0) → width = orig_S/syn_S explodes.
-Adding decorrelation to Python renderer would NOT help — real stereo
+(symmetric pan -> S ~ 0) -> width = orig_S/syn_S explodes. Real stereo
 comes from soundboard radiation, room acoustics, mic placement.
 
-**Long-term fix:** frequency-dependent width — compare S/M only in bands
+**Long-term fix:** frequency-dependent width -- compare S/M only in bands
 where synthesis has actual stereo content (beating frequencies, pan offset).
-Bands where synthesis is mono → width = 1.0 (ignore).
+Bands where synthesis is mono -> width = 1.0 (ignore).
 
-Deferred to after Phase 4 (hammer model changes spectral content).
+Deferred to after Phase 5 (hammer model changes spectral content).
 
 ---
 
@@ -166,10 +178,10 @@ Deferred to after Phase 4 (hammer model changes spectral content).
 | Register | MIDI range | Avg score | Best | Worst | Pattern |
 |----------|-----------|-----------|------|-------|---------|
 | Deep bass | 21-30 | 0.44 | 0.89 (21) | 0.23 (29,30) | Weak gain, missing harmonics |
-| Bass | 32-45 | 0.67 | 0.80 (41) | 0.20 (39) | Variable; 39 "chrastivý" |
-| Low-mid | 46-56 | 0.48 | 0.68 (52) | 0.25 (53) | "Dutý" tones begin |
+| Bass | 32-45 | 0.67 | 0.80 (41) | 0.20 (39) | Variable; 39 "chrastivy" |
+| Low-mid | 46-56 | 0.48 | 0.68 (52) | 0.25 (53) | "Duty" tones begin |
 | Middle | 57-65 | 0.46 | 0.76 (60) | 0.34 (61) | "Hollow/bottle" problem |
-| Upper-mid | 66-77 | 0.52 | 0.79 (71) | 0.30 (77) | "Břinkavý" from stereo_width |
+| Upper-mid | 66-77 | 0.52 | 0.79 (71) | 0.30 (77) | "Brinkava" from stereo_width |
 | Upper | 78-90 | 0.69 | 0.98 (88) | 0.40 (89) | Improving toward treble |
 | Treble | 91-108 | 0.94 | 0.99 (92,95) | 0.79 (98) | Excellent |
 
@@ -177,89 +189,41 @@ Deferred to after Phase 4 (hammer model changes spectral content).
 
 | Symptom | Parameter | Notes |
 |---------|-----------|-------|
-| "Břinkavý/praskla struna" | stereo_width > 4.0 | MIDI 65 (8.0), 71 (7.13), 74 (4.18) — FIXED by clamp |
-| "Dutý/lahev" | Unknown | MIDI 53, 55, 61 — needs investigation (P3) |
-| Weak/quiet | rms_gain < 0.0003 | MIDI 25, 27 — lowest in bank |
-| "Chrastivý" | Unknown | MIDI 39 — isolated, possible extraction artifact |
+| "Brinkava/praskla struna" | stereo_width > 4.0 | MIDI 65 (8.0), 71 (7.13), 74 (4.18) -- FIXED by clamp |
+| "Duty/lahev" | Weak source harmonics | MIDI 53, 55, 61 -- root cause: pl-grand recording |
+| Weak/quiet | rms_gain < 0.0003 | MIDI 25, 27 -- lowest in bank |
+| "Chrastivy" | Unknown | MIDI 39 -- isolated, possible extraction artifact |
 | Good bass | tau1 0.3-1.0, a1 0.4-0.6 | MIDI 32, 40, 41, 46 |
-| Good treble | Few partials, high A_noise | MIDI 88-95 — simple signal, strong noise attack |
+| Good treble | Few partials, high A_noise | MIDI 88-95 -- simple signal, strong noise attack |
 
 ---
 
-## Sound Editor — New Features
+## Sound Editor -- Future Features
 
-### SE1. Note Compare & Correct (Source → Destination)
+### SE1. Note Compare & Correct (Source -> Destination)
 
 Interactive tool for fixing problematic notes by referencing good ones.
+Per-parameter comparison with deviation % and correction sliders.
 
-**Concept:**
-
-1. User selects **Source** (good note, e.g. MIDI 64) and **Destination** (bad note, e.g. MIDI 70)
-2. Editor computes **Base** — theoretical expected values for destination derived from source proportions:
-   - For each parameter, base = source_value × (dest_f0 / src_f0) scaling factor
-   - Velocity-dependent parameters scale additionally by velocity ratio
-3. Editor shows per-parameter comparison:
-   - Absolute value (what destination currently has)
-   - Base value (what it "should" have based on source proportions)
-   - **Relative deviation** in % (how far destination is from base)
-
-**Example:**
-- Source: f0=261.6, partial k=3 A0=0.15
-- Destination: f0=369.9, base A0 for k=3 = 0.15 (amplitude preserved)
-- Destination actual A0=0.18 → deviation = +20%
-- Source: partial k=3 f_hz=785 (ratio to f0 = 3.0×)
-- Destination base f_hz = 369.9 × 3.0 = 1109.7
-- Destination actual f_hz = 1115.2 → deviation = +0.5% (inharmonicity)
-
-**Correction modes:**
-- **100% correction** — set destination parameter to base (exact proportional match to source)
-- **Partial correction** — slider to shift up/down from base (e.g. +5%, -3%)
-- **Copy missing partials** — if destination lacks a partial that source has, create it with f0-proportional scaling
-
-**Implementation:**
-- [ ] Backend: `/editor/compare` endpoint — takes source (midi,vel) and dest (midi,vel), returns per-parameter base + deviation table
-- [ ] Backend: `/editor/correct` endpoint — applies corrections to destination params in store
-- [ ] Frontend: new panel with source/dest selectors, deviation table with color-coded %, correction sliders, Apply button
-- [ ] Frontend: visual diff overlay on 3D spline view (highlight deviating parameters)
+- [ ] Backend: `/editor/compare` endpoint
+- [ ] Backend: `/editor/correct` endpoint
+- [ ] Frontend: source/dest selectors, deviation table, correction sliders
 
 ### SE2. MIDI Audition (Note Playback via Loopback)
 
 Send MIDI noteOn/noteOff from the editor to ICR for instant listening.
 
-**Workflow:**
-1. User connects MIDI output port in editor (same as SysEx port or separate)
-2. User clicks a note in the compare panel or the 3D view
-3. Editor sends noteOn (configurable velocity) → ICR plays the note
-4. After configurable duration (or on mouse release), sends noteOff
-
-**Implementation:**
-- [ ] Backend: `/midi/audition` endpoint — sends noteOn, waits duration_ms, sends noteOff via mido
-- [ ] Backend: sysex_bridge.py already has mido — extend with `send_note_on(midi, vel)` and `send_note_off(midi)`
-- [ ] Frontend: "Play" button next to source/dest note selectors
-- [ ] Frontend: click-to-play on 3D cards (with shift or middle-click modifier)
-- [ ] Velocity slider (pp to ff) in audition controls
-
-**SysEx bridge extension:**
-```python
-def note_on(self, midi: int, velocity: int = 80):
-    """Send MIDI noteOn via the open port."""
-    msg = mido.Message("note_on", note=midi, velocity=velocity)
-    self._port.send(msg)
-
-def note_off(self, midi: int):
-    """Send MIDI noteOff via the open port."""
-    msg = mido.Message("note_off", note=midi, velocity=0)
-    self._port.send(msg)
-```
+- [ ] Backend: `/midi/audition` endpoint
+- [ ] Frontend: click-to-play on note cards
 
 ---
 
 ## Operational Issues
 
 ### Tests
-- [ ] `tests/test_dsp_math.cpp` — biquad, decay_coeff, RBJ shelves, allpass unity gain
-- [ ] `tests/test_piano_math.cpp` — string models, envelope, rise
-- [ ] Python: synthetic signal → extractor → verify parameters
+- [ ] `tests/test_dsp_math.cpp` -- biquad, decay_coeff, RBJ shelves, allpass unity gain
+- [ ] `tests/test_piano_math.cpp` -- string models, envelope, rise
+- [ ] Python: synthetic signal -> extractor -> verify parameters
 - [ ] CMake test target (`ctest`)
 
 ### Build / environment
@@ -267,14 +231,15 @@ def note_off(self, midi: int):
 - [ ] Evaluate removing torch dependency (unused DifferentiableRenderer)
 
 ### Tools
-- [x] `tools/inspect_bank.py` — per-register summary + note detail
-- [ ] `tools/compare_banks.py` — diff two soundbanks
+- [x] `tools/inspect_bank.py` -- per-register summary + note detail
+- [x] `tools/synthesize_hybrid_bank.py` -- hybrid bank from pl-grand + ks-grand
+- [ ] `tools/compare_banks.py` -- diff two soundbanks
 
 ---
 
 ## Hardware Velocity Resolution
 
-MIDI velocity is 7-bit (1-127).  C++ maps to continuous float 0.0-7.0
+MIDI velocity is 7-bit (1-127). C++ maps to continuous float 0.0-7.0
 (`midiVelToFloat`) and interpolates all parameters via `lerpNoteParams`.
 Architecture ready for 10+ bit hardware velocity.
 
@@ -284,7 +249,7 @@ Architecture ready for 10+ bit hardware velocity.
 
 | Parameter | Chabassier | Our extraction | Status |
 |-----------|-----------|----------------|--------|
-| Tuning | A=440 | A≈438-439 (-5 to -15 cents) | OK (different tuning) |
+| Tuning | A=440 | A~438-439 (-5 to -15 cents) | OK (different tuning) |
 | B (D#1) | ~3.5e-5 (core theory) | 5.3e-4 (measured) | Expected (wound strings) |
 | B (C2) | ~3.6e-5 | 2.2e-4 | Expected |
 | tau1 (D#1) | ~2.2 s | 0.66 s | Short (mf vs ff dynamics) |
@@ -295,46 +260,21 @@ Architecture ready for 10+ bit hardware velocity.
 
 ---
 
-## Physics Reference (Chabassier et al. 2012)
-
-### String parameters (Steinway D)
-
-| Note | L (m) | d (mm) | F | T0 (N) | f0 (Hz) | p | K_H | M_H (g) |
-|------|-------|--------|---|--------|---------|---|-----|---------|
-| D#1 | 1.945 | 1.48 | 5.73 | 1781 | 38.9 | 2.4 | 4.0e8 | 12.0 |
-| C2 | 1.600 | 0.95 | 3.55 | 865 | 65.4 | 2.27 | 2.0e9 | 10.2 |
-| F3 | 0.961 | 1.05 | 1.0 | 774 | 174.6 | 2.4 | 1.0e9 | 9.0 |
-| C#5 | 0.326 | 0.92 | 1.0 | 684 | 555.6 | 2.6 | 2.8e10 | 7.9 |
-| G6 | 0.124 | 0.79 | 1.0 | 587 | 1571 | 3.0 | 2.3e11 | 6.77 |
-
-### Key physics
-- Hammer stiffness K_H: 4e8 (bass) to 2.3e11 (treble)
-- Nonlinear exponent p: 2.27 (bass) to 3.0 (treble)
-- Hammer velocity: 0.5 m/s (pp) to 4.5 m/s (ff)
-- Wave speed: transverse 209 m/s, longitudinal 2914 m/s (C2)
-- Damping: R_u + eta_u * f^2
-- Hammer contact: bass ~4 ms, middle ~2 ms, treble <1 ms
-
-### Onset prepend vs. bi-exp fitting — root cause analysis
-
-Onset prepend captures hammer contact transient (~10-20ms), which the
-bi-exp fitter interprets as very fast tau1.  MIDI 57 (smooth decay from
-peak → tau1=0.03) vs MIDI 59 (spike + plateau → tau1=1.58) showed
-the mechanism is soundboard coupling at resonance.
-
-**Fix:** onset for A0 peak only, bi-exp fit from main STFT data.
-Reduced bound-hit rate from 59% to 12% of middle register.
-
----
-
 ## Recently Completed
 
+- [x] Velocity dynamics curve: vel_gain = pow(vel_norm, 1.5), ~23 dB range
+- [x] Forte rms_gain reference (always from highest valid velocity layer)
+- [x] Forte spectral shape normalization (A0 ratios from forte, only boost)
+- [x] Physics-based noise centroid/tau override (metallic hammer attack)
+- [x] EQ gain floor (-3 dB, prevents aggressive EQ from muffling)
+- [x] Body parameter (implemented then reverted -- better without)
+- [x] Hybrid bank synthesis tool (`tools/synthesize_hybrid_bank.py`)
 - [x] DSP math refactor (`dsp_math.h` + `additive_synthesis_piano_math.h`)
-- [x] Allpass sign fix (reverted incorrect "fix" — `+g*y[n-1]` is correct)
+- [x] Allpass sign fix (reverted incorrect "fix" -- `+g*y[n-1]` is correct)
 - [x] GUI: velocity fallback display, PaddedPanel, fit_quality columns
 - [x] Onset STFT frame scaling for bass
 - [x] Attack rise envelope (1-exp(-t/tau_rise)), noise bypasses onset gate
-- [x] Noise filter: 1-pole → biquad bandpass (Q=1.5)
+- [x] Noise filter: 1-pole -> biquad bandpass (Q=1.5)
 - [x] Python/C++ noise model match (both use biquad BP for RMS calibration)
 - [x] attack_tau capped at 0.10s, eq_freq_min lowered to 80Hz
 - [x] Onset/decay separation (A0 from onset, fit from main STFT)
