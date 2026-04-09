@@ -78,6 +78,8 @@ bytes[0..4] → 35-bit integer → reinterpret as IEEE 754 float32
 | `disp_coeff` | yes | — | Per-stage allpass coefficient |
 | `n_strings` | yes | — | Unison strings (1-3) |
 | `detune_cents` | yes | — | String detuning (cents) |
+| `hammer_mass` | yes | — | Hammer mass scale (0.1-3.0) |
+| `string_mass` | yes | — | String mass scale (0.1-3.0) |
 | `output_scale` | yes | — | Per-note output gain (0.01-0.5) |
 | `attack_tau` | — | yes (0x03) | Attack transient decay (s) |
 | `A_noise` | — | yes (0x04) | Attack noise amplitude |

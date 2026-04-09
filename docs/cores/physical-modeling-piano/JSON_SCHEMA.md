@@ -69,10 +69,11 @@ hammer speed directly in the Chaigne physics model).
 | `exc_x0` | float | 0.05-0.25 | 0.1429 (1/7) | Striking position as fraction of string length. Creates comb-filter notches at `k = 1/x0` multiples |
 | `K_hardening` | float | 0-5.0 | 1.5 | Velocity-dependent stiffness scaling: `K_eff = K × (1 + K_hardening × vel_norm)`. Higher = brighter forte |
 | `p_hardening` | float | 0-1.0 | 0.3 | Velocity-dependent exponent offset: `p_eff = p + p_hardening × vel_norm`. Higher = sharper forte |
+| `hammer_mass` | float | 0.1-3.0 | 1.0 | Hammer mass scale (1.0 = Chaigne default). Lower = lighter = shorter contact = brighter attack |
+| `string_mass` | float | 0.1-3.0 | 1.0 | String mass scale (1.0 = Chaigne default). Higher = heavier = higher wave impedance |
 
-Hammer base stiffness (K), exponent (p), and mass (Mh) are interpolated
-internally from Chaigne & Askenfelt (1994) anchor measurements.
-`K_hardening` and `p_hardening` control how much these change with velocity.
+Base K, p, Mh, Ms are interpolated from Chaigne & Askenfelt (1994)
+anchor measurements. The scale parameters above multiply these base values.
 
 ### Dispersion
 

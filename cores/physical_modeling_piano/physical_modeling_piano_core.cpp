@@ -118,6 +118,8 @@ bool PhysicalModelingPianoCore::loadBankFromJson(const std::string& json_str,
         np.detune_cents  = s.value("detune_cents", np.detune_cents);
         np.K_hardening   = s.value("K_hardening", np.K_hardening);
         np.p_hardening   = s.value("p_hardening", np.p_hardening);
+        np.hammer_mass   = s.value("hammer_mass", np.hammer_mass);
+        np.string_mass   = s.value("string_mass", np.string_mass);
         np.output_scale  = s.value("output_scale", np.output_scale);
         np.bridge_freq   = s.value("bridge_freq", np.bridge_freq);
         np.bridge_Q      = s.value("bridge_Q", np.bridge_Q);
@@ -166,6 +168,8 @@ bool PhysicalModelingPianoCore::exportBankJson(const std::string& path) {
             {"detune_cents",  np.detune_cents},
             {"K_hardening",   np.K_hardening},
             {"p_hardening",   np.p_hardening},
+            {"hammer_mass",   np.hammer_mass},
+            {"string_mass",   np.string_mass},
             {"output_scale",  np.output_scale},
             {"bridge_freq",   np.bridge_freq},
             {"bridge_Q",      np.bridge_Q},
@@ -200,6 +204,8 @@ bool PhysicalModelingPianoCore::setNoteParam(int midi, int /*vel*/,
     if (key == "detune_cents")  { np.detune_cents  = value; return true; }
     if (key == "K_hardening")   { np.K_hardening   = value; return true; }
     if (key == "p_hardening")   { np.p_hardening   = value; return true; }
+    if (key == "hammer_mass")   { np.hammer_mass   = value; return true; }
+    if (key == "string_mass")   { np.string_mass   = value; return true; }
     if (key == "output_scale")  { np.output_scale  = value; return true; }
     if (key == "bridge_freq")   { np.bridge_freq   = value; return true; }
     if (key == "bridge_Q")      { np.bridge_Q      = value; return true; }
@@ -343,7 +349,8 @@ void PhysicsVoiceManager::initVoice(int midi, uint8_t velocity,
     float v0 = physics::velocity_to_v0(vel_norm);
     v.hammer_len = physics::hammer::compute_force(
         midi, v0, np.exc_x0, sr, v.hammer_v_in,
-        np.K_hardening, np.p_hardening);
+        np.K_hardening, np.p_hardening, np.gauge,
+        np.hammer_mass, np.string_mass);
 
     // ── Multi-string setup ──────────────────────────────────────────
     v.n_strings = np.n_strings;
