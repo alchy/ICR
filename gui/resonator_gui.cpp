@@ -85,6 +85,12 @@ private:
     float avail_;
 };
 
+// ── Path helpers ─────────────────────────────────────────────────────────────
+static std::string filenameFromPath(const std::string& path) {
+    auto pos = path.find_last_of("/\\");
+    return (pos != std::string::npos) ? path.substr(pos + 1) : path;
+}
+
 static bool isBlack(int midi) {
     int n = midi % 12;
     return n == 1 || n == 3 || n == 6 || n == 8 || n == 10;
@@ -150,7 +156,49 @@ struct GuiState {
     // Stats
     int  active_voices  = 0;
     bool sustain_on     = false;
+
+    // Log viewer
+    std::vector<std::string> log_lines;
+    uint64_t log_last_read_ms = 0;
+    long     log_last_size    = 0;
 };
+
+// ── Log file tail reader ──────────────────────────────────────────────────────
+static void updateLogTail(GuiState& gs, const std::string& log_path, int max_lines = 24) {
+    uint64_t now = guiNowMs();
+    if (now - gs.log_last_read_ms < 500) return;  // read every 500ms
+    gs.log_last_read_ms = now;
+
+    std::ifstream f(log_path, std::ios::ate);
+    if (!f.is_open()) return;
+    long size = (long)f.tellg();
+    if (size == gs.log_last_size) return;  // no new data
+    gs.log_last_size = size;
+
+    // Read last ~4KB (enough for 20-30 lines)
+    long start = (std::max)(0L, size - 4096L);
+    f.seekg(start);
+    std::string buf((std::istreambuf_iterator<char>(f)),
+                     std::istreambuf_iterator<char>());
+
+    gs.log_lines.clear();
+    size_t pos = 0;
+    if (start > 0) {
+        pos = buf.find('\n');
+        if (pos != std::string::npos) pos++;
+        else pos = 0;
+    }
+    while (pos < buf.size()) {
+        size_t end = buf.find('\n', pos);
+        if (end == std::string::npos) end = buf.size();
+        if (end > pos)
+            gs.log_lines.push_back(buf.substr(pos, end - pos));
+        pos = end + 1;
+    }
+    if ((int)gs.log_lines.size() > max_lines)
+        gs.log_lines.erase(gs.log_lines.begin(),
+                           gs.log_lines.end() - max_lines);
+}
 
 // ── GLFW error callback ───────────────────────────────────────────────────────
 static Logger* g_glfw_logger = nullptr;
@@ -805,6 +853,20 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 cname + ": " + std::to_string(cbs.files.size()) + " banks in " + cbs.dir);
         }
 
+        // Restore active bank from params_path in config
+        if (!cbs.is_sampler && !cbs.files.empty()) {
+            std::string pp = engine.coreConfigValue(cname, "params_path");
+            if (!pp.empty()) {
+                std::string fn = filenameFromPath(pp);
+                for (const auto& f : cbs.files) {
+                    if (f == fn) { cbs.active = fn; break; }
+                }
+                if (cbs.active.empty())
+                    engine.getLogger().log("GUI", LogSeverity::Warning,
+                        cname + ": saved bank '" + fn + "' not found in " + cbs.dir);
+            }
+        }
+
         gs.core_banks[cname] = std::move(cbs);
     }
 
@@ -812,19 +874,48 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
     if (DspChain* dsp = engine.getDspChain()) {
         if (dsp->isConvolverLoaded()) {
             gs.conv_enabled = dsp->convolver().isEnabled();
-            gs.conv_mix     = (int)(dsp->convolver().getMix() * 100.f);
+            gs.conv_mix     = (int)(dsp->convolver().getMix() * 100.f / 0.04f);
         }
+    }
+
+    // Sync DSP slider state from config for the active core
+    {
+        auto cv = [&](const std::string& k, int fb) -> int {
+            std::string v = engine.coreConfigValue(gs.active_core_name, k);
+            if (v.empty()) return fb;
+            try { return std::stoi(v); } catch(...) { return fb; }
+        };
+        gs.master_gain     = (uint8_t)cv("master_gain", gs.master_gain);
+        gs.pan             = (uint8_t)cv("master_pan",  gs.pan);
+        gs.lfo_speed       = (uint8_t)cv("lfo_speed",   gs.lfo_speed);
+        gs.lfo_depth       = (uint8_t)cv("lfo_depth",   gs.lfo_depth);
+        gs.limiter_thr     = (uint8_t)cv("limiter_threshold", gs.limiter_thr);
+        gs.limiter_rel     = (uint8_t)cv("limiter_release",   gs.limiter_rel);
+        gs.limiter_enabled = cv("limiter_enabled", 0) >= 64;
+        gs.bbe_def         = (uint8_t)cv("bbe_definition",  gs.bbe_def);
+        gs.bbe_bass        = (uint8_t)cv("bbe_bass_boost",  gs.bbe_bass);
+        gs.bbe_enabled     = (gs.bbe_def > 0 || gs.bbe_bass > 0);
     }
 
     gs.ports = MidiInput::listPorts();
     MidiInput midi_in;
 
+    // Restore MIDI port from config (match by name)
+    std::string saved_port = engine.coreConfigValue("_engine", "midi_port");
+    int auto_port = 0;
+    if (!saved_port.empty()) {
+        for (int i = 0; i < (int)gs.ports.size(); i++) {
+            if (gs.ports[i] == saved_port) { auto_port = i; break; }
+        }
+    }
+    gs.selected_port = auto_port;
+
     if (!gs.ports.empty()) {
-        midi_in.open(engine, 0);
+        midi_in.open(engine, gs.selected_port);
         gs.midi_connected = midi_in.isOpen();
         logger.log("GUI", LogSeverity::Info,
-            gs.midi_connected ? "Auto-connected: " + gs.ports[0]
-                              : "MIDI open failed");
+            gs.midi_connected ? "Auto-connected: " + gs.ports[gs.selected_port]
+                              : "MIDI open failed for port " + std::to_string(gs.selected_port));
     }
     logger.log("GUI", LogSeverity::Info, "GUI loop started");
 
@@ -1067,7 +1158,7 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         sectionGap();
 
         // ═══════════════════════════════════════════════════════════════════════
-        // PIANO KEYBOARD (full width, centered)
+        // PIANO KEYBOARD (left) + LOG VIEWER (right)
         // ═══════════════════════════════════════════════════════════════════════
         {
             int nw = 0;
@@ -1075,12 +1166,42 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 if (!isBlack(m)) nw++;
             float piano_px = nw * WHITE_W;
             float avail_w  = ImGui::GetContentRegionAvail().x;
-            float offset   = (avail_w - piano_px) * 0.5f;
-            if (offset > 0.f) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset);
+            float log_w    = avail_w - piano_px - GRID_GAP * 2.f;
 
+            // Piano (left-aligned)
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0.f, 4.f});
             drawPiano(gs, engine);
             ImGui::PopStyleVar();
+
+            // Log viewer (right of piano)
+            if (log_w > 100.f) {
+                ImGui::SameLine(0, GRID_GAP);
+                ImGui::BeginChild("##logview", {log_w, WHITE_H + 4.f}, true,
+                                  ImGuiWindowFlags_HorizontalScrollbar);
+                {
+                    // Read log tail periodically
+                    updateLogTail(gs, "icr.log");
+
+                    ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(160,170,180,220));
+                    for (const auto& line : gs.log_lines) {
+                        // Color by severity
+                        if (line.size() > 4 && line[1] == 'E')
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255,100,100,255));
+                        else if (line.size() > 4 && line[1] == 'W')
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(255,200,80,255));
+                        else
+                            ImGui::PushStyleColor(ImGuiCol_Text, IM_COL32(160,170,180,200));
+
+                        ImGui::TextUnformatted(line.c_str());
+                        ImGui::PopStyleColor();
+                    }
+                    ImGui::PopStyleColor();
+                    // Auto-scroll to bottom
+                    if (ImGui::GetScrollY() >= ImGui::GetScrollMaxY() - 20.f)
+                        ImGui::SetScrollHereY(1.f);
+                }
+                ImGui::EndChild();
+            }
         }
         sectionGap();
 
@@ -1180,11 +1301,8 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         // Bottom bar: keyboard shortcuts help
         // ═══════════════════════════════════════════════════════════════════════
         sectionGap();
-        ImGui::TextDisabled("Spacebar = sustain  |  A-K = C4-B4  |  Click keys to play");
-        if (!engine.configPath().empty()) {
-            ImGui::SameLine(0, 20.f);
-            ImGui::TextDisabled("config: %s", engine.configPath().c_str());
-        }
+        ImGui::TextDisabled("Keys: Space=sustain  A-K=C4-B4  |  config: %s",
+            engine.configPath().empty() ? "(none)" : engine.configPath().c_str());
 
         // Sustain toggle
         if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
@@ -1226,8 +1344,11 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
 
     // ── Save state to icr-config.json on exit ─────────────────────────────
     {
-        // Remember active core
+        // Remember active core and MIDI port
         engine.setCoreConfigValue("_engine", "default_core", gs.active_core_name);
+        if (gs.midi_connected && gs.selected_port < (int)gs.ports.size())
+            engine.setCoreConfigValue("_engine", "midi_port",
+                gs.ports[gs.selected_port]);
 
         // Remember active soundbank per core
         for (const auto& [cname, cbs] : gs.core_banks) {

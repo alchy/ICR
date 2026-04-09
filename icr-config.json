@@ -1,61 +1,61 @@
 {
-  "log_file": "icr.log",
-  "default_core": "SineCore",
   "cores": {
-    "SamplerCore": {
-      "params_path": "C:/SoundBanks/IthacaPlayer",
+    "AdditiveSynthesisPianoCore": {
+      "bbe_bass_boost": "0",
+      "bbe_definition": "0",
+      "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
+      "lfo_depth": "0",
+      "lfo_speed": "0",
+      "limiter_enabled": "0",
+      "limiter_release": "50",
+      "limiter_threshold": "100",
       "master_gain": "100",
       "master_pan": "64",
-      "lfo_speed": "0",
-      "lfo_depth": "0",
-      "limiter_threshold": "100",
-      "limiter_release": "50",
-      "limiter_enabled": "0",
-      "bbe_definition": "0",
-      "bbe_bass_boost": "0"
-    },
-    "AdditiveSynthesisPianoCore": {
       "params_path": "",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive",
-      "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard",
-      "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
-      "master_gain": "100",
-      "master_pan": "64",
-      "lfo_speed": "0",
-      "lfo_depth": "0",
-      "limiter_threshold": "100",
-      "limiter_release": "50",
-      "limiter_enabled": "0",
-      "bbe_definition": "0",
-      "bbe_bass_boost": "0"
+      "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard"
     },
     "PhysicalModelingPianoCore": {
-      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/teng-v2-default.json",
-      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical",
-      "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard",
+      "bbe_bass_boost": "0",
+      "bbe_definition": "0",
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
+      "lfo_depth": "0",
+      "lfo_speed": "0",
+      "limiter_enabled": "0",
+      "limiter_release": "50",
+      "limiter_threshold": "100",
       "master_gain": "100",
       "master_pan": "64",
-      "lfo_speed": "0",
+      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/v11-pure-harmonic.json",
+      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical",
+      "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard"
+    },
+    "SamplerCore": {
+      "bbe_bass_boost": "0",
+      "bbe_definition": "0",
       "lfo_depth": "0",
-      "limiter_threshold": "110",
+      "lfo_speed": "0",
+      "limiter_enabled": "0",
       "limiter_release": "50",
-      "limiter_enabled": "64",
-      "bbe_definition": "30",
-      "bbe_bass_boost": "20"
+      "limiter_threshold": "100",
+      "master_gain": "100",
+      "master_pan": "64",
+      "params_path": "C:/SoundBanks/IthacaPlayer"
     },
     "SineCore": {
-      "params_path": "",
-      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-sine",
+      "bbe_bass_boost": "0",
+      "bbe_definition": "0",
+      "lfo_depth": "0",
+      "lfo_speed": "0",
+      "limiter_enabled": "0",
+      "limiter_release": "50",
+      "limiter_threshold": "127",
       "master_gain": "100",
       "master_pan": "64",
-      "lfo_speed": "0",
-      "lfo_depth": "0",
-      "limiter_threshold": "127",
-      "limiter_release": "50",
-      "limiter_enabled": "0",
-      "bbe_definition": "0",
-      "bbe_bass_boost": "0"
+      "params_path": "",
+      "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-sine"
     }
-  }
+  },
+  "default_core": "PhysicalModelingPianoCore",
+  "log_file": "icr.log"
 }
