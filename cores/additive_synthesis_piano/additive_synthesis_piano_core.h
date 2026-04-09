@@ -221,7 +221,7 @@ public:
                 PianoVoiceManager& vm,
                 float sample_rate, float beat_scale, float noise_level,
                 int rng_seed, float pan_spread, float stereo_decorr,
-                float keyboard_spread, float eq_strength,
+                float keyboard_spread, float eq_strength, float body,
                 std::mutex& bank_mutex) noexcept;
 
     /// Translate MIDI noteOff.
@@ -316,6 +316,7 @@ private:
     std::atomic<float> stereo_decorr_  {1.0f};
     std::atomic<float> keyboard_spread_{0.60f};
     std::atomic<float> eq_strength_    {0.5f};
+    std::atomic<float> body_           {0.15f};  // low-harmonic boost (0=flat, 1=+6dB at k=1)
 
     // Protects note_params_ during full bank reload.
     mutable std::mutex bank_mutex_;

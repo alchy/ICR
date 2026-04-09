@@ -172,6 +172,7 @@ void AdditiveSynthesisPianoCore::noteOn(uint8_t midi, uint8_t velocity) {
                       stereo_decorr_.load(std::memory_order_relaxed),
                       keyboard_spread_.load(std::memory_order_relaxed),
                       eq_strength_.load(std::memory_order_relaxed),
+                      body_.load(std::memory_order_relaxed),
                       bank_mutex_);
 }
 
@@ -196,7 +197,7 @@ void PianoPatchManager::noteOn(
         PianoVoiceManager& vm,
         float sample_rate, float beat_scale, float noise_level,
         int rng_seed, float pan_spread, float stereo_decorr,
-        float keyboard_spread, float eq_strength,
+        float keyboard_spread, float eq_strength, float body,
         std::mutex& bank_mutex) noexcept {
     std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
     if (!lk.owns_lock()) return;
@@ -261,6 +262,17 @@ void PianoPatchManager::noteOn(
                 if (target_a0 > np.partials[ki].A0)
                     np.partials[ki].A0 = target_a0;
             }
+        }
+    }
+
+    // Body boost: gently raise low harmonics (k=1-8) for warmth/fullness.
+    // body=0 → flat, body=0.15 → k=1 gets +1.3 dB, k=4 gets +0.7 dB.
+    if (body > 0.001f) {
+        static constexpr int BODY_K = 8;
+        int kLim = (std::min)(np.K, BODY_K);
+        for (int ki = 0; ki < kLim; ki++) {
+            float fade = 1.f - (float)ki / (float)BODY_K;  // 1.0 → 0.0
+            np.partials[ki].A0 *= 1.f + body * fade;
         }
     }
 
@@ -665,6 +677,11 @@ bool AdditiveSynthesisPianoCore::setParam(const std::string& key, float value) {
                            std::memory_order_relaxed);
         return true;
     }
+    if (key == "body") {
+        body_.store(std::max(0.f, std::min(1.f, value)),
+                    std::memory_order_relaxed);
+        return true;
+    }
     return false;
 }
 
@@ -676,6 +693,7 @@ bool AdditiveSynthesisPianoCore::getParam(const std::string& key, float& out) co
     if (key == "stereo_decorr")    { out = stereo_decorr_    .load(std::memory_order_relaxed); return true; }
     if (key == "keyboard_spread")  { out = keyboard_spread_  .load(std::memory_order_relaxed); return true; }
     if (key == "eq_strength")      { out = eq_strength_      .load(std::memory_order_relaxed); return true; }
+    if (key == "body")             { out = body_             .load(std::memory_order_relaxed); return true; }
     return false;
 }
 
@@ -687,6 +705,7 @@ std::vector<CoreParamDesc> AdditiveSynthesisPianoCore::describeParams() const {
         { "stereo_decorr",   "Stereo Decorr",    "Stereo",  "×",   stereo_decorr_  .load(), 0.f,    2.f,      false },
         { "keyboard_spread", "Keyboard Spread",  "Stereo",  "rad", keyboard_spread_.load(), 0.f,    3.14159f, false },
         { "eq_strength",     "EQ Strength",      "Timbre",  "×",   eq_strength_    .load(), 0.f,    1.f,      false },
+        { "body",            "Body",             "Timbre",  "",    body_           .load(), 0.f,    1.f,      false },
         { "rng_seed",        "RNG Seed",         "Debug",   "",    (float)rng_seed_.load(), 0.f,    9999.f,   true  },
     };
 }
