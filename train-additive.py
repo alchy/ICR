@@ -92,8 +92,9 @@ def main() -> int:
 
     bank_name = Path(args.bank).name
     ts = datetime.now().strftime("%m%d%H%M")
+    mode_suffix = "strict" if args.strict else "relaxed"
     out_path = args.out or str(
-        REPO_ROOT / "soundbanks-additive" / f"{bank_name}-{ts}.json")
+        REPO_ROOT / "soundbanks-additive" / f"{bank_name}-{ts}-{mode_suffix}.json")
 
     log_path = REPO_ROOT / "training-logs" / f"train-additive-{bank_name}-{ts}.log"
     tee = _Tee(sys.stdout, log_path)
