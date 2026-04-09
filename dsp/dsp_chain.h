@@ -17,7 +17,7 @@
  *   0x23  BBE definition:     MIDI 0..127 → 0..12 dB  (5 kHz high shelf)
  *   0x24  BBE bass boost:     MIDI 0..127 → 0..10 dB  (180 Hz low shelf)
  *   0x25  Convolver enabled:  >= 0.5 = on
- *   0x26  Convolver mix:      0.0-1.0 (mapped to 0.0-0.04 usable range)
+ *   0x26  Convolver mix:      0.0-1.0 wet/dry mix
  */
 
 #include "limiter/limiter.h"

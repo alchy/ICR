@@ -153,7 +153,7 @@ F0 7D 01  10  <core_id>  <param_id>  <v0..v4>  F7
 |----------------|--------|-------------|
 | 0x01-0x07 | `core->setParam()` on targeted core | Core-specific global params |
 | 0x10-0x13 | CoreEngine atomics | Master mix (always engine, core_id ignored) |
-| 0x20-0x24 | DspChain | Limiter + BBE (always engine, core_id ignored) |
+| 0x20-0x26 | DspChain | Limiter + BBE + Convolver (always engine, core_id ignored) |
 
 ### Core params (0x01-0x07) -- core-specific
 
@@ -169,7 +169,7 @@ depends on the core.  See per-core SysEx docs for tables.
 | 0x12 | `lfo_speed`   | 0.0-2.0 Hz  | LFO panning rate              |
 | 0x13 | `lfo_depth`   | 0.0-1.0     | LFO panning depth             |
 
-### DspChain params (0x20-0x24) -- normalised 0.0-1.0
+### DspChain params (0x20-0x26) -- normalised 0.0-1.0
 
 | id   | key                  | 0.0         | 1.0       |
 |------|----------------------|-------------|-----------|
@@ -178,6 +178,8 @@ depends on the core.  See per-core SysEx docs for tables.
 | 0x22 | `limiter_enabled`    | off         | on (>=0.5)|
 | 0x23 | `bbe_definition`     | 0 dB shelf  | +12 dB    |
 | 0x24 | `bbe_bass_boost`     | 0 dB shelf  | +10 dB    |
+| 0x25 | `convolver_enabled`  | off         | on (>=0.5)|
+| 0x26 | `convolver_mix`      | 0% (dry)    | 100% (full wet)           |
 
 ---
 
@@ -220,11 +222,11 @@ F0 7D 01  10  7F  10  <float32>  F7
          core_id=0x7F (engine)
 ```
 
-**Set hammer_hardness on PhysicalModelingPianoCore:**
+**Set brightness on PhysicalModelingPianoCore:**
 ```
 F0 7D 01  10  02  01  <float32>  F7
           |   |   |
-          cmd |  param_id=0x01 (core-specific: hammer_hardness)
+          cmd |  param_id=0x01 (core-specific: beat_scale/brightness)
          core_id=0x02 (PhysicalModeling)
 ```
 
@@ -240,5 +242,6 @@ F0 7D 01  10  02  01  <float32>  F7
 //      0x7F -> engine-level (no core target)
 // 3. Dispatch cmd to target->setNoteParam / loadBankJson / etc.
 // 4. SET_MASTER: pid 0x01-0x07 -> target->setParam()
-//               pid 0x10-0x24 -> engine/dsp atomics (always)
+//               pid 0x10-0x13 -> engine mix atomics (always)
+//               pid 0x20-0x26 -> DspChain (limiter/BBE/convolver)
 ```

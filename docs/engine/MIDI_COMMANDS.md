@@ -128,20 +128,21 @@ Physical, Sampler, Sine: N/A (no partial concept).
 
 | Key | Physical | Additive | Sampler | Sine | Description |
 |-----|:--------:|:--------:|:-------:|:----:|-------------|
-| `brightness` | yes | yes | — | — | Scales T60_nyq (timbre) |
-| `stiffness_scale` | yes | yes | — | — | Scales inharmonicity B |
-| `sustain_scale` | yes | yes | — | — | Scales T60_fund |
-| `keyboard_spread` | yes | yes | yes | yes | Stereo pan from note position |
-| `stereo_spread` | yes | — | — | — | Multi-string pan width |
-| `gauge_scale` | yes | — | — | — | Retained for compatibility (no DSP effect) |
+| `beat_scale` | — | yes | — | — | Beating amplitude scale (0-4) |
+| `noise_level` | — | yes | — | — | Attack noise level (0-4) |
+| `pan_spread` | — | yes | — | — | Per-partial pan spread (0-pi rad) |
+| `stereo_decorr` | — | yes | — | — | Stereo decorrelation (0-2) |
+| `keyboard_spread` | yes | yes | yes | yes | Stereo pan from note position (0-pi rad) |
+| `eq_strength` | — | yes | — | — | Spectral EQ strength (0-1) |
+| `rng_seed` | — | yes | — | — | Random seed (0-9999) |
+| `brightness` | yes | — | — | — | Scales T60_nyq (0.1-4) |
+| `stiffness_scale` | yes | — | — | — | Scales inharmonicity B (0.1-4) |
+| `sustain_scale` | yes | — | — | — | Scales T60_fund (0.1-4) |
+| `stereo_spread` | yes | — | — | — | Multi-string pan width (0-1) |
+| `gauge_scale` | yes | — | — | — | Gauge scaling (0.5-4, no DSP effect) |
 | `gain` | — | — | yes | yes | Output gain (0-2) |
 | `detune_cents` | — | — | — | yes | Global detuning (cents) |
 | `release_time` | — | — | yes | — | Release envelope (0.1-4s) |
-| `beat_scale` | — | yes | — | — | Beating amplitude scale |
-| `noise_level` | — | yes | — | — | Attack noise level |
-| `pan_spread` | — | yes | — | — | Per-partial pan spread |
-| `stereo_decorr` | — | yes | — | — | Stereo decorrelation |
-| `eq_strength` | — | yes | — | — | Spectral EQ strength |
 
 ### Engine-Level (param_id 0x10-0x13, always applied)
 
@@ -152,7 +153,7 @@ Physical, Sampler, Sine: N/A (no partial concept).
 | `0x12` | 0-2.0 | LFO pan speed (Hz) |
 | `0x13` | 0-1.0 | LFO pan depth |
 
-### DspChain (param_id 0x20-0x24, always applied)
+### DspChain (param_id 0x20-0x26, always applied)
 
 | Param ID | Range | Description |
 |----------|-------|-------------|
@@ -161,6 +162,8 @@ Physical, Sampler, Sine: N/A (no partial concept).
 | `0x22` | 0-1.0 | Limiter enabled (≥0.5 = on) |
 | `0x23` | 0-1.0 | BBE definition (0=off, 1=+12dB @ 5kHz) |
 | `0x24` | 0-1.0 | BBE bass boost (0=off, 1=+10dB @ 180Hz) |
+| `0x25` | 0-1.0 | Convolver enabled (≥0.5 = on) |
+| `0x26` | 0-1.0 | Convolver mix (0.0=dry, 1.0=full wet) |
 
 ---
 
@@ -198,3 +201,4 @@ F0 7D 01 72 <core_id> <path bytes...> F7
 - Events queued from MIDI callback thread
 - Drained at start of each audio processBlock (before synthesis)
 - Overflow: logged as warning, event dropped
+
