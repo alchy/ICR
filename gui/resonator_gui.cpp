@@ -144,6 +144,9 @@ struct GuiState {
     bool  conv_enabled = false;
     int   conv_mix     = 50;   // 0-100% GUI range (maps to 0.0-0.04 real mix)
 
+    // Stereo (engine-level, applied to active core)
+    int   keyboard_spread = 38;  // 0-100 GUI → 0-π rad
+
     // Stats
     int  active_voices  = 0;
     bool sustain_on     = false;
@@ -1099,6 +1102,25 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 ImGui::TableSetColumnIndex(0);
                 ImGui::Spacing();
                 drawConvolverControls(gs, dsp);
+                ImGui::Spacing();
+
+                // Row 4: STEREO (keyboard spread — engine-level)
+                ImGui::TableNextRow();
+                ImGui::TableSetColumnIndex(0);
+                ImGui::Spacing();
+                {
+                    ImGui::SeparatorText("STEREO");
+                    int v = gs.keyboard_spread;
+                    char desc[48];
+                    float rad = (float)v / 100.f * 3.14159f;
+                    snprintf(desc, sizeof(desc), "Spread: %.0f%%", (float)v);
+                    if (labeledSlider("##kbspread", "Kbd Spread", desc, &v, 0, 100)) {
+                        gs.keyboard_spread = v;
+                        float val = (float)v / 100.f * 3.14159f;
+                        if (engine.core())
+                            engine.core()->setParam("keyboard_spread", val);
+                    }
+                }
                 ImGui::Spacing();
 
                 ImGui::EndTable();

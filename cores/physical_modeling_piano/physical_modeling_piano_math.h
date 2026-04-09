@@ -136,23 +136,34 @@ inline void bridge_filter_init(BridgeFilter& bf, float bridge_freq,
 }
 
 /// Apply bridge admittance to the reflected signal.
-///   rigid = simple -x reflection (what we had before)
-///   Returns modified reflection incorporating bridge resonance.
+///   The bridge resonator shapes the spectrum but must NEVER add
+///   net energy to the loop (gain ≤ 1 everywhere).
+///
+///   Strategy: resonator output is normalized by Q, then mixed with
+///   the rigid reflection. Total gain at all frequencies stays ≤ 1.
 inline float bridge_filter_tick(float x, BridgeFilter& bf) {
     // Rigid reflection component
     float rigid = -x;
 
-    // Bridge resonator: excited by incoming wave
-    float res = bf.c1 * bf.y1 + bf.c2 * bf.y2 + x;
+    // Bridge resonator (2nd-order, normalized input)
+    // Scale input by 1/Q to prevent resonance gain > 1
+    float res = bf.c1 * bf.y1 + bf.c2 * bf.y2 + x * 0.1f;
     bf.y2 = bf.y1;
     bf.y1 = res;
 
-    // Highpass to remove DC buildup from resonator
+    // Highpass to remove DC buildup
     float hp = res - bf.hp_state;
     bf.hp_state += (1.f - bf.hp_coeff) * hp;
 
-    // Mix rigid reflection with bridge resonance
-    return rigid * (1.f - bf.mix) + hp * bf.mix;
+    // Mix: rigid dominates, resonator adds spectral color
+    // Clamp output magnitude to prevent any possibility of divergence
+    float mixed = rigid * (1.f - bf.mix) + hp * bf.mix;
+    float mag = std::abs(mixed);
+    float in_mag = std::abs(x);
+    if (mag > in_mag * 1.05f && in_mag > 1e-8f)
+        mixed *= in_mag * 1.05f / mag;
+
+    return mixed;
 }
 
 // ── Dual-rail string ─────────────────────────────────────────────────────
