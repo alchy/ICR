@@ -1239,7 +1239,8 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             {
                 PaddedPanel pp;
 
-                // Signal flow: Core output → Mix → LFO → Convolver → BBE → Limiter
+                // DSP chain in actual processing order:
+                //   Core → [Mix/LFO] → Convolver → BBE → Limiter → DAC
 
                 drawMixControls(gs, engine);
                 ImGui::Spacing();
@@ -1247,16 +1248,20 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                 drawLfoControls(gs, engine);
 
                 sectionGap();
+                ImGui::TextDisabled("  signal flow: core output");
+                ImGui::TextDisabled("       %s", "\xe2\x96\xbc");  // ▼
 
                 drawConvolverControls(gs, dsp, (float)engine.sampleRate());
 
-                sectionGap();
+                ImGui::TextDisabled("       %s", "\xe2\x96\xbc");  // ▼
 
                 drawBbeControls(gs, engine, dsp);
 
-                sectionGap();
+                ImGui::TextDisabled("       %s", "\xe2\x96\xbc");  // ▼
 
                 drawLimiterControls(gs, engine, dsp);
+
+                ImGui::TextDisabled("       %s  DAC", "\xe2\x96\xbc");  // ▼
             }
             ImGui::EndChild();
 

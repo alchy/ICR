@@ -3,6 +3,8 @@
     "AdditiveSynthesisPianoCore": {
       "bbe_bass_boost": "0",
       "bbe_definition": "0",
+      "convolver_enabled": "64",
+      "convolver_mix": "50",
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
       "lfo_depth": "0",
       "lfo_speed": "0",
@@ -18,6 +20,8 @@
     "PhysicalModelingPianoCore": {
       "bbe_bass_boost": "0",
       "bbe_definition": "0",
+      "convolver_enabled": "64",
+      "convolver_mix": "50",
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
       "lfo_depth": "0",
       "lfo_speed": "0",
@@ -26,7 +30,7 @@
       "limiter_threshold": "100",
       "master_gain": "100",
       "master_pan": "64",
-      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/v11-pure-harmonic.json",
+      "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/D-grand.json",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical",
       "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard"
     },
