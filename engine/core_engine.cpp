@@ -55,7 +55,10 @@ using json = nlohmann::json;
 void CoreEngine::pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcept {
     int w    = midi_w_.load(std::memory_order_relaxed);
     int next = (w + 1) % MIDI_Q_SIZE;
-    if (next == midi_r_.load(std::memory_order_acquire)) return;  // full, drop
+    if (next == midi_r_.load(std::memory_order_acquire)) {
+        logger_.log("CoreEngine", LogSeverity::Warning, "MIDI queue full, event dropped");
+        return;
+    }
     midi_q_[w] = {t, midi, val};
     midi_w_.store(next, std::memory_order_release);
 }
@@ -241,7 +244,7 @@ void CoreEngine::loadIrFromConfig(const std::string& core_name) {
     if (ir.empty()) return;
     // Don't reload if same IR is already loaded
     if (dsp_.isConvolverLoaded() && dsp_.convolver().isEnabled()) return;
-    if (dsp_.loadConvolverIR(ir, 0)) {
+    if (dsp_.loadConvolverIR(ir, (float)sample_rate_)) {
         dsp_.setConvolverEnabled(true);
         logger_.log("CoreEngine", LogSeverity::Info,
                     "Auto-loaded IR from config: " + ir);

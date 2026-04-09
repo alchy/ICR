@@ -150,7 +150,7 @@ private:
         uint8_t midi;
         uint8_t value;
     };
-    static constexpr int MIDI_Q_SIZE = 256;
+    static constexpr int MIDI_Q_SIZE = 512;
     MidiEvt          midi_q_[MIDI_Q_SIZE];
     std::atomic<int> midi_w_{0};
     std::atomic<int> midi_r_{0};
