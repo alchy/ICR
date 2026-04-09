@@ -104,8 +104,8 @@ public:
                    float sample_rate,
                    float keyboard_spread) noexcept;
 
-    void releaseVoice(int midi, float sample_rate) noexcept;
-    void releaseAll(float sample_rate) noexcept;
+    void releaseVoice(int midi, float sample_rate, float release_ms = 200.f) noexcept;
+    void releaseAll(float sample_rate, float release_ms = 200.f) noexcept;
 
     SamplerVoice&       voice(int midi)       { return voices_[midi]; }
     const SamplerVoice& voice(int midi) const { return voices_[midi]; }
@@ -125,9 +125,12 @@ public:
                 float keyboard_spread,
                 std::mutex& bank_mutex) noexcept;
 
-    void noteOff(uint8_t midi, SamplerVoiceManager& vm, float sr) noexcept;
-    void sustainPedal(bool down, SamplerVoiceManager& vm, float sr) noexcept;
-    void allNotesOff(SamplerVoiceManager& vm, float sr) noexcept;
+    void noteOff(uint8_t midi, SamplerVoiceManager& vm, float sr,
+                 float release_ms = 200.f) noexcept;
+    void sustainPedal(bool down, SamplerVoiceManager& vm, float sr,
+                      float release_ms = 200.f) noexcept;
+    void allNotesOff(SamplerVoiceManager& vm, float sr,
+                     float release_ms = 200.f) noexcept;
 
     int lastMidi() const { return last_midi_.load(std::memory_order_relaxed); }
     int lastVel()  const { return last_vel_.load(std::memory_order_relaxed); }
