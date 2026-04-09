@@ -475,7 +475,7 @@ inline int compute_force(int midi, float v0, float exc_x0, float sr,
     // the force envelope to inject this missing HF content.
     //
     // noise_level: controlled by K_hardening (harder felt = more HF)
-    float noise_level = 0.15f * (1.f + K_hardening * vel_norm);
+    float noise_level = 0.03f * (1.f + K_hardening * vel_norm);
     uint32_t rng_state = (uint32_t)(midi * 7919 + (int)(v0 * 1000.f));
     for (int i = 0; i < actual_len; i++) {
         if (F[i] < 1e-6f) continue;
