@@ -88,84 +88,49 @@ inline float allpass_delay_dc(float a) {
 
 // ── Dual-rail string ─────────────────────────────────────────────────────
 
-// ── Bridge admittance filter ─────────────────────────────────────────
+// ── Bridge reflection filter ─────────────────────────────────────────
 //
-// Real piano bridge is NOT a rigid termination (-1 reflection).
-// The bridge+soundboard system has frequency-dependent admittance:
-//   - Low frequencies: nearly rigid (reflection ≈ -1)
-//   - Around bridge resonances (200-800 Hz): partial energy transfer
-//     to soundboard → phase shift + amplitude dip in reflection
-//   - High frequencies: increasing losses
+// Real piano bridge: frequency-dependent reflection coefficient.
+// Low frequencies reflect almost fully (rigid, -1). High frequencies
+// lose more energy to the soundboard (bridge is more compliant at HF).
 //
-// Modeled as a 2nd-order resonant filter that modifies the bridge
-// reflection coefficient. This is what gives piano its metallic
-// character vs nylon guitar (which has a more uniform bridge).
+// This is modeled as a one-pole low-pass on the reflected signal:
+//   H_bridge(z) = -1 × [ (1-b_mix) + b_mix × LP(z) ]
 //
-// H_bridge(z) = (1 - bridge_mix) * (-1) + bridge_mix * resonator(z)
-//
-// The resonator boosts odd-harmonic energy near the bridge resonance,
-// which is the physical basis for piano's characteristic timbre.
+// The effect: HF partials decay faster from the bridge side (additional
+// damping beyond the nut-side loss filter), while LF sustains normally.
+// This creates the asymmetric spectral decay characteristic of piano
+// (bright attack, warm sustain) that distinguishes it from guitar/mandolin.
 
 struct BridgeFilter {
-    // Resonator state (two-pole)
-    float y1 = 0.f, y2 = 0.f;
-    // Resonator coefficients
-    float c1 = 0.f, c2 = 0.f;
-    // Mix: 0 = rigid bridge (-1), 1 = full resonator
-    float mix = 0.15f;
-    // Highpass state (removes DC from resonator output)
-    float hp_state = 0.f;
-    float hp_coeff = 0.995f;
+    float state = 0.f;    // one-pole LPF state
+    float coeff = 0.5f;   // pole coefficient (0=bypass, →1=more LF emphasis)
+    float mix   = 0.15f;  // 0=rigid (-1), 1=full bridge LPF
 };
 
-/// Initialize bridge filter for a given note.
-///   bridge_freq: bridge/soundboard resonance frequency (Hz)
-///   bridge_Q:    resonance quality factor
-///   bridge_mix:  how much bridge character vs rigid (0-1)
+/// Initialize bridge filter.
+///   bridge_freq: cutoff frequency (Hz) — below this, reflection ≈ -1
+///   bridge_mix:  how much HF is lost at bridge (0=rigid, 0.3=strong)
 inline void bridge_filter_init(BridgeFilter& bf, float bridge_freq,
-                               float bridge_Q, float bridge_mix, float sr) {
+                               float /*bridge_Q*/, float bridge_mix,
+                               float sr) {
+    // One-pole coefficient from cutoff frequency
     float w = dsp::TAU * bridge_freq / sr;
-    float decay = std::exp(-w / std::max(bridge_Q, 0.5f));
-    bf.c1  = 2.f * decay * std::cos(w);
-    bf.c2  = -(decay * decay);
-    bf.mix = bridge_mix;
-    bf.y1  = 0.f;
-    bf.y2  = 0.f;
-    bf.hp_state = 0.f;
-    bf.hp_coeff = 1.f - (dsp::TAU * 20.f / sr);  // 20 Hz highpass
+    bf.coeff = std::exp(-w);
+    bf.mix   = bridge_mix;
+    bf.state = 0.f;
 }
 
-/// Apply bridge admittance to the reflected signal.
-///   The bridge resonator shapes the spectrum but must NEVER add
-///   net energy to the loop (gain ≤ 1 everywhere).
-///
-///   Strategy: resonator output is normalized by Q, then mixed with
-///   the rigid reflection. Total gain at all frequencies stays ≤ 1.
+/// Apply bridge reflection: frequency-dependent, energy-conserving.
+///   Returns reflected signal (always ≤ input magnitude).
 inline float bridge_filter_tick(float x, BridgeFilter& bf) {
-    // Rigid reflection component
-    float rigid = -x;
+    // Low-pass filtered version of input
+    bf.state = bf.coeff * bf.state + (1.f - bf.coeff) * x;
 
-    // Bridge resonator (2nd-order, normalized input)
-    // Scale input by 1/Q to prevent resonance gain > 1
-    float res = bf.c1 * bf.y1 + bf.c2 * bf.y2 + x * 0.1f;
-    bf.y2 = bf.y1;
-    bf.y1 = res;
-
-    // Highpass to remove DC buildup
-    float hp = res - bf.hp_state;
-    bf.hp_state += (1.f - bf.hp_coeff) * hp;
-
-    // Mix: rigid dominates, resonator adds spectral color
-    float mixed = rigid * (1.f - bf.mix) + hp * bf.mix;
-
-    // Energy conservation: output magnitude must not exceed input.
-    // Bridge transfers energy to soundboard, never creates it.
-    float mag = std::abs(mixed);
-    float in_mag = std::abs(x);
-    if (mag > in_mag && in_mag > 1e-10f)
-        mixed *= in_mag / mag;
-
-    return mixed;
+    // Mix: rigid reflection + bridge-filtered reflection
+    // At DC (x ≈ state): output ≈ -x (rigid)
+    // At HF (state ≈ 0): output ≈ -(1-mix)*x (attenuated)
+    return -((1.f - bf.mix) * x + bf.mix * bf.state);
 }
 
 // ── Dual-rail string ─────────────────────────────────────────────────────
