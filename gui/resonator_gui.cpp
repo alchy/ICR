@@ -650,7 +650,7 @@ static void drawConvolverControls(GuiState& gs, DspChain* dsp) {
                 dsp->convolver().irLength() / 48.0f);
 }
 
-// ── Right panel: data-driven core params + last-note detail ──────────────────
+// ── Core params panel (synthesis column) ─────────────────────────────────────
 static void drawCorePanel(CoreEngine& engine) {
     ISynthCore* core = engine.core();
     if (!core) {
@@ -658,39 +658,10 @@ static void drawCorePanel(CoreEngine& engine) {
         return;
     }
 
-    PaddedPanel pp;
-
-    // ── Core params ──────────────────────────────────────────────────────────
     ImGui::Spacing();
-    ImGui::SeparatorText(("CORE PARAMS  [" + core->coreName() + "]").c_str());
+    ImGui::SeparatorText(core->coreName().c_str());
     ImGui::Spacing();
     drawCoreParams(core);
-    ImGui::Spacing();
-
-    sectionGap();
-
-    // ── Last note visualization ──────────────────────────────────────────────
-    CoreVizState viz = core->getVizState();
-    if (!viz.last_note_valid) {
-        ImGui::TextDisabled("(no note played yet)");
-        return;
-    }
-
-    const CoreVoiceViz& ln = viz.last_note;
-
-    ImGui::SeparatorText("LAST NOTE");
-    ImGui::Spacing();
-    drawNoteHeader(ln);
-    ImGui::Spacing();
-
-    if (ln.n_partials > 0 || ln.n_strings > 0) {
-        sectionGap();
-        drawNoteSummary(ln);
-        ImGui::Spacing();
-    }
-
-    sectionGap();
-    drawPartialsTable(ln);
 }
 
 // ── Main GUI loop ─────────────────────────────────────────────────────────────
@@ -712,7 +683,7 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
     glfwWindowHint(GLFW_OPENGL_FORWARD_COMPAT, GL_TRUE);
 #endif
 
-    GLFWwindow* win = glfwCreateWindow(1500, 920,
+    GLFWwindow* win = glfwCreateWindow(1620, 950,
         "IthacaCoreResonator", nullptr, nullptr);
     if (!win) {
         logger.log("GUI", LogSeverity::Error, "glfwCreateWindow failed");
@@ -1047,91 +1018,112 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         sectionGap();
 
         // ═══════════════════════════════════════════════════════════════════════
-        // ROW 1: Piano keyboard (full width, centered)
-        // ═══════════════════════════════════════════════════════════════════════
-
-        // ═══════════════════════════════════════════════════════════════════════
-        // ROW 2: Left grid [controls] | Right panel [core params + note detail]
+        // PIANO KEYBOARD (full width, centered)
         // ═══════════════════════════════════════════════════════════════════════
         {
             int nw = 0;
             for (int m = PIANO_MIDI_LOW; m <= PIANO_MIDI_HIGH; m++)
                 if (!isBlack(m)) nw++;
             float piano_px = nw * WHITE_W;
-            float left_w   = piano_px + style.WindowPadding.x * 2.f;
+            float avail_w  = ImGui::GetContentRegionAvail().x;
+            float offset   = (avail_w - piano_px) * 0.5f;
+            if (offset > 0.f) ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset);
 
-            // ── Left column ──────────────────────────────────────────────────
-            ImGui::BeginChild("##left", {left_w, 0.f}, false,
-                              ImGuiWindowFlags_NoScrollbar);
-
-            // Piano
             ImGui::PushStyleVar(ImGuiStyleVar_ItemSpacing, {0.f, 4.f});
             drawPiano(gs, engine);
             ImGui::PopStyleVar();
+        }
+        sectionGap();
 
-            sectionGap();
+        // ═══════════════════════════════════════════════════════════════════════
+        // 3-COLUMN LAYOUT: Synthesis | DSP Chain | Note Detail
+        // ═══════════════════════════════════════════════════════════════════════
+        {
+            float avail_w  = ImGui::GetContentRegionAvail().x;
+            float col1_w   = avail_w * 0.22f;   // Synthesis (core params)
+            float col2_w   = avail_w * 0.30f;   // DSP chain (signal flow)
+            // col3 = remainder            // Note detail
 
-            // Control grid: 2x2 matrix [MIX|LFO] / [LIMITER|BBE]
             DspChain* dsp = engine.getDspChain();
-            constexpr ImGuiTableFlags tf =
-                ImGuiTableFlags_BordersOuter | ImGuiTableFlags_BordersInnerV |
-                ImGuiTableFlags_SizingStretchSame | ImGuiTableFlags_PadOuterX;
 
-            if (ImGui::BeginTable("##ctrl_grid", 2, tf)) {
-                // Row 1: MIX | LFO
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::Spacing();
-                drawMixControls(gs, engine);
-                ImGui::Spacing();
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Spacing();
-                drawLfoControls(gs, engine);
-                ImGui::Spacing();
-
-                // Row 2: LIMITER | BBE
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::Spacing();
-                drawLimiterControls(gs, engine, dsp);
-                ImGui::Spacing();
-
-                ImGui::TableSetColumnIndex(1);
-                ImGui::Spacing();
-                drawBbeControls(gs, engine, dsp);
-                ImGui::Spacing();
-
-                // Row 3: CONVOLVER (full width)
-                ImGui::TableNextRow();
-                ImGui::TableSetColumnIndex(0);
-                ImGui::Spacing();
-                drawConvolverControls(gs, dsp);
-                ImGui::Spacing();
-
-                // keyboard_spread removed — it's a core param shown via
-                // describeParams() in the right panel (no duplication)
-
-                ImGui::EndTable();
+            // ── Column 1: SYNTHESIS (core-specific params) ───────────────────
+            ImGui::BeginChild("##col_synth", {col1_w, 0.f}, false);
+            {
+                PaddedPanel pp;
+                drawCorePanel(engine);
             }
+            ImGui::EndChild();
 
-            ImGui::EndChild();  // ##left
-
-            // ── Vertical separator with spacing ─────────────────────────────
-            ImGui::SameLine(0, GRID_GAP);
+            ImGui::SameLine(0, 1.f);
+            // Vertical separator
             {
                 ImVec2 p = ImGui::GetCursorScreenPos();
                 float  h = ImGui::GetContentRegionAvail().y;
                 ImGui::GetWindowDrawList()->AddLine(p, {p.x, p.y + h},
                     ImGui::GetColorU32(ImGuiCol_Separator), 1.f);
-                ImGui::SetCursorScreenPos({p.x + 1.f, p.y});
             }
             ImGui::SameLine(0, GRID_GAP);
 
-            // ── Right column: core params + note detail ──────────────────────
-            ImGui::BeginChild("##right", {0.f, 0.f}, false,
-                              ImGuiWindowFlags_NoScrollbar);
-            drawCorePanel(engine);
+            // ── Column 2: DSP CHAIN (signal flow order) ─────────────────────
+            ImGui::BeginChild("##col_dsp", {col2_w, 0.f}, false);
+            {
+                PaddedPanel pp;
+
+                // Signal flow: Core output → Mix → LFO → Convolver → BBE → Limiter
+
+                drawMixControls(gs, engine);
+                ImGui::Spacing();
+
+                drawLfoControls(gs, engine);
+
+                sectionGap();
+
+                drawConvolverControls(gs, dsp);
+
+                sectionGap();
+
+                drawBbeControls(gs, engine, dsp);
+
+                sectionGap();
+
+                drawLimiterControls(gs, engine, dsp);
+            }
+            ImGui::EndChild();
+
+            ImGui::SameLine(0, 1.f);
+            // Vertical separator
+            {
+                ImVec2 p = ImGui::GetCursorScreenPos();
+                float  h = ImGui::GetContentRegionAvail().y;
+                ImGui::GetWindowDrawList()->AddLine(p, {p.x, p.y + h},
+                    ImGui::GetColorU32(ImGuiCol_Separator), 1.f);
+            }
+            ImGui::SameLine(0, GRID_GAP);
+
+            // ── Column 3: NOTE DETAIL ───────────────────────────────────────
+            ImGui::BeginChild("##col_note", {0.f, 0.f}, false);
+            {
+                PaddedPanel pp;
+                ISynthCore* core = engine.core();
+                if (core) {
+                    CoreVizState viz = core->getVizState();
+                    if (viz.last_note_valid) {
+                        const CoreVoiceViz& ln = viz.last_note;
+                        ImGui::SeparatorText("LAST NOTE");
+                        ImGui::Spacing();
+                        drawNoteHeader(ln);
+                        ImGui::Spacing();
+                        if (ln.n_partials > 0 || ln.n_strings > 0) {
+                            drawNoteSummary(ln);
+                            ImGui::Spacing();
+                        }
+                        sectionGap();
+                        drawPartialsTable(ln);
+                    } else {
+                        ImGui::TextDisabled("(no note played yet)");
+                    }
+                }
+            }
             ImGui::EndChild();
         }
 
