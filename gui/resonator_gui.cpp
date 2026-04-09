@@ -736,7 +736,7 @@ static void drawConvolverControls(GuiState& gs, DspChain* dsp, float sr) {
         char desc[48]; snprintf(desc, sizeof(desc), "Body: %d%%", v);
         if (labeledSlider("##convmix", "Mix", desc, &v, 0, 100)) {
             gs.conv_mix = v;
-            dsp->setConvolverMix(v * 0.04f / 100.f);
+            dsp->setConvolverMix(v / 100.f);
         }
     }
 
@@ -874,7 +874,7 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
     if (DspChain* dsp = engine.getDspChain()) {
         if (dsp->isConvolverLoaded()) {
             gs.conv_enabled = dsp->convolver().isEnabled();
-            gs.conv_mix     = (int)(dsp->convolver().getMix() * 100.f / 0.04f);
+            gs.conv_mix     = (int)(dsp->convolver().getMix() * 100.f);
         }
     }
 

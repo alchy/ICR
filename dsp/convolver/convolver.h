@@ -43,6 +43,6 @@ private:
     std::vector<float> buf_L_;       // input history buffer (ring)
     std::vector<float> buf_R_;
     int                write_pos_ = 0;
-    float              mix_       = 0.02f; // default: subtle body coloring (GUI 50%)
+    float              mix_       = 0.5f;  // default: 50% wet/dry
     bool               enabled_   = false;
 };

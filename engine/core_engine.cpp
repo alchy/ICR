@@ -353,7 +353,7 @@ void CoreEngine::applyDspDefaults(const std::string& core_name) {
     if (conv_ena >= 0) dsp_.setConvolverEnabled(conv_ena >= 64);
 
     int conv_mix = get("convolver_mix", -1);
-    if (conv_mix >= 0) dsp_.setConvolverMix((float)conv_mix / 127.f * 0.04f);
+    if (conv_mix >= 0) dsp_.setConvolverMix((float)conv_mix / 127.f);
 }
 
 // ── switchCore ────────────────────────────────────────────────────────────────
@@ -827,7 +827,7 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
                 case 0x23: dsp_.setBBEDefinition(u);    break;
                 case 0x24: dsp_.setBBEBassBoost(u);     break;
                 case 0x25: dsp_.setConvolverEnabled(value >= 0.5f); break;
-                case 0x26: dsp_.setConvolverMix(value * 0.04f);     break;
+                case 0x26: dsp_.setConvolverMix(value);              break;
                 }
             }
         }
