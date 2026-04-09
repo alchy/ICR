@@ -17,6 +17,7 @@
     "AdditiveSynthesisPianoCore": {
       "params_path": "",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-additive",
+      "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard",
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
       "master_gain": "100",
       "master_pan": "64",
@@ -31,6 +32,7 @@
     "PhysicalModelingPianoCore": {
       "params_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical/teng-v2-default.json",
       "soundbank_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-physical",
+      "soundboard_dir": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard",
       "ir_path": "C:/Users/jindr/PycharmProjects/ICR/soundbanks-soundboard/pl-grand-04072006-soundboard.wav",
       "master_gain": "100",
       "master_pan": "64",

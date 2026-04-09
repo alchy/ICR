@@ -105,6 +105,7 @@ static void applyConfigJson(const std::string& path, ISynthCore* core,
 // ── loadEngineConfig ──────────────────────────────────────────────────────────
 
 bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger) {
+    config_path_ = config_path;   // remember for saveConfig()
     std::ifstream f(config_path);
     if (!f.is_open()) {
         logger.log("CoreEngine", LogSeverity::Warning,
@@ -175,6 +176,55 @@ std::string CoreEngine::coreConfigValue(const std::string& core_name,
     return (jt != it->second.end()) ? jt->second : "";
 }
 
+void CoreEngine::setCoreConfigValue(const std::string& core_name,
+                                     const std::string& key,
+                                     const std::string& value) {
+    core_config_[core_name][key] = value;
+}
+
+bool CoreEngine::saveConfig() {
+    if (config_path_.empty()) {
+        logger_.log("CoreEngine", LogSeverity::Warning,
+                    "saveConfig: no config_path set, skipping");
+        return false;
+    }
+
+    // GUI stores default_core via setCoreConfigValue("_engine", ...)
+    auto eng_it = core_config_.find("_engine");
+    if (eng_it != core_config_.end()) {
+        auto dc_it = eng_it->second.find("default_core");
+        if (dc_it != eng_it->second.end())
+            default_core_name_ = dc_it->second;
+    }
+
+    json root;
+    root["log_file"] = "icr.log";
+    root["default_core"] = default_core_name_;
+
+    json cores_j = json::object();
+    for (const auto& [cname, cfg] : core_config_) {
+        if (cname == "_engine") continue;  // pseudo-key, not a real core
+        json cj = json::object();
+        for (const auto& [k, v] : cfg)
+            cj[k] = v;
+        cores_j[cname] = cj;
+    }
+    root["cores"] = cores_j;
+
+    std::ofstream f(config_path_);
+    if (!f.is_open()) {
+        logger_.log("CoreEngine", LogSeverity::Error,
+                    "saveConfig: cannot open " + config_path_);
+        return false;
+    }
+    f << root.dump(2) << "\n";
+
+    logger_.log("CoreEngine", LogSeverity::Info,
+                "Config saved: " + config_path_
+                + " (default_core=" + default_core_name_ + ")");
+    return f.good();
+}
+
 // ── initialize ────────────────────────────────────────────────────────────────
 
 bool CoreEngine::initialize(const std::string& core_name,
@@ -236,14 +286,30 @@ bool CoreEngine::initialize(const std::string& core_name,
 }
 
 void CoreEngine::loadIrFromConfig(const std::string& core_name) {
+    // Set soundboard directory for GUI IR selector
+    std::string sb_dir = coreConfigValue(core_name, "soundboard_dir");
+    if (!sb_dir.empty()) {
+        dsp_.setSoundboardDir(sb_dir);
+        logger_.log("CoreEngine", LogSeverity::Info,
+                    "Soundboard directory: " + sb_dir);
+    }
+
     std::string ir = coreConfigValue(core_name, "ir_path");
-    if (ir.empty()) return;
+    if (ir.empty()) {
+        logger_.log("CoreEngine", LogSeverity::Info,
+                    "No ir_path configured for " + core_name);
+        return;
+    }
     // Don't reload if same IR is already loaded
     if (dsp_.isConvolverLoaded() && dsp_.convolver().isEnabled()) return;
     if (dsp_.loadConvolverIR(ir, (float)sample_rate_)) {
         dsp_.setConvolverEnabled(true);
         logger_.log("CoreEngine", LogSeverity::Info,
-                    "Auto-loaded IR from config: " + ir);
+                    "Convolver IR loaded: " + ir + " ("
+                    + std::to_string(dsp_.convolver().irLength()) + " samples)");
+    } else {
+        logger_.log("CoreEngine", LogSeverity::Warning,
+                    "Failed to load convolver IR: " + ir);
     }
 }
 
@@ -282,6 +348,12 @@ void CoreEngine::applyDspDefaults(const std::string& core_name) {
 
     int bbe_bas = get("bbe_bass_boost", -1);
     if (bbe_bas >= 0) setBBEBassBoost((uint8_t)(std::min)(127, bbe_bas));
+
+    int conv_ena = get("convolver_enabled", -1);
+    if (conv_ena >= 0) dsp_.setConvolverEnabled(conv_ena >= 64);
+
+    int conv_mix = get("convolver_mix", -1);
+    if (conv_mix >= 0) dsp_.setConvolverMix((float)conv_mix / 127.f * 0.04f);
 }
 
 // ── switchCore ────────────────────────────────────────────────────────────────
@@ -746,7 +818,7 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
                                      std::memory_order_relaxed);
                     break;
                 }
-            } else if (pid >= 0x20 && pid <= 0x24) {
+            } else if (pid >= 0x20 && pid <= 0x26) {
                 auto u = (uint8_t)((std::max)(0.f, (std::min)(1.f, value)) * 127.f);
                 switch (pid) {
                 case 0x20: dsp_.setLimiterThreshold(u); break;
@@ -754,6 +826,8 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
                 case 0x22: dsp_.setLimiterEnabled(u);   break;
                 case 0x23: dsp_.setBBEDefinition(u);    break;
                 case 0x24: dsp_.setBBEBassBoost(u);     break;
+                case 0x25: dsp_.setConvolverEnabled(value >= 0.5f); break;
+                case 0x26: dsp_.setConvolverMix(value * 0.04f);     break;
                 }
             }
         }

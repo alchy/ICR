@@ -1,18 +1,23 @@
 #pragma once
 #include <cstdint>
 /*
- * dsp_chain.h — Master bus DSP chain: Limiter → BBE.
+ * dsp_chain.h — Master bus DSP chain: Convolver → BBE → Limiter.
+ *
+ * Signal flow:  Core output → Convolver (soundboard IR) → BBE → Limiter → DAC
  *
  * Call order (per block):
  *   prepare()  — call once at init with sample_rate + max_block_size
  *   process()  — called from audio thread (RT-safe after prepare)
  *   reset()    — clear filter states
  *
- * MIDI mappings:
- *   Limiter threshold: MIDI 0..127 → -40..0 dB
- *   Limiter release:   MIDI 0..127 → 10..2000 ms
- *   BBE definition:    MIDI 0..127 → 0..12 dB  (5 kHz high shelf)
- *   BBE bass boost:    MIDI 0..127 → 0..10 dB  (180 Hz low shelf)
+ * MIDI/SysEx mappings (param_id 0x20-0x26):
+ *   0x20  Limiter threshold:  MIDI 0..127 → -40..0 dB
+ *   0x21  Limiter release:    MIDI 0..127 → 10..2000 ms
+ *   0x22  Limiter enabled:    >= 0.5 = on
+ *   0x23  BBE definition:     MIDI 0..127 → 0..12 dB  (5 kHz high shelf)
+ *   0x24  BBE bass boost:     MIDI 0..127 → 0..10 dB  (180 Hz low shelf)
+ *   0x25  Convolver enabled:  >= 0.5 = on
+ *   0x26  Convolver mix:      0.0-1.0 (mapped to 0.0-0.04 usable range)
  */
 
 #include "limiter/limiter.h"
@@ -50,6 +55,10 @@ public:
     void setConvolverMix(float mix)   { convolver_.setMix(mix); }
     bool isConvolverLoaded() const    { return convolver_.irLength() > 0; }
 
+    void setSoundboardDir(const std::string& dir) { soundboard_dir_ = dir; }
+    const std::string& soundboardDir() const { return soundboard_dir_; }
+    const std::string& activeIrName() const { return active_ir_name_; }
+
     Limiter&   limiter()   { return limiter_; }
     BBE&       bbe()       { return bbe_;     }
     Convolver& convolver() { return convolver_; }
@@ -66,4 +75,7 @@ private:
     uint8_t lim_ena_midi_ = 0;
     uint8_t bbe_def_midi_ = 0;
     uint8_t bbe_bas_midi_ = 0;
+
+    std::string soundboard_dir_;
+    std::string active_ir_name_;
 };

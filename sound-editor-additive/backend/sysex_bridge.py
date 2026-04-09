@@ -108,6 +108,8 @@ MASTER_PARAM_IDS = {
     "limiter_enabled":   0x22,   # ≥0.5 = on
     "bbe_definition":    0x23,   # 0=0 dB, 1=12 dB
     "bbe_bass_boost":    0x24,   # 0=0 dB, 1=10 dB
+    "convolver_enabled": 0x25,  # >=0.5 = on
+    "convolver_mix":     0x26,  # 0.0-1.0 (mapped to 0.0-0.04)
 }
 
 # Per-partial param IDs

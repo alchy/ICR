@@ -33,7 +33,11 @@ void DspChain::process(float* L, float* R, int n_samples) {
 }
 
 bool DspChain::loadConvolverIR(const std::string& path, float sr) {
-    return convolver_.loadIR(path, sr);
+    if (!convolver_.loadIR(path, sr)) return false;
+    // Extract filename for GUI display
+    auto pos = path.find_last_of("/\\");
+    active_ir_name_ = (pos != std::string::npos) ? path.substr(pos + 1) : path;
+    return true;
 }
 
 // ── Limiter ───────────────────────────────────────────────────────────────────

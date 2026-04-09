@@ -65,6 +65,13 @@ public:
     std::string coreConfigValue(const std::string& core_name,
                                 const std::string& key) const;
 
+    /// Set engine config value (updates in-memory map, saved on exit).
+    void setCoreConfigValue(const std::string& core_name,
+                            const std::string& key, const std::string& value);
+
+    /// Save current config state to the JSON file it was loaded from.
+    bool saveConfig();
+
     /// Get default core name from engine config (empty if no config loaded).
     const std::string& defaultCoreName() const { return default_core_name_; }
 
@@ -177,6 +184,10 @@ private:
     // Engine config (loaded from JSON, per-core settings)
     std::FILE*  log_file_handle_ = nullptr;   // owned, closed in destructor
     std::string default_core_name_;
+    std::string config_path_;   // path for saveConfig() on exit
+public:
+    const std::string& configPath() const { return config_path_; }
+private:
     // core_name -> {key -> value} from engine_config.json
     std::unordered_map<std::string,
         std::unordered_map<std::string, std::string>> core_config_;

@@ -143,9 +143,9 @@ struct GuiState {
     // Convolver (soundboard IR)
     bool  conv_enabled = false;
     int   conv_mix     = 50;   // 0-100% GUI range (maps to 0.0-0.04 real mix)
-
-    // Stereo (engine-level, applied to active core)
-    int   keyboard_spread = 38;  // 0-100 GUI → 0-π rad
+    std::vector<std::string> soundboard_files;
+    std::string active_ir;
+    bool  soundboard_scanned = false;
 
     // Stats
     int  active_voices  = 0;
@@ -620,12 +620,9 @@ static void drawBbeControls(GuiState& gs, CoreEngine& engine, DspChain* dsp) {
 }
 
 // ── Section: Convolver (soundboard IR) controls ──────────────────────────────
-static void drawConvolverControls(GuiState& gs, DspChain* dsp) {
-    if (!dsp || !dsp->isConvolverLoaded()) {
-        ImGui::TextDisabled("CONVOLVER (no IR loaded)");
-        ImGui::TextDisabled("Use --ir <soundboard.wav>");
-        return;
-    }
+static void drawConvolverControls(GuiState& gs, DspChain* dsp, float sr) {
+    if (!dsp) { ImGui::TextDisabled("CONVOLVER (no DspChain)"); return; }
+
     {
         bool ena = gs.conv_enabled;
         if (ImGui::Checkbox("##convon", &ena)) {
@@ -636,18 +633,70 @@ static void drawConvolverControls(GuiState& gs, DspChain* dsp) {
         ImGui::TextUnformatted("SOUNDBOARD IR");
     }
     ImGui::Spacing();
+
+    // IR file selector (from soundboard directory)
+    if (!dsp->soundboardDir().empty()) {
+        // Lazy-discover WAV files
+        if (gs.soundboard_files.empty() && !gs.soundboard_scanned) {
+            namespace fs = std::filesystem;
+            std::error_code ec;
+            for (const auto& e : fs::directory_iterator(dsp->soundboardDir(), ec)) {
+                if (ec) break;
+                if (!e.is_regular_file()) continue;
+                auto ext = e.path().extension().string();
+                if (ext == ".wav" || ext == ".WAV")
+                    gs.soundboard_files.push_back(e.path().filename().string());
+            }
+            std::sort(gs.soundboard_files.begin(), gs.soundboard_files.end());
+            gs.soundboard_scanned = true;
+            // Set active to currently loaded IR
+            gs.active_ir = dsp->activeIrName();
+        }
+
+        if (!gs.soundboard_files.empty()) {
+            const char* preview = gs.active_ir.empty() ? "(select IR...)"
+                                                       : gs.active_ir.c_str();
+            float combo_w = ImGui::GetContentRegionAvail().x - SECTION_PAD;
+            ImGui::SetNextItemWidth(combo_w > 60.f ? combo_w : -1.f);
+            if (ImGui::BeginCombo("##ir_sel", preview)) {
+                for (const auto& fname : gs.soundboard_files) {
+                    bool sel = (fname == gs.active_ir);
+                    if (ImGui::Selectable(fname.c_str(), sel)) {
+                        if (fname != gs.active_ir) {
+                            std::string path = dsp->soundboardDir() + "/" + fname;
+                            if (dsp->loadConvolverIR(path, sr)) {
+                                gs.active_ir = fname;
+                                gs.conv_enabled = true;
+                                dsp->setConvolverEnabled(true);
+                            }
+                        }
+                    }
+                    if (sel) ImGui::SetItemDefaultFocus();
+                }
+                ImGui::EndCombo();
+            }
+            ImGui::Spacing();
+        }
+    } else if (!dsp->isConvolverLoaded()) {
+        ImGui::TextDisabled("No soundboard_dir configured");
+        ImGui::Spacing();
+    }
+
+    // Mix slider
     {
         int v = gs.conv_mix;
         char desc[48]; snprintf(desc, sizeof(desc), "Body: %d%%", v);
         if (labeledSlider("##convmix", "Mix", desc, &v, 0, 100)) {
             gs.conv_mix = v;
-            // GUI 0-100% maps to mix 0.0-0.04 (usable range from listening test)
             dsp->setConvolverMix(v * 0.04f / 100.f);
         }
     }
-    ImGui::Text("IR: %d samples (%.1f ms)",
-                dsp->convolver().irLength(),
-                dsp->convolver().irLength() / 48.0f);
+
+    if (dsp->isConvolverLoaded()) {
+        ImGui::Text("IR: %d samples (%.1f ms)",
+                    dsp->convolver().irLength(),
+                    dsp->convolver().irLength() / 48.0f);
+    }
 }
 
 // ── Core params panel (synthesis column) ─────────────────────────────────────
@@ -1078,7 +1127,7 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
 
                 sectionGap();
 
-                drawConvolverControls(gs, dsp);
+                drawConvolverControls(gs, dsp, (float)engine.sampleRate());
 
                 sectionGap();
 
@@ -1132,6 +1181,10 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         // ═══════════════════════════════════════════════════════════════════════
         sectionGap();
         ImGui::TextDisabled("Spacebar = sustain  |  A-K = C4-B4  |  Click keys to play");
+        if (!engine.configPath().empty()) {
+            ImGui::SameLine(0, 20.f);
+            ImGui::TextDisabled("config: %s", engine.configPath().c_str());
+        }
 
         // Sustain toggle
         if (ImGui::IsKeyPressed(ImGuiKey_Space)) {
@@ -1169,6 +1222,49 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
         glClear(GL_COLOR_BUFFER_BIT);
         ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
         glfwSwapBuffers(win);
+    }
+
+    // ── Save state to icr-config.json on exit ─────────────────────────────
+    {
+        // Remember active core
+        engine.setCoreConfigValue("_engine", "default_core", gs.active_core_name);
+
+        // Remember active soundbank per core
+        for (const auto& [cname, cbs] : gs.core_banks) {
+            if (!cbs.active.empty()) {
+                if (cbs.is_sampler) {
+                    // SamplerCore: active bank is a directory name in params_path
+                    // (don't overwrite params_path — it's the parent dir)
+                } else {
+                    std::string full_path = cbs.dir + "/" + cbs.active;
+                    engine.setCoreConfigValue(cname, "params_path", full_path);
+                }
+            }
+        }
+
+        // Remember DSP state for active core
+        const std::string& cn = gs.active_core_name;
+        engine.setCoreConfigValue(cn, "master_gain",
+            std::to_string((int)gs.master_gain));
+        engine.setCoreConfigValue(cn, "master_pan",
+            std::to_string((int)gs.pan));
+        engine.setCoreConfigValue(cn, "lfo_speed",
+            std::to_string((int)gs.lfo_speed));
+        engine.setCoreConfigValue(cn, "lfo_depth",
+            std::to_string((int)gs.lfo_depth));
+        engine.setCoreConfigValue(cn, "limiter_threshold",
+            std::to_string((int)gs.limiter_thr));
+        engine.setCoreConfigValue(cn, "limiter_release",
+            std::to_string((int)gs.limiter_rel));
+        engine.setCoreConfigValue(cn, "limiter_enabled",
+            std::to_string(gs.limiter_enabled ? 64 : 0));
+        engine.setCoreConfigValue(cn, "bbe_definition",
+            std::to_string((int)gs.bbe_def));
+        engine.setCoreConfigValue(cn, "bbe_bass_boost",
+            std::to_string((int)gs.bbe_bass));
+
+        if (engine.saveConfig())
+            logger.log("GUI", LogSeverity::Info, "Config saved on exit");
     }
 
     ImGui_ImplOpenGL3_Shutdown();
