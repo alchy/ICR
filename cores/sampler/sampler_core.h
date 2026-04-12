@@ -4,11 +4,11 @@
  * ----------------------------
  * SamplerCore -- WAV sample playback engine.
  *
- * Loads WAV sample banks from disk (IthacaPlayer format: mXXX-velY-fZZ.wav)
- * and plays them back with per-voice envelope, velocity layers, and stereo
- * panning.  Supports bank switching at runtime.
+ * Voice pool architecture: N voices (default 32) allocated from a free-list.
+ * Multiple voices can play the same MIDI pitch simultaneously (sustain pedal
+ * compatible).  When the pool is full, the quietest releasing voice is stolen.
  *
- * Sample directory: C:\SoundBanks\IthacaPlayer\{bank_name}\
+ * Sample directory: soundbanks-sampler/{bank_name}/
  * Each subdirectory with at least one matching WAV file is a selectable bank.
  *
  * Threading: same as ISynthCore -- see i_synth_core.h.
@@ -26,11 +26,12 @@
 
 // -- Constants ----------------------------------------------------------------
 
-static constexpr int SAMPLER_MAX_VOICES   = 128;
-static constexpr int SAMPLER_VEL_LAYERS   = 8;
-static constexpr float SAMPLER_ATTACK_MS  = 3.f;    // click-prevention onset
-static constexpr float SAMPLER_RELEASE_MS = 200.f;  // key-release fadeout
-static constexpr float SAMPLER_DAMPING_MS = 21.f;   // retrigger crossfade
+static constexpr int SAMPLER_DEFAULT_POOL_SIZE = 32;
+static constexpr int SAMPLER_MAX_POOL_SIZE     = 128;
+static constexpr int SAMPLER_VEL_LAYERS        = 8;
+static constexpr float SAMPLER_ATTACK_MS       = 3.f;    // click-prevention onset
+static constexpr float SAMPLER_RELEASE_MS      = 200.f;  // key-release fadeout
+static constexpr float SAMPLER_DAMPING_MS      = 21.f;   // retrigger crossfade
 
 // -- Sample buffer ------------------------------------------------------------
 
@@ -67,20 +68,20 @@ public:
     uint8_t  velocity    = 0;
 
     // Sample playback — two layers for velocity crossfade
-    const SampleBuffer* sample_lo = nullptr;  // lower velocity layer
-    const SampleBuffer* sample_hi = nullptr;  // higher velocity layer (can == lo)
-    float    vel_blend   = 0.f;   // 0.0 = all lo, 1.0 = all hi
-    int      position    = 0;     // current frame position in sample
+    const SampleBuffer* sample_lo = nullptr;
+    const SampleBuffer* sample_hi = nullptr;
+    float    vel_blend   = 0.f;
+    int      position    = 0;
 
     // Envelope
-    float    vel_gain    = 1.f;   // velocity-scaled amplitude
-    float    onset_gain  = 0.f;   // onset ramp 0->1
+    float    vel_gain    = 1.f;
+    float    onset_gain  = 0.f;
     float    onset_step  = 0.f;
-    float    rel_gain    = 1.f;   // release ramp 1->0
+    float    rel_gain    = 1.f;
     float    rel_step    = 0.f;
 
     // Damping buffer for click-free retrigger
-    float    damp_buf[2 * 2048] = {};  // stereo interleaved, max ~21ms at 96kHz
+    float    damp_buf[2 * 2048] = {};
     int      damp_len    = 0;
     int      damp_pos    = 0;
     bool     damping     = false;
@@ -88,30 +89,50 @@ public:
     // Stereo pan
     float    pan_l       = 0.707f;
     float    pan_r       = 0.707f;
+
+    // Current envelope level (for voice stealing priority)
+    float currentEnvLevel() const noexcept {
+        float env = vel_gain;
+        if (in_onset) env *= onset_gain;
+        if (releasing) env *= rel_gain;
+        return env;
+    }
 };
 
-// -- VoiceManager -------------------------------------------------------------
+// -- VoiceManager (voice pool) ------------------------------------------------
 
 class SamplerVoiceManager {
 public:
+    explicit SamplerVoiceManager(int pool_size = SAMPLER_DEFAULT_POOL_SIZE);
+
     bool processBlock(float* out_l, float* out_r, int n_samples,
                       float sample_rate) noexcept;
 
-    void initVoice(int midi, uint8_t velocity,
+    // Allocate a voice from the pool and initialize it.
+    // Returns the pool index, or -1 if allocation failed.
+    int allocVoice(int midi, uint8_t velocity,
                    const SampleBuffer* sample_lo,
                    const SampleBuffer* sample_hi,
                    float vel_blend,
                    float sample_rate,
                    float keyboard_spread) noexcept;
 
-    void releaseVoice(int midi, float sample_rate, float release_ms = 200.f) noexcept;
-    void releaseAll(float sample_rate, float release_ms = 200.f) noexcept;
+    // Release all voices playing the given MIDI note.
+    void releaseNote(int midi, float sample_rate, float release_ms) noexcept;
 
-    SamplerVoice&       voice(int midi)       { return voices_[midi]; }
-    const SamplerVoice& voice(int midi) const { return voices_[midi]; }
+    // Release all active voices.
+    void releaseAll(float sample_rate, float release_ms) noexcept;
+
+    int  poolSize()    const { return pool_size_; }
+    int  activeCount() const noexcept;
+    const SamplerVoice& poolVoice(int idx) const { return voices_[idx]; }
 
 private:
-    SamplerVoice voices_[SAMPLER_MAX_VOICES];
+    // Find a free voice slot, or steal the quietest releasing voice.
+    int findFreeSlot() noexcept;
+
+    SamplerVoice voices_[SAMPLER_MAX_POOL_SIZE];
+    int          pool_size_;
 };
 
 // -- PatchManager -------------------------------------------------------------
@@ -135,14 +156,13 @@ public:
     int lastMidi() const { return last_midi_.load(std::memory_order_relaxed); }
     int lastVel()  const { return last_vel_.load(std::memory_order_relaxed); }
 
-    /// Map MIDI velocity 1-127 to velocity layer index 0-7
     static int velToLayer(uint8_t velocity) {
         return std::min(7, (int)(velocity - 1) / 16);
     }
 
 private:
     std::atomic<bool> sustain_{false};
-    std::atomic<bool> delayed_offs_[SAMPLER_MAX_VOICES] = {};
+    std::atomic<bool> delayed_offs_[128] = {};   // indexed by MIDI note
     std::atomic<int>  last_midi_{-1};
     std::atomic<int>  last_vel_{0};
 };
@@ -172,48 +192,37 @@ public:
     CoreVizState getVizState() const override;
 
     std::string coreName()    const override { return "SamplerCore"; }
-    std::string coreVersion() const override { return "1.0"; }
+    std::string coreVersion() const override { return "2.0"; }
     bool        isLoaded()    const override { return loaded_; }
 
     // -- Bank management (called from GUI thread) -----------------------------
-    /// Get list of discovered bank names.
     const std::vector<std::string>& bankNames() const { return bank_names_; }
-    /// Get currently active bank name.
     const std::string& activeBankName() const { return active_bank_name_; }
-    /// Switch to a different bank by name.  Loads asynchronously if not yet loaded.
-    /// Returns true if switch was initiated (loading may still be in progress).
     bool selectBank(const std::string& name, Logger& logger);
-    /// True while a bank is being loaded in the background.
     bool isBankLoading() const { return bank_loading_.load(std::memory_order_relaxed); }
 
 private:
-    /// Scan base directory for sample banks.
     void discoverBanks(const std::string& base_dir);
-    /// Load a bank's WAV files from disk.
     bool loadBank(SampleBank& bank, float sr, Logger& logger);
 
-    // All discovered banks (lazy-loaded)
     std::vector<SampleBank> banks_;
     std::vector<std::string> bank_names_;
     std::string active_bank_name_;
     int active_bank_idx_ = -1;
 
-    // Three-layer architecture
     SamplerVoiceManager voice_mgr_;
     SamplerPatchManager patch_mgr_;
 
     float sample_rate_ = 48000.f;
     bool  loaded_      = false;
 
-    // GUI parameters
     std::atomic<float> gain_            {1.0f};
     std::atomic<float> keyboard_spread_ {0.60f};
-    std::atomic<float> release_time_    {1.0f};   // release multiplier
+    std::atomic<float> release_time_    {1.0f};
 
     mutable std::mutex bank_mutex_;
 
-    // Async bank loading
     std::atomic<bool> bank_loading_{false};
     std::thread       load_thread_;
-    Logger            load_logger_;   // copy for background thread
+    Logger            load_logger_;
 };

@@ -225,7 +225,7 @@ void SamplerCore::setSampleRate(float sr) {
 // -- MIDI ---------------------------------------------------------------------
 
 void SamplerCore::noteOn(uint8_t midi, uint8_t velocity) {
-    if (midi >= SAMPLER_MAX_VOICES) return;
+    if (midi >= 128) return;
     if (velocity == 0) { noteOff(midi); return; }
     if (active_bank_idx_ < 0) return;
 
@@ -236,7 +236,7 @@ void SamplerCore::noteOn(uint8_t midi, uint8_t velocity) {
 }
 
 void SamplerCore::noteOff(uint8_t midi) {
-    if (midi >= SAMPLER_MAX_VOICES) return;
+    if (midi >= 128) return;
     float rel_ms = release_time_.load(std::memory_order_relaxed) * 1000.f;
     patch_mgr_.noteOff(midi, voice_mgr_, sample_rate_, rel_ms);
 }
@@ -263,7 +263,6 @@ void SamplerPatchManager::noteOn(
     std::unique_lock<std::mutex> lk(bank_mutex, std::try_to_lock);
     if (!lk.owns_lock()) return;
 
-    // Velocity -> continuous float position 0.0-7.0 across layers
     int n_layers = bank.vel_layers_available[midi];
     if (n_layers == 0) return;
 
@@ -272,11 +271,9 @@ void SamplerPatchManager::noteOn(
     int hi_idx = (std::min)(lo_idx + 1, n_layers - 1);
     float blend = vel_float - (float)lo_idx;
 
-    // Find loaded samples for lo and hi layers (with fallback)
     const SampleBuffer* lo = nullptr;
     const SampleBuffer* hi = nullptr;
 
-    // Search for lo: down from lo_idx, then up
     for (int v = (std::min)(lo_idx, n_layers - 1); v >= 0; v--)
         if (bank.samples[midi][v].loaded) { lo = &bank.samples[midi][v]; break; }
     if (!lo)
@@ -284,12 +281,14 @@ void SamplerPatchManager::noteOn(
             if (bank.samples[midi][v].loaded) { lo = &bank.samples[midi][v]; break; }
     if (!lo) return;
 
-    // Search for hi: up from hi_idx, then down
     for (int v = (std::min)(hi_idx, n_layers - 1); v < SAMPLER_VEL_LAYERS; v++)
         if (bank.samples[midi][v].loaded) { hi = &bank.samples[midi][v]; break; }
-    if (!hi) hi = lo;  // same layer if only one available
+    if (!hi) hi = lo;
 
-    vm.initVoice(midi, velocity, lo, hi, blend, sample_rate, keyboard_spread);
+    // Clear delayed_offs for this note — new noteOn supersedes pending release
+    delayed_offs_[midi].store(false, std::memory_order_relaxed);
+
+    vm.allocVoice(midi, velocity, lo, hi, blend, sample_rate, keyboard_spread);
 
     last_midi_.store(midi,     std::memory_order_relaxed);
     last_vel_ .store(velocity, std::memory_order_relaxed);
@@ -300,16 +299,16 @@ void SamplerPatchManager::noteOff(uint8_t midi, SamplerVoiceManager& vm,
     if (sustain_.load(std::memory_order_relaxed))
         delayed_offs_[midi].store(true, std::memory_order_relaxed);
     else
-        vm.releaseVoice(midi, sr, release_ms);
+        vm.releaseNote(midi, sr, release_ms);
 }
 
 void SamplerPatchManager::sustainPedal(bool down, SamplerVoiceManager& vm,
                                         float sr, float release_ms) noexcept {
     sustain_.store(down, std::memory_order_relaxed);
     if (!down) {
-        for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
+        for (int m = 0; m < 128; m++) {
             if (delayed_offs_[m].load(std::memory_order_relaxed)) {
-                vm.releaseVoice(m, sr, release_ms);
+                vm.releaseNote(m, sr, release_ms);
                 delayed_offs_[m].store(false, std::memory_order_relaxed);
             }
         }
@@ -319,43 +318,70 @@ void SamplerPatchManager::sustainPedal(bool down, SamplerVoiceManager& vm,
 void SamplerPatchManager::allNotesOff(SamplerVoiceManager& vm, float sr,
                                        float release_ms) noexcept {
     vm.releaseAll(sr, release_ms);
-    for (int m = 0; m < SAMPLER_MAX_VOICES; m++)
+    for (int m = 0; m < 128; m++)
         delayed_offs_[m].store(false, std::memory_order_relaxed);
     sustain_.store(false, std::memory_order_relaxed);
 }
 
-// -- VoiceManager -------------------------------------------------------------
+// -- VoiceManager (voice pool) ------------------------------------------------
+
+SamplerVoiceManager::SamplerVoiceManager(int pool_size)
+    : pool_size_((std::min)(pool_size, SAMPLER_MAX_POOL_SIZE)) {}
 
 bool SamplerVoiceManager::processBlock(float* out_l, float* out_r,
                                         int n_samples, float sr) noexcept {
     bool any = false;
-    for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
-        if (!voices_[m].active) continue;
-        voices_[m].process(out_l, out_r, n_samples, sr);
+    for (int i = 0; i < pool_size_; i++) {
+        if (!voices_[i].active) continue;
+        voices_[i].process(out_l, out_r, n_samples, sr);
         any = true;
     }
     return any;
 }
 
-void SamplerVoiceManager::initVoice(int midi, uint8_t velocity,
+int SamplerVoiceManager::findFreeSlot() noexcept {
+    // 1. Find an inactive slot
+    for (int i = 0; i < pool_size_; i++)
+        if (!voices_[i].active) return i;
+
+    // 2. Pool full — steal the quietest releasing voice
+    int best = -1;
+    float best_level = 1e30f;
+    for (int i = 0; i < pool_size_; i++) {
+        if (voices_[i].releasing) {
+            float lvl = voices_[i].currentEnvLevel();
+            if (lvl < best_level) { best_level = lvl; best = i; }
+        }
+    }
+    if (best >= 0) return best;
+
+    // 3. No releasing voices — steal the quietest overall
+    for (int i = 0; i < pool_size_; i++) {
+        float lvl = voices_[i].currentEnvLevel();
+        if (lvl < best_level) { best_level = lvl; best = i; }
+    }
+    return best >= 0 ? best : 0;
+}
+
+int SamplerVoiceManager::allocVoice(int midi, uint8_t velocity,
                                      const SampleBuffer* lo,
                                      const SampleBuffer* hi,
                                      float vel_blend,
                                      float sr, float keyboard_spread) noexcept {
-    SamplerVoice& v = voices_[midi];
+    int slot = findFreeSlot();
+    SamplerVoice& v = voices_[slot];
 
-    // If voice is active, capture damping buffer for click-free retrigger
+    // Damping buffer for click-free steal/retrigger
     if (v.active && v.sample_lo && v.position < v.sample_lo->frames) {
         int damp_frames = (std::min)((int)(SAMPLER_DAMPING_MS * 0.001f * sr), 2048);
         int avail = (std::min)(damp_frames, v.sample_lo->frames - v.position);
         if (avail > 0) {
             const float* src = v.sample_lo->data.data() + v.position * 2;
-            // Apply current envelope to damping buffer
             float env = v.vel_gain;
             if (v.releasing) env *= v.rel_gain;
             float fade_step = 1.f / (float)avail;
             for (int i = 0; i < avail; i++) {
-                float fade = 1.f - (float)i * fade_step;  // linear fadeout
+                float fade = 1.f - (float)i * fade_step;
                 v.damp_buf[i * 2]     = src[i * 2]     * env * fade * v.pan_l;
                 v.damp_buf[i * 2 + 1] = src[i * 2 + 1] * env * fade * v.pan_r;
             }
@@ -375,35 +401,50 @@ void SamplerVoiceManager::initVoice(int midi, uint8_t velocity,
     v.vel_blend = vel_blend;
     v.position  = 0;
 
-    // Velocity gain: power curve for natural dynamic response
-    // Combines layer crossfade (timbral) + continuous gain (dynamic)
     float vel_norm = (float)velocity / 127.f;
-    v.vel_gain = vel_norm * vel_norm;  // quadratic gain curve
+    v.vel_gain = vel_norm * vel_norm;
 
-    // Onset ramp
     v.onset_gain = 0.f;
     v.onset_step = 1.f / (SAMPLER_ATTACK_MS * 0.001f * sr);
     v.rel_gain   = 1.f;
     v.rel_step   = 0.f;
 
-    // Panning
     float angle = (dsp::PI / 4.f)
                 + ((float)midi - 64.5f) / 87.0f * keyboard_spread * 0.5f;
     v.pan_l = std::cos(angle);
     v.pan_r = std::sin(angle);
+
+    return slot;
 }
 
-void SamplerVoiceManager::releaseVoice(int midi, float sr, float release_ms) noexcept {
-    SamplerVoice& v = voices_[midi];
-    if (!v.active) return;
-    v.releasing = true;
-    v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
-    v.rel_step  = -v.rel_gain / (release_ms * 0.001f * sr);
+void SamplerVoiceManager::releaseNote(int midi, float sr, float release_ms) noexcept {
+    // Release ALL voices playing this MIDI note (may be multiple with sustain)
+    for (int i = 0; i < pool_size_; i++) {
+        SamplerVoice& v = voices_[i];
+        if (v.active && !v.releasing && v.midi == midi) {
+            v.releasing = true;
+            v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
+            v.rel_step  = -v.rel_gain / (release_ms * 0.001f * sr);
+        }
+    }
 }
 
 void SamplerVoiceManager::releaseAll(float sr, float release_ms) noexcept {
-    for (int m = 0; m < SAMPLER_MAX_VOICES; m++)
-        if (voices_[m].active) releaseVoice(m, sr, release_ms);
+    for (int i = 0; i < pool_size_; i++) {
+        SamplerVoice& v = voices_[i];
+        if (v.active && !v.releasing) {
+            v.releasing = true;
+            v.rel_gain  = v.in_onset ? v.onset_gain : 1.f;
+            v.rel_step  = -v.rel_gain / (release_ms * 0.001f * sr);
+        }
+    }
+}
+
+int SamplerVoiceManager::activeCount() const noexcept {
+    int n = 0;
+    for (int i = 0; i < pool_size_; i++)
+        if (voices_[i].active) n++;
+    return n;
 }
 
 // -- Voice::process -----------------------------------------------------------
@@ -533,9 +574,10 @@ std::vector<CoreParamDesc> SamplerCore::describeParams() const {
 CoreVizState SamplerCore::getVizState() const {
     CoreVizState vs;
 
-    for (int m = 0; m < SAMPLER_MAX_VOICES; m++) {
-        if (voice_mgr_.voice(m).active) {
-            vs.active_midi_notes.push_back(m);
+    for (int i = 0; i < voice_mgr_.poolSize(); i++) {
+        const auto& v = voice_mgr_.poolVoice(i);
+        if (v.active) {
+            vs.active_midi_notes.push_back(v.midi);
             vs.active_voice_count++;
         }
     }

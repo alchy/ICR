@@ -40,11 +40,15 @@ public:
     int  blockSize() const { return block_size_; }
     void setBlockSize(int bs) { block_size_ = bs; }
 
+    int  voicePoolSize() const { return voice_pool_size_; }
+    void setVoicePoolSize(int n) { voice_pool_size_ = n; }
+
 private:
     std::string path_;
     std::string default_core_;
     std::string log_file_;
-    int         block_size_ = 256;
+    int         block_size_      = 256;
+    int         voice_pool_size_ = 32;
     std::unordered_map<std::string,
         std::unordered_map<std::string, std::string>> cores_;
 };
