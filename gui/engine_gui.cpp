@@ -127,6 +127,10 @@ struct GuiState {
     int  selected_port   = 0;
     bool midi_connected  = false;
 
+    // Block size (index into common sizes: 64, 128, 256, 512, 1024)
+    int  block_size_idx  = 2;   // default: 256
+    static constexpr int BLOCK_SIZES[] = { 64, 128, 256, 512, 1024 };
+
     bool active_notes[128] = {};
     int  mouse_held_note   = -1;
 
@@ -1114,6 +1118,33 @@ int runEngineGui(Engine& engine, Logger& logger) {
             if (ImGui::SmallButton("Refresh")) {
                 gs.ports = MidiInput::listPorts();
                 gs.selected_port = 0;
+            }
+
+            // ── Block size selector ──────────────────────────────────────
+            ImGui::SameLine(0, 20.f);
+            ImGui::Text("Block:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(100.f);
+            {
+                int cur_bs = engine.blockSize();
+                float latency_ms = 1000.f * cur_bs / engine.sampleRate();
+                char preview[32];
+                std::snprintf(preview, sizeof(preview), "%d (%.1f ms)", cur_bs, latency_ms);
+                if (ImGui::BeginCombo("##blocksize", preview)) {
+                    for (int i = 0; i < 5; i++) {
+                        int bs = GuiState::BLOCK_SIZES[i];
+                        float lat = 1000.f * bs / engine.sampleRate();
+                        char label[32];
+                        std::snprintf(label, sizeof(label), "%d (%.1f ms)", bs, lat);
+                        bool sel = (bs == cur_bs);
+                        if (ImGui::Selectable(label, sel)) {
+                            if (bs != cur_bs)
+                                engine.setBlockSize(bs);
+                        }
+                        if (sel) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
             }
         }
         sectionGap();

@@ -44,6 +44,9 @@ set(ENGINE_SOURCES
     engine/app_config.cpp
     engine/engine_config.cpp
     engine/batch_renderer.cpp
+    engine/sysex_handler.cpp
+    engine/audio_device.cpp
+    engine/miniaudio_impl.cpp
     engine/midi_input.cpp
     third_party/RtMidi.cpp
 )

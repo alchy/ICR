@@ -26,6 +26,8 @@
 #include "i_synth_core.h"
 #include "master_bus.h"
 #include "engine_config.h"
+#include "sysex_handler.h"
+#include "audio_device.h"
 #include "../dsp/dsp_chain.h"
 #include "../dsp/agc.h"
 #include "logger.h"
@@ -35,8 +37,6 @@
 #include <unordered_map>
 #include <atomic>
 #include <cstdint>
-
-struct ma_device;
 
 static constexpr int ENGINE_DEFAULT_SR         = 48000;
 static constexpr int ENGINE_DEFAULT_BLOCK_SIZE = 256;
@@ -97,7 +97,11 @@ public:
     // Phase 3: stop audio device (blocks until callback thread exits).
     void stop();
 
-    bool isRunning()     const { return running_.load(); }
+    // Change block size at runtime (any positive integer, not limited to ^2).
+    // Restarts audio device if running.  Suitable for VST/JUCE integration.
+    bool setBlockSize(int block_size);
+
+    bool isRunning()     const { return audio_.isRunning(); }
     bool isInitialized() const { return active_core_ && active_core_->isLoaded(); }
 
     // ── Thread-safe MIDI ──────────────────────────────────────────────────────
@@ -123,7 +127,9 @@ public:
     // Process an incoming SysEx message (called from MidiInput callback thread).
     // data: bytes AFTER the leading F0, BEFORE the trailing F7.
     // Returns a PONG response to send, or an empty vector if no response needed.
-    std::vector<uint8_t> handleSysEx(const uint8_t* data, int len);
+    std::vector<uint8_t> handleSysEx(const uint8_t* data, int len) {
+        return sysex_.handle(data, len);
+    }
 
     // ── Offline batch render ───────────────────────────────────────────────────
     // Render a list of notes to mono int16 WAV files without starting the audio
@@ -158,7 +164,7 @@ public:
     uint8_t getLastNoteVel()  const noexcept { return last_note_vel_ .load(std::memory_order_relaxed); }
 
     int sampleRate() const { return sample_rate_; }
-    int blockSize()  const { return block_size_;  }
+    int blockSize()  const { return audio_.blockSize(); }
 
 private:
     // ── MIDI event queue (lock-free SPSC ring, instance-local) ──────────────
@@ -198,14 +204,11 @@ public:
     const std::string& configPath() const { return config_.configPath(); }
 private:
 
-    // Audio device
-    ma_device*          device_      = nullptr;
-    std::atomic<bool>   running_    {false};
-    int                 sample_rate_ = ENGINE_DEFAULT_SR;
-    int                 block_size_  = ENGINE_DEFAULT_BLOCK_SIZE;
-
-    float* buf_l_ = nullptr;
-    float* buf_r_ = nullptr;
+    // Audio device + buffers
+    AudioDevice audio_;
+    int         sample_rate_ = ENGINE_DEFAULT_SR;   // also used by cores + batch render
+    float*      buf_l_ = nullptr;
+    float*      buf_r_ = nullptr;
 
     // Progressive voice gain (AGC) — see dsp/agc.h
     dsp::AgcState agc_;
@@ -218,8 +221,5 @@ private:
     std::atomic<uint8_t> last_note_midi_{60};
     std::atomic<uint8_t> last_note_vel_ {80};
 
-    // SET_BANK chunk reassembly state (MIDI callback thread only — not concurrent)
-    std::string bank_chunk_buf_;
-    int         bank_chunk_total_ = 0;
-    int         bank_chunk_recv_  = 0;
+    SysExHandler sysex_{*this};
 };
