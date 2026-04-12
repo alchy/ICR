@@ -1061,10 +1061,16 @@ int runEngineGui(Engine& engine, Logger& logger) {
                     else
                         sb_preview = cbs.active.c_str();
 
-                    // Sampler async loading indicator
+                    // Sampler: sync loading state and active bank name from core
                     if (cbs.is_sampler) {
                         auto* sc = dynamic_cast<SamplerCore*>(engine.core());
-                        if (sc) cbs.loading = sc->isBankLoading();
+                        if (sc) {
+                            cbs.loading = sc->isBankLoading();
+                            // Keep GUI in sync with actual core state
+                            const std::string& actual = sc->activeBankName();
+                            if (!actual.empty() && actual != cbs.active)
+                                cbs.active = actual;
+                        }
                     }
                     if (cbs.loading) ImGui::BeginDisabled();
 
