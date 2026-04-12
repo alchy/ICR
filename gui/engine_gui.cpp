@@ -868,7 +868,11 @@ int runEngineGui(Engine& engine, Logger& logger) {
                 // Auto-select the saved bank in the core
                 if (!cbs.active.empty()) {
                     auto* sc = dynamic_cast<SamplerCore*>(engine.coreByName(cname));
-                    if (sc) sc->selectBank(cbs.active, engine.getLogger());
+                    if (sc && !sc->selectBank(cbs.active, engine.getLogger())) {
+                        engine.getLogger().log("GUI", LogSeverity::Warning,
+                            cname + ": failed to restore bank '" + cbs.active + "'");
+                        cbs.active.clear();
+                    }
                 }
             }
         } else if (!cbs.is_sampler && !cbs.files.empty()) {
@@ -1072,9 +1076,11 @@ int runEngineGui(Engine& engine, Logger& logger) {
                                     if (cbs.is_sampler) {
                                         // SamplerCore: select by directory name
                                         auto* sc = dynamic_cast<SamplerCore*>(engine.core());
-                                        if (sc) {
-                                            sc->selectBank(fname, engine.getLogger());
+                                        if (sc && sc->selectBank(fname, engine.getLogger())) {
                                             cbs.active = fname;
+                                        } else {
+                                            engine.getLogger().log("GUI", LogSeverity::Warning,
+                                                "SamplerCore: selectBank failed for '" + fname + "'");
                                         }
                                     } else {
                                         // All other cores: load JSON file

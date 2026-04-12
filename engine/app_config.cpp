@@ -135,7 +135,9 @@ int AppConfig::parse(int argc, char* argv[], bool gui_mode) {
 bool AppConfig::initEngine(Engine& engine, Logger& logger) {
     // Load engine config (per-core paths, default_core)
     std::string cfg = engine_config_.empty() ? "icr-config.json" : engine_config_;
-    engine.loadEngineConfig(cfg, logger);
+    if (!engine.loadEngineConfig(cfg, logger))
+        logger.log("main", LogSeverity::Warning,
+                   "Engine config not loaded (using defaults): " + cfg);
 
     // Resolve core name: CLI arg > engine config default > SineCore
     if (core_name_.empty())

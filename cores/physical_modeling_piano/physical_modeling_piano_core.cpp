@@ -79,6 +79,9 @@ bool PhysicalModelingPianoCore::load(const std::string& params_path, float sr,
             if (loadBankFromJson(json_str, logger))
                 logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
                            "Bank loaded: " + params_path);
+            else
+                logger.log("PhysicalModelingPianoCore", LogSeverity::Warning,
+                           "Bank parse failed, using defaults: " + params_path);
         } else {
             logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
                        "No bank file, using defaults");
