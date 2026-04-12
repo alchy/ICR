@@ -33,6 +33,11 @@ bool AudioDevice::start(AudioCallback cb, void* userdata,
     if (ma_device_init(nullptr, &cfg, device_) != MA_SUCCESS)
         return false;
 
+    // Check actual negotiated sample rate (OS may differ from requested)
+    int actual_sr = (int)device_->sampleRate;
+    if (actual_sr != sample_rate_)
+        sample_rate_ = actual_sr;
+
     if (ma_device_start(device_) != MA_SUCCESS) {
         ma_device_uninit(device_);
         return false;

@@ -449,8 +449,33 @@ bool Engine::start() {
         logger_.log("Engine", LogSeverity::Error, "Failed to start audio device");
         return false;
     }
+
+    // Check if audio device negotiated a different sample rate
+    int actual_sr = audio_.sampleRate();
+    if (actual_sr != sample_rate_) {
+        logger_.log("Engine", LogSeverity::Warning,
+            "Audio device negotiated SR=" + std::to_string(actual_sr)
+            + " (requested " + std::to_string(sample_rate_) + ")");
+        sample_rate_ = actual_sr;
+
+        // Propagate new SR to all instantiated cores
+        for (auto& [name, core] : cores_) {
+            core->setSampleRate((float)sample_rate_);
+            logger_.log("Engine", LogSeverity::Info,
+                "Core SR updated: " + name + " -> " + std::to_string(sample_rate_));
+        }
+
+        // Update DSP chain and peak metering
+        dsp_.prepare((float)sample_rate_, audio_.blockSize());
+        dsp::agc_init(agc_, (float)sample_rate_);
+        float bps = (float)sample_rate_ / (float)audio_.blockSize();
+        peak_decay_coeff_ = std::pow(10.f, -1.f / bps);
+    }
+
     logger_.log("Engine", LogSeverity::Info,
-        "Audio started: " + audio_.deviceName());
+        "Audio started: " + audio_.deviceName()
+        + " SR=" + std::to_string(sample_rate_)
+        + " block=" + std::to_string(audio_.blockSize()));
     return true;
 }
 

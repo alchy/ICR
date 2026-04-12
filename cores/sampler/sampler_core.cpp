@@ -105,14 +105,41 @@ bool SamplerCore::loadBank(SampleBank& bank, float sr, Logger& logger) {
     auto files = listFiles(bank.path);
     std::regex wav_pat(R"(m(\d{3})-vel(\d)-f(\d+)\.wav)", std::regex::icase);
 
+    // Determine target SR tag (e.g. 48000 → "48", 44100 → "44")
+    int sr_tag_target = (int)sr / 1000;
+
+    // First pass: check if target SR files exist
+    bool has_target_sr = false;
+    int  fallback_sr_tag = 0;
+    for (const auto& fname : files) {
+        std::smatch match;
+        if (!std::regex_match(fname, match, wav_pat)) continue;
+        int sr_tag = std::stoi(match[3].str());
+        if (sr_tag == sr_tag_target) { has_target_sr = true; break; }
+        if (fallback_sr_tag == 0) fallback_sr_tag = sr_tag;
+    }
+
+    int load_sr_tag = has_target_sr ? sr_tag_target : fallback_sr_tag;
+    if (!has_target_sr && fallback_sr_tag > 0) {
+        logger.log("SamplerCore", LogSeverity::Warning,
+                   "No f" + std::to_string(sr_tag_target) + " samples in "
+                   + bank.name + ", falling back to f" + std::to_string(fallback_sr_tag)
+                   + " (SR mismatch — playback will not be resampled)");
+    }
+
     int count = 0;
+    int skipped_sr = 0;
     for (const auto& fname : files) {
         std::smatch match;
         if (!std::regex_match(fname, match, wav_pat)) continue;
 
-        int midi = std::stoi(match[1].str());
-        int vel  = std::stoi(match[2].str());
+        int midi   = std::stoi(match[1].str());
+        int vel    = std::stoi(match[2].str());
+        int sr_tag = std::stoi(match[3].str());
         if (midi < 0 || midi > 127 || vel < 0 || vel >= SAMPLER_VEL_LAYERS) continue;
+
+        // Only load files matching the chosen SR tag
+        if (sr_tag != load_sr_tag) { skipped_sr++; continue; }
 
         std::string full_path = bank.path + PATH_SEP + fname;
         wav::WavData w = wav::load(full_path);
@@ -120,6 +147,14 @@ bool SamplerCore::loadBank(SampleBank& bank, float sr, Logger& logger) {
             logger.log("SamplerCore", LogSeverity::Warning,
                        "Failed to load: " + fname);
             continue;
+        }
+
+        // Verify WAV header SR matches filename tag
+        int wav_sr_k = w.sample_rate / 1000;
+        if (wav_sr_k != sr_tag) {
+            logger.log("SamplerCore", LogSeverity::Warning,
+                       fname + ": WAV header SR=" + std::to_string(w.sample_rate)
+                       + " doesn't match filename tag f" + std::to_string(sr_tag));
         }
 
         SampleBuffer& sb = bank.samples[midi][vel];
@@ -137,7 +172,10 @@ bool SamplerCore::loadBank(SampleBank& bank, float sr, Logger& logger) {
     bank.loaded = (count > 0);
     if (bank.loaded) {
         logger.log("SamplerCore", LogSeverity::Info,
-                   "Loaded " + std::to_string(count) + " samples from " + bank.name);
+                   "Loaded " + std::to_string(count) + " samples from " + bank.name
+                   + " (f" + std::to_string(load_sr_tag) + ")"
+                   + (skipped_sr > 0 ? ", skipped " + std::to_string(skipped_sr)
+                      + " files with different SR" : ""));
     }
     return bank.loaded;
 }
