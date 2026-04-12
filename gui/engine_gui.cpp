@@ -886,6 +886,9 @@ int runEngineGui(Engine& engine, Logger& logger) {
                     engine.getLogger().log("GUI", LogSeverity::Warning,
                         cname + ": saved bank '" + fn + "' not found in " + cbs.dir);
             }
+            // Fallback: if no active bank resolved, default to first available
+            if (cbs.active.empty())
+                cbs.active = cbs.files.front();
         }
 
         gs.core_banks[cname] = std::move(cbs);
