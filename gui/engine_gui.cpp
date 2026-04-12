@@ -1,7 +1,7 @@
 /*
- * resonator_gui.cpp
+ * engine_gui.cpp
  * ──────────────────
- * Dear ImGui + GLFW + OpenGL3 GUI for IthacaCoreResonator.
+ * Dear ImGui + GLFW + OpenGL3 GUI for ICR engine.
  *
  * Grid layout system:
  *   Row 0  — Top bar: MIDI port, status LEDs, voices, level
@@ -13,7 +13,7 @@
  * getVizState() — no hard-coded SynthConfig references.
  */
 
-#include "resonator_gui.h"
+#include "engine_gui.h"
 #include "../engine/midi_input.h"
 #include "../engine/synth_core_registry.h"
 #include "../cores/sampler/sampler_core.h"
@@ -268,7 +268,7 @@ static void ledSep() {
 }
 
 // ── Piano keyboard widget ─────────────────────────────────────────────────────
-static int drawPiano(GuiState& gs, CoreEngine& engine) {
+static int drawPiano(GuiState& gs, Engine& engine) {
     ImDrawList* dl  = ImGui::GetWindowDrawList();
     ImVec2 origin   = ImGui::GetCursorScreenPos();
 
@@ -513,7 +513,7 @@ static void drawPartialsTable(const CoreVoiceViz& ln) {
 }
 
 // ── Section: Mix controls ─────────────────────────────────────────────────────
-static void drawMixControls(GuiState& gs, CoreEngine& engine) {
+static void drawMixControls(GuiState& gs, Engine& engine) {
     ImGui::SeparatorText("MIX");
     {
         int v = gs.master_gain;
@@ -538,7 +538,7 @@ static void drawMixControls(GuiState& gs, CoreEngine& engine) {
 }
 
 // ── Section: LFO pan controls ─────────────────────────────────────────────────
-static void drawLfoControls(GuiState& gs, CoreEngine& engine) {
+static void drawLfoControls(GuiState& gs, Engine& engine) {
     ImGui::SeparatorText("LFO PAN");
     {
         int v = gs.lfo_speed;
@@ -584,7 +584,7 @@ static void drawLfoControls(GuiState& gs, CoreEngine& engine) {
 }
 
 // ── Section: Limiter controls ─────────────────────────────────────────────────
-static void drawLimiterControls(GuiState& gs, CoreEngine& engine, DspChain* dsp) {
+static void drawLimiterControls(GuiState& gs, Engine& engine, DspChain* dsp) {
     {
         bool ena = gs.limiter_enabled;
         if (ImGui::Checkbox("##limon", &ena)) {
@@ -631,7 +631,7 @@ static void drawLimiterControls(GuiState& gs, CoreEngine& engine, DspChain* dsp)
 }
 
 // ── Section: BBE controls ─────────────────────────────────────────────────────
-static void drawBbeControls(GuiState& gs, CoreEngine& engine, DspChain* dsp) {
+static void drawBbeControls(GuiState& gs, Engine& engine, DspChain* dsp) {
     {
         bool ena = gs.bbe_enabled;
         if (ImGui::Checkbox("##bbeon", &ena)) {
@@ -748,7 +748,7 @@ static void drawConvolverControls(GuiState& gs, DspChain* dsp, float sr) {
 }
 
 // ── Core params panel (synthesis column) ─────────────────────────────────────
-static void drawCorePanel(CoreEngine& engine) {
+static void drawCorePanel(Engine& engine) {
     ISynthCore* core = engine.core();
     if (!core) {
         ImGui::TextDisabled("(no core loaded)");
@@ -763,7 +763,7 @@ static void drawCorePanel(CoreEngine& engine) {
 
 // ── Main GUI loop ─────────────────────────────────────────────────────────────
 
-int runResonatorGui(CoreEngine& engine, Logger& logger) {
+int runEngineGui(Engine& engine, Logger& logger) {
     g_glfw_logger = &logger;
     logger.log("GUI", LogSeverity::Info, "Starting GLFW + ImGui");
 

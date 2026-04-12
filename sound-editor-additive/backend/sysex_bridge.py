@@ -86,7 +86,7 @@ PARAM_IDS = {
 
 # Master param IDs (command 0x10 SET_MASTER)
 #   0x01–0x07  ISynthCore global params  (physical units matching setParam)
-#   0x10–0x13  CoreEngine mix params     (physical units: gain 0–2, pan -1–+1, Hz, 0–1)
+#   0x10–0x13  Engine mix params          (physical units: gain 0–2, pan -1–+1, Hz, 0–1)
 #   0x20–0x24  DspChain params           (normalised 0.0–1.0)
 MASTER_PARAM_IDS = {
     # ISynthCore global
@@ -97,7 +97,7 @@ MASTER_PARAM_IDS = {
     "keyboard_spread":   0x05,   # rad 0.0–π
     "eq_strength":       0x06,   # ×  0.0–1.0
     "rng_seed":          0x07,   # int 0–9999
-    # CoreEngine mix
+    # Engine mix
     "master_gain":       0x10,   # 0.0–2.0
     "master_pan":        0x11,   # -1.0–+1.0
     "lfo_speed":         0x12,   # Hz  0.0–2.0

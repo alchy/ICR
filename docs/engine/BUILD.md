@@ -106,7 +106,7 @@ pip install numpy scipy soundfile
 │  ISynthCore implementations (pure C++ math)     │  ← 100% portable
 │  DspChain (convolver, BBE, limiter)             │
 ├─────────────────────────────────────────────────┤
-│  CoreEngine (RT loop, MIDI queue, master bus)   │  ← portable (std::atomic)
+│  Engine (RT loop, MIDI queue, master bus)       │  ← portable (std::atomic)
 ├─────────────────────────────────────────────────┤
 │  miniaudio          │  RtMidi         │ GLFW    │  ← platform abstraction
 │  (audio device)     │  (MIDI ports)   │ (window)│

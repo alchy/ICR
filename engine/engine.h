@@ -1,9 +1,9 @@
 #pragma once
 /*
- * core_engine.h
+ * engine.h
  * ──────────────
  * Generic real-time engine wrapping an ISynthCore.
- * Replaces ResonatorEngine; works with any registered core.
+ * Works with any registered core.
  *
  * Responsibilities:
  *  - Create and own an ISynthCore (via SynthCoreRegistry)
@@ -15,9 +15,9 @@
  *  - Peak metering
  *
  * Usage:
- *   CoreEngine engine;
- *   engine.initialize("ResonatorCore", "soundbanks/params-ks-grand-ft.json",
- *                     "soundbanks/params-ks-grand-ft.synth_config.json", logger);
+ *   Engine engine;
+ *   engine.initialize("AdditiveSynthesisPianoCore", "soundbanks/params.json",
+ *                     "soundbanks/synth_config.json", logger);
  *   engine.start();
  *   engine.noteOn(60, 80);
  *   engine.stop();
@@ -26,7 +26,7 @@
 #include "i_synth_core.h"
 #include "../dsp/dsp_chain.h"
 #include "../dsp/agc.h"
-#include "core_logger.h"
+#include "logger.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -36,13 +36,13 @@
 
 struct ma_device;
 
-static constexpr int CORE_ENGINE_DEFAULT_SR         = 48000;
-static constexpr int CORE_ENGINE_DEFAULT_BLOCK_SIZE = 256;
+static constexpr int ENGINE_DEFAULT_SR         = 48000;
+static constexpr int ENGINE_DEFAULT_BLOCK_SIZE = 256;
 
-class CoreEngine {
+class Engine {
 public:
-    CoreEngine();
-    ~CoreEngine();
+    Engine();
+    ~Engine();
 
     // ── Initialization ────────────────────────────────────────────────────────
 
@@ -205,8 +205,8 @@ private:
     // Audio device
     ma_device*          device_      = nullptr;
     std::atomic<bool>   running_    {false};
-    int                 sample_rate_ = CORE_ENGINE_DEFAULT_SR;
-    int                 block_size_  = CORE_ENGINE_DEFAULT_BLOCK_SIZE;
+    int                 sample_rate_ = ENGINE_DEFAULT_SR;
+    int                 block_size_  = ENGINE_DEFAULT_BLOCK_SIZE;
 
     float* buf_l_ = nullptr;
     float* buf_r_ = nullptr;
@@ -227,11 +227,3 @@ private:
     int         bank_chunk_total_ = 0;
     int         bank_chunk_recv_  = 0;
 };
-
-// ── Convenience: full startup + interactive loop ──────────────────────────────
-// Like runResonator, but selects core by name.
-int runCoreEngine(Logger&            logger,
-                  const std::string& core_name,
-                  const std::string& params_path,
-                  int                midi_port       = 0,
-                  const std::string& config_json_path = "");

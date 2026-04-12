@@ -40,7 +40,8 @@ endif()
 
 set(ENGINE_SOURCES
     engine/synth_core_registry.cpp
-    engine/core_engine.cpp
+    engine/engine.cpp
+    engine/app_config.cpp
     engine/midi_input.cpp
     third_party/RtMidi.cpp
 )
@@ -159,7 +160,7 @@ if (ICR_BUILD_GUI)
 
     add_executable(icrgui
         main_gui.cpp
-        gui/resonator_gui.cpp
+        gui/engine_gui.cpp
         ${ENGINE_SOURCES}
         ${CORE_SOURCES}
         ${DSP_SOURCES}

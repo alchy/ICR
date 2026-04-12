@@ -1,5 +1,5 @@
 /*
- * core_engine.cpp
+ * engine.cpp
  * ────────────────
  * Generic RT engine for any ISynthCore.
  *
@@ -19,7 +19,7 @@
 #define MINIAUDIO_IMPLEMENTATION
 #include "miniaudio.h"
 
-#include "core_engine.h"
+#include "engine.h"
 #include "synth_core_registry.h"
 #include "midi_input.h"
 #include "../third_party/json.hpp"
@@ -36,23 +36,15 @@ using json = nlohmann::json;
 #include <chrono>
 #include <filesystem>
 
-#ifdef _WIN32
-  #include <conio.h>
-#else
-  #include <termios.h>
-  #include <unistd.h>
-  #include <fcntl.h>
-#endif
-
-// ── MIDI event queue — see pushMidiEvt (now a CoreEngine member) ─────────────
+// ── MIDI event queue — see pushMidiEvt (Engine member) ──────────────────────
 
 // ── MIDI queue (instance-local, SPSC lock-free) ───────────────────────────────
 
-void CoreEngine::pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcept {
+void Engine::pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcept {
     int w    = midi_w_.load(std::memory_order_relaxed);
     int next = (w + 1) % MIDI_Q_SIZE;
     if (next == midi_r_.load(std::memory_order_acquire)) {
-        logger_.log("CoreEngine", LogSeverity::Warning, "MIDI queue full, event dropped");
+        logger_.log("Engine", LogSeverity::Warning, "MIDI queue full, event dropped");
         return;
     }
     midi_q_[w] = {t, midi, val};
@@ -61,10 +53,10 @@ void CoreEngine::pushMidiEvt(MidiEvt::Type t, uint8_t midi, uint8_t val) noexcep
 
 // ── Constructor / Destructor ──────────────────────────────────────────────────
 
-CoreEngine::CoreEngine()
+Engine::Engine()
     : device_(new ma_device{}) {}
 
-CoreEngine::~CoreEngine() {
+Engine::~Engine() {
     stop();
     delete[] buf_l_;
     delete[] buf_r_;
@@ -79,14 +71,14 @@ static void applyConfigJson(const std::string& path, ISynthCore* core,
     if (path.empty()) return;
     std::ifstream f(path);
     if (!f) {
-        logger.log("CoreEngine", LogSeverity::Warning,
+        logger.log("Engine", LogSeverity::Warning,
                    "Config file not found: " + path);
         return;
     }
     nlohmann::json j;
     try { f >> j; }
     catch (const std::exception& e) {
-        logger.log("CoreEngine", LogSeverity::Warning,
+        logger.log("Engine", LogSeverity::Warning,
                    std::string("Config parse error: ") + e.what());
         return;
     }
@@ -97,18 +89,18 @@ static void applyConfigJson(const std::string& path, ISynthCore* core,
             if (core->setParam(it.key(), v)) ++applied;
         }
     }
-    logger.log("CoreEngine", LogSeverity::Info,
+    logger.log("Engine", LogSeverity::Info,
                "Config loaded: " + path +
                " (" + std::to_string(applied) + " params applied)");
 }
 
 // ── loadEngineConfig ──────────────────────────────────────────────────────────
 
-bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger) {
+bool Engine::loadEngineConfig(const std::string& config_path, Logger& logger) {
     config_path_ = config_path;   // remember for saveConfig()
     std::ifstream f(config_path);
     if (!f.is_open()) {
-        logger.log("CoreEngine", LogSeverity::Warning,
+        logger.log("Engine", LogSeverity::Warning,
                    "Cannot open engine config: " + config_path);
         return false;
     }
@@ -116,7 +108,7 @@ bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger
     json root;
     try { f >> root; }
     catch (const std::exception& e) {
-        logger.log("CoreEngine", LogSeverity::Error,
+        logger.log("Engine", LogSeverity::Error,
                    std::string("Engine config parse error: ") + e.what());
         return false;
     }
@@ -130,10 +122,10 @@ bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger
                 // Redirect logger: file_out -> log file, rt_out -> stdout
                 logger = Logger(log_file_handle_, stdout);
                 logger_ = logger;
-                logger.log("CoreEngine", LogSeverity::Info,
+                logger.log("Engine", LogSeverity::Info,
                            "Log file opened: " + log_path);
             } else {
-                logger.log("CoreEngine", LogSeverity::Warning,
+                logger.log("Engine", LogSeverity::Warning,
                            "Cannot open log file: " + log_path);
             }
         }
@@ -161,14 +153,14 @@ bool CoreEngine::loadEngineConfig(const std::string& config_path, Logger& logger
         }
     }
 
-    logger.log("CoreEngine", LogSeverity::Info,
+    logger.log("Engine", LogSeverity::Info,
                "Engine config loaded: " + config_path
                + " (default_core=" + default_core_name_
                + ", " + std::to_string(core_config_.size()) + " core configs)");
     return true;
 }
 
-std::string CoreEngine::coreConfigValue(const std::string& core_name,
+std::string Engine::coreConfigValue(const std::string& core_name,
                                          const std::string& key) const {
     auto it = core_config_.find(core_name);
     if (it == core_config_.end()) return "";
@@ -176,15 +168,15 @@ std::string CoreEngine::coreConfigValue(const std::string& core_name,
     return (jt != it->second.end()) ? jt->second : "";
 }
 
-void CoreEngine::setCoreConfigValue(const std::string& core_name,
+void Engine::setCoreConfigValue(const std::string& core_name,
                                      const std::string& key,
                                      const std::string& value) {
     core_config_[core_name][key] = value;
 }
 
-bool CoreEngine::saveConfig() {
+bool Engine::saveConfig() {
     if (config_path_.empty()) {
-        logger_.log("CoreEngine", LogSeverity::Warning,
+        logger_.log("Engine", LogSeverity::Warning,
                     "saveConfig: no config_path set, skipping");
         return false;
     }
@@ -213,13 +205,13 @@ bool CoreEngine::saveConfig() {
 
     std::ofstream f(config_path_);
     if (!f.is_open()) {
-        logger_.log("CoreEngine", LogSeverity::Error,
+        logger_.log("Engine", LogSeverity::Error,
                     "saveConfig: cannot open " + config_path_);
         return false;
     }
     f << root.dump(2) << "\n";
 
-    logger_.log("CoreEngine", LogSeverity::Info,
+    logger_.log("Engine", LogSeverity::Info,
                 "Config saved: " + config_path_
                 + " (default_core=" + default_core_name_ + ")");
     return f.good();
@@ -227,7 +219,7 @@ bool CoreEngine::saveConfig() {
 
 // ── initialize ────────────────────────────────────────────────────────────────
 
-bool CoreEngine::initialize(const std::string& core_name,
+bool Engine::initialize(const std::string& core_name,
                              const std::string& params_path,
                              const std::string& config_json_path,
                              Logger&            logger,
@@ -239,21 +231,21 @@ bool CoreEngine::initialize(const std::string& core_name,
     if (resolved_params.empty())
         resolved_params = coreConfigValue(core_name, "params_path");
 
-    logger_.log("CoreEngine", LogSeverity::Info,
+    logger_.log("Engine", LogSeverity::Info,
                 "Initializing core: " + core_name
                 + (resolved_params.empty() ? "" : " params=" + resolved_params));
 
     auto core = SynthCoreRegistry::instance().create(core_name);
     if (!core) {
-        logger_.log("CoreEngine", LogSeverity::Error,
+        logger_.log("Engine", LogSeverity::Error,
                     "Unknown core: '" + core_name + "'. Available:");
         for (const auto& n : SynthCoreRegistry::instance().availableCores())
-            logger_.log("CoreEngine", LogSeverity::Info, "  - " + n);
+            logger_.log("Engine", LogSeverity::Info, "  - " + n);
         return false;
     }
 
     if (!core->load(resolved_params, (float)sample_rate_, logger_, midi_from, midi_to)) {
-        logger_.log("CoreEngine", LogSeverity::Error, "Core load failed");
+        logger_.log("Engine", LogSeverity::Error, "Core load failed");
         return false;
     }
 
@@ -278,25 +270,25 @@ bool CoreEngine::initialize(const std::string& core_name,
     loadIrFromConfig(core_name);
     applyDspDefaults(core_name);
 
-    logger_.log("CoreEngine", LogSeverity::Info,
+    logger_.log("Engine", LogSeverity::Info,
         std::string("Ready. Core=") + active_core_->coreName() +
         " SR=" + std::to_string(sample_rate_) +
         " block=" + std::to_string(block_size_));
     return true;
 }
 
-void CoreEngine::loadIrFromConfig(const std::string& core_name) {
+void Engine::loadIrFromConfig(const std::string& core_name) {
     // Set soundboard directory for GUI IR selector
     std::string sb_dir = coreConfigValue(core_name, "soundboard_dir");
     if (!sb_dir.empty()) {
         dsp_.setSoundboardDir(sb_dir);
-        logger_.log("CoreEngine", LogSeverity::Info,
+        logger_.log("Engine", LogSeverity::Info,
                     "Soundboard directory: " + sb_dir);
     }
 
     std::string ir = coreConfigValue(core_name, "ir_path");
     if (ir.empty()) {
-        logger_.log("CoreEngine", LogSeverity::Info,
+        logger_.log("Engine", LogSeverity::Info,
                     "No ir_path configured for " + core_name);
         return;
     }
@@ -304,16 +296,16 @@ void CoreEngine::loadIrFromConfig(const std::string& core_name) {
     if (dsp_.isConvolverLoaded() && dsp_.convolver().isEnabled()) return;
     if (dsp_.loadConvolverIR(ir, (float)sample_rate_)) {
         dsp_.setConvolverEnabled(true);
-        logger_.log("CoreEngine", LogSeverity::Info,
+        logger_.log("Engine", LogSeverity::Info,
                     "Convolver IR loaded: " + ir + " ("
                     + std::to_string(dsp_.convolver().irLength()) + " samples)");
     } else {
-        logger_.log("CoreEngine", LogSeverity::Warning,
+        logger_.log("Engine", LogSeverity::Warning,
                     "Failed to load convolver IR: " + ir);
     }
 }
 
-void CoreEngine::applyDspDefaults(const std::string& core_name) {
+void Engine::applyDspDefaults(const std::string& core_name) {
     // Apply per-core DSP defaults from icr-config.json "dsp_defaults" sub-object.
     // Any key not present keeps its current value.
     auto get = [&](const std::string& key, int fallback) -> int {
@@ -358,7 +350,7 @@ void CoreEngine::applyDspDefaults(const std::string& core_name) {
 
 // ── switchCore ────────────────────────────────────────────────────────────────
 
-bool CoreEngine::switchCore(const std::string& core_name,
+bool Engine::switchCore(const std::string& core_name,
                              const std::string& params_path) {
     if (core_name == active_core_name_) return true;  // already active
 
@@ -369,19 +361,19 @@ bool CoreEngine::switchCore(const std::string& core_name,
         if (resolved.empty())
             resolved = coreConfigValue(core_name, "params_path");
 
-        logger_.log("CoreEngine", LogSeverity::Info,
+        logger_.log("Engine", LogSeverity::Info,
                     "Instantiating core: " + core_name
                     + (resolved.empty() ? "" : " params=" + resolved));
 
         auto new_core = SynthCoreRegistry::instance().create(core_name);
         if (!new_core) {
-            logger_.log("CoreEngine", LogSeverity::Error,
+            logger_.log("Engine", LogSeverity::Error,
                         "Unknown core: '" + core_name + "'");
             return false;
         }
 
         if (!new_core->load(resolved, (float)sample_rate_, logger_)) {
-            logger_.log("CoreEngine", LogSeverity::Error,
+            logger_.log("Engine", LogSeverity::Error,
                         "Core load failed for " + core_name);
             return false;
         }
@@ -399,7 +391,7 @@ bool CoreEngine::switchCore(const std::string& core_name,
     loadIrFromConfig(core_name);
     applyDspDefaults(core_name);
 
-    logger_.log("CoreEngine", LogSeverity::Info,
+    logger_.log("Engine", LogSeverity::Info,
         std::string("Active core: ") + active_core_->coreName()
         + " (" + std::to_string(cores_.size()) + " cores loaded)");
     return true;
@@ -407,11 +399,11 @@ bool CoreEngine::switchCore(const std::string& core_name,
 
 // ── Audio callback ────────────────────────────────────────────────────────────
 
-void CoreEngine::audioCallback(ma_device*  device,
+void Engine::audioCallback(ma_device*  device,
                                 void*       output,
                                 const void* /*input*/,
                                 uint32_t    frame_count) {
-    auto* eng = reinterpret_cast<CoreEngine*>(device->pUserData);
+    auto* eng = reinterpret_cast<Engine*>(device->pUserData);
     // Interleave L+R into float32 output
     uint32_t rem = frame_count;
     uint32_t off = 0;
@@ -429,7 +421,7 @@ void CoreEngine::audioCallback(ma_device*  device,
     }
 }
 
-void CoreEngine::processBlock(float* out_l, float* out_r, int n) noexcept {
+void Engine::processBlock(float* out_l, float* out_r, int n) noexcept {
     // Drain MIDI queue — route events to ACTIVE core only
     if (active_core_) {
         int r = midi_r_.load(std::memory_order_acquire);
@@ -477,7 +469,7 @@ void CoreEngine::processBlock(float* out_l, float* out_r, int n) noexcept {
     output_peak_lin_.store(cur, std::memory_order_relaxed);
 }
 
-void CoreEngine::applyMasterAndLfo(float* out_l, float* out_r,
+void Engine::applyMasterAndLfo(float* out_l, float* out_r,
                                     int n) noexcept {
     static constexpr float PI  = 3.14159265358979f;
     static constexpr float TAU = 2.f * PI;
@@ -513,7 +505,7 @@ void CoreEngine::applyMasterAndLfo(float* out_l, float* out_r,
 
 // ── start / stop ─────────────────────────────────────────────────────────────
 
-bool CoreEngine::start() {
+bool Engine::start() {
     if (!isInitialized()) return false;
 
     dsp::agc_init(agc_, (float)sample_rate_);
@@ -527,56 +519,56 @@ bool CoreEngine::start() {
     cfg.periodSizeInFrames = (ma_uint32)block_size_;
 
     if (ma_device_init(nullptr, &cfg, device_) != MA_SUCCESS) {
-        logger_.log("CoreEngine", LogSeverity::Error, "Failed to open audio device");
+        logger_.log("Engine", LogSeverity::Error, "Failed to open audio device");
         return false;
     }
     if (ma_device_start(device_) != MA_SUCCESS) {
-        logger_.log("CoreEngine", LogSeverity::Error, "Failed to start audio device");
+        logger_.log("Engine", LogSeverity::Error, "Failed to start audio device");
         ma_device_uninit(device_);
         return false;
     }
     running_.store(true);
-    logger_.log("CoreEngine", LogSeverity::Info,
+    logger_.log("Engine", LogSeverity::Info,
         "Audio started: " + std::string(device_->playback.name));
     return true;
 }
 
-void CoreEngine::stop() {
+void Engine::stop() {
     if (!running_.load()) return;
     ma_device_stop(device_);
     ma_device_uninit(device_);
     running_.store(false);
-    logger_.log("CoreEngine", LogSeverity::Info, "Audio stopped");
+    logger_.log("Engine", LogSeverity::Info, "Audio stopped");
 }
 
 // ── Thread-safe MIDI ──────────────────────────────────────────────────────────
 
-void CoreEngine::noteOn(uint8_t midi, uint8_t vel) {
+void Engine::noteOn(uint8_t midi, uint8_t vel) {
     last_note_midi_.store(midi, std::memory_order_relaxed);
     last_note_vel_ .store(vel,  std::memory_order_relaxed);
     pushMidiEvt(MidiEvt::NOTE_ON, midi, vel);
 }
-void CoreEngine::noteOff(uint8_t midi) {
+void Engine::noteOff(uint8_t midi) {
     pushMidiEvt(MidiEvt::NOTE_OFF, midi, 0);
 }
-void CoreEngine::sustainPedal(uint8_t val) {
+void Engine::sustainPedal(uint8_t val) {
     pushMidiEvt(MidiEvt::SUSTAIN, 0, val);
 }
 
-void CoreEngine::allNotesOff() {
+void Engine::allNotesOff() {
     pushMidiEvt(MidiEvt::ALL_NOTES_OFF, 0, 0);
 }
 
 // ── Master mix ────────────────────────────────────────────────────────────────
 
-void CoreEngine::setMasterGain(uint8_t v, Logger& logger) {
+void Engine::setMasterGain(uint8_t v, Logger& logger) {
     master_gain_.store((v / 127.f) * (v / 127.f) * 2.f,  // square law, 0..2
                        std::memory_order_relaxed);
-    logger.log("CoreEngine", LogSeverity::Info,
+    logger.log("Engine", LogSeverity::Info,
                "Master gain MIDI=" + std::to_string(v));
 }
 
-void CoreEngine::setMasterPan(uint8_t v) noexcept {
+void Engine::setMasterPan(uint8_t v) noexcept {
     float norm = (v - 64) / 64.f;  // -1..+1
     if (norm <= 0.f) {
         pan_l_.store(1.f,          std::memory_order_relaxed);
@@ -587,25 +579,25 @@ void CoreEngine::setMasterPan(uint8_t v) noexcept {
     }
 }
 
-void CoreEngine::setPanSpeed(uint8_t v) noexcept {
+void Engine::setPanSpeed(uint8_t v) noexcept {
     lfo_speed_.store(2.f * (v / 127.f), std::memory_order_relaxed);   // 0..2 Hz
 }
 
-void CoreEngine::setPanDepth(uint8_t v) noexcept {
+void Engine::setPanDepth(uint8_t v) noexcept {
     lfo_depth_.store(v / 127.f, std::memory_order_relaxed);
 }
 
 // ── DSP chain ─────────────────────────────────────────────────────────────────
 
-void CoreEngine::setLimiterThreshold(uint8_t v) noexcept { dsp_.setLimiterThreshold(v); }
-void CoreEngine::setLimiterRelease  (uint8_t v) noexcept { dsp_.setLimiterRelease(v);   }
-void CoreEngine::setLimiterEnabled  (uint8_t v) noexcept { dsp_.setLimiterEnabled(v);   }
-void CoreEngine::setBBEDefinition   (uint8_t v) noexcept { dsp_.setBBEDefinition(v);    }
-void CoreEngine::setBBEBassBoost    (uint8_t v) noexcept { dsp_.setBBEBassBoost(v);     }
+void Engine::setLimiterThreshold(uint8_t v) noexcept { dsp_.setLimiterThreshold(v); }
+void Engine::setLimiterRelease  (uint8_t v) noexcept { dsp_.setLimiterRelease(v);   }
+void Engine::setLimiterEnabled  (uint8_t v) noexcept { dsp_.setLimiterEnabled(v);   }
+void Engine::setBBEDefinition   (uint8_t v) noexcept { dsp_.setBBEDefinition(v);    }
+void Engine::setBBEBassBoost    (uint8_t v) noexcept { dsp_.setBBEBassBoost(v);     }
 
 // ── Stats ─────────────────────────────────────────────────────────────────────
 
-int CoreEngine::activeVoices() const {
+int Engine::activeVoices() const {
     if (!active_core_) return 0;
     return active_core_->getVizState().active_voice_count;
 }
@@ -664,7 +656,7 @@ static const char* partialParamKey(uint8_t id) {
 }
 
 // Master param IDs — ISynthCore global keys (0x01–0x07).
-// CoreEngine and DspChain params (0x10+, 0x20+) are handled inline in SET_MASTER.
+// Engine and DspChain params (0x10+, 0x20+) are handled inline in SET_MASTER.
 static const char* masterCoreParamKey(uint8_t id) {
     switch (id) {
         case 0x01: return "beat_scale";
@@ -699,7 +691,7 @@ static const char* coreIdToName(uint8_t core_id) {
     }
 }
 
-std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
+std::vector<uint8_t> Engine::handleSysEx(const uint8_t* data, int len) {
     // data is AFTER F0, BEFORE F7
     if (len < 3) return {};
     if (data[0] != 0x7D || data[1] != 0x01) return {};  // not ICR SysEx
@@ -776,12 +768,12 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
 
         if (bank_chunk_recv_ >= bank_chunk_total_) {
             if (target->loadBankJson(bank_chunk_buf_))
-                logger_.log("CoreEngine", LogSeverity::Info,
+                logger_.log("Engine", LogSeverity::Info,
                             "SET_BANK: applied ("
                             + std::to_string(bank_chunk_buf_.size()) + " bytes)"
                             + " core_id=0x" + std::to_string((int)core_id));
             else
-                logger_.log("CoreEngine", LogSeverity::Warning,
+                logger_.log("Engine", LogSeverity::Warning,
                             "SET_BANK: loadBankJson failed");
             bank_chunk_buf_.clear();
             bank_chunk_total_ = 0;
@@ -845,16 +837,16 @@ std::vector<uint8_t> CoreEngine::handleSysEx(const uint8_t* data, int len) {
         std::string export_path(reinterpret_cast<const char*>(payload),
                                 (size_t)payloadLen);
         if (target->exportBankJson(export_path))
-            logger_.log("CoreEngine", LogSeverity::Info,
+            logger_.log("Engine", LogSeverity::Info,
                         "EXPORT_BANK: wrote " + export_path);
         else
-            logger_.log("CoreEngine", LogSeverity::Warning,
+            logger_.log("Engine", LogSeverity::Warning,
                         "EXPORT_BANK: failed to write " + export_path);
         break;
     }
 
     default:
-        logger_.log("CoreEngine", LogSeverity::Info,
+        logger_.log("Engine", LogSeverity::Info,
                     "SysEx: unknown cmd 0x" + std::to_string((int)cmd));
         break;
     }
@@ -921,7 +913,7 @@ static void _mkdirP(const std::string& dir) {
     std::filesystem::create_directories(dir);
 }
 
-int CoreEngine::renderBatch(const std::string& batch_json_path,
+int Engine::renderBatch(const std::string& batch_json_path,
                              const std::string& out_dir,
                              int sr)
 {
@@ -1041,97 +1033,4 @@ int CoreEngine::renderBatch(const std::string& batch_json_path,
                 "Render done: " + std::to_string(rendered) + "/" + std::to_string(total)
                 + " notes in " + std::to_string((int)(elapsed * 10) / 10.f) + "s");
     return rendered;
-}
-
-// ── runCoreEngine — interactive loop ─────────────────────────────────────────
-
-int runCoreEngine(Logger&            logger,
-                  const std::string& core_name,
-                  const std::string& params_path,
-                  int                midi_port,
-                  const std::string& config_json_path) {
-    logger.log("runCoreEngine", LogSeverity::Info,
-               "=== IthacaCoreResonator STARTING ===");
-
-    auto engine = std::make_unique<CoreEngine>();
-    if (!engine->initialize(core_name, params_path, config_json_path, logger)) {
-        logger.log("runCoreEngine", LogSeverity::Error, "Initialization failed");
-        return 1;
-    }
-    if (!engine->start()) {
-        logger.log("runCoreEngine", LogSeverity::Error, "Audio start failed");
-        return 1;
-    }
-
-    MidiInput midi;
-    auto ports = MidiInput::listPorts();
-    if (!ports.empty()) {
-        for (int i = 0; i < (int)ports.size(); i++)
-            logger.log("MIDI", LogSeverity::Info,
-                       "port [" + std::to_string(i) + "] " + ports[i]);
-        midi.open(*engine, midi_port);
-    }
-#ifndef _WIN32
-    if (!midi.isOpen()) midi.openVirtual(*engine);
-#endif
-
-    const char  keys[] = "asdfghjk";
-    const int  midis[] = { 60, 62, 64, 65, 67, 69, 71, 72 };
-    bool       sustain = false;
-    logger.log("runCoreEngine", LogSeverity::Info,
-               "Keyboard: a-k = C4-C5  |  z = sustain  |  q = quit");
-
-#ifdef _WIN32
-    while (true) {
-        if (_kbhit()) {
-            int ch = _getch();
-            if (ch == 'q' || ch == 'Q') break;
-            if (ch == 'z') {
-                sustain = !sustain;
-                engine->sustainPedal(sustain ? 127 : 0);
-                continue;
-            }
-            for (int i = 0; i < 8; i++) {
-                if (ch == keys[i]) {
-                    engine->noteOn((uint8_t)midis[i], 80);
-                    ma_sleep(300);
-                    engine->noteOff((uint8_t)midis[i]);
-                }
-            }
-        }
-        ma_sleep(1);
-    }
-#else
-    struct termios oldt, newt;
-    tcgetattr(STDIN_FILENO, &oldt);
-    newt = oldt;
-    newt.c_lflag &= ~(ICANON | ECHO);
-    tcsetattr(STDIN_FILENO, TCSANOW, &newt);
-    fcntl(STDIN_FILENO, F_SETFL, O_NONBLOCK);
-    while (true) {
-        char ch;
-        if (read(STDIN_FILENO, &ch, 1) == 1) {
-            if (ch == 'q' || ch == 'Q') break;
-            if (ch == 'z') {
-                sustain = !sustain;
-                engine->sustainPedal(sustain ? 127 : 0);
-            }
-            for (int i = 0; i < 8; i++) {
-                if (ch == keys[i]) {
-                    engine->noteOn((uint8_t)midis[i], 80);
-                    ma_sleep(300);
-                    engine->noteOff((uint8_t)midis[i]);
-                }
-            }
-        }
-        ma_sleep(1);
-    }
-    tcsetattr(STDIN_FILENO, TCSANOW, &oldt);
-#endif
-
-    midi.close();
-    engine->stop();
-    logger.log("runCoreEngine", LogSeverity::Info,
-               "=== IthacaCoreResonator STOPPED ===");
-    return 0;
 }

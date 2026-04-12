@@ -24,12 +24,60 @@ analysis-resynthesis (additive) and physical modelling (waveguide) approaches.
 All synthesis cores are 100% platform-independent (pure C++ math).
 Platform I/O is handled by miniaudio (audio) and RtMidi (MIDI).
 
-## Quick Start
+## Build
 
-```bash
+### Windows (x86_64, Visual Studio 2022)
+
+```powershell
 cmake -B build
 cmake --build build --config Release
 ```
+
+Binaries: `build\bin\Release\icr.exe`, `build\bin\Release\icrgui.exe`.
+No external dependencies — WASAPI and Windows MM MIDI are part of the OS,
+GLFW and ImGui are fetched automatically by CMake.
+
+### macOS (x86_64 / Apple Silicon)
+
+```bash
+brew install cmake
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+Binaries: `build/bin/icr`, `build/bin/icrgui`.
+CoreAudio and CoreMIDI are system frameworks. GLFW/ImGui are fetched by CMake.
+
+### Linux (Ubuntu / Debian)
+
+```bash
+sudo apt install build-essential cmake libasound2-dev \
+     libgl-dev libxrandr-dev libxinerama-dev libxcursor-dev libxi-dev
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+### Linux (RockyLinux / RHEL / Fedora)
+
+```bash
+sudo dnf groupinstall "Development Tools"
+sudo dnf install cmake alsa-lib-devel \
+     mesa-libGL-devel libXrandr-devel libXinerama-devel libXcursor-devel libXi-devel
+cmake -B build -DCMAKE_BUILD_TYPE=Release
+cmake --build build
+```
+
+Headless CLI only (no GUI dependencies):
+
+```bash
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DICR_BUILD_GUI=OFF
+cmake --build build
+```
+
+Binaries: `build/bin/icr`, `build/bin/icrgui`.
+JACK is auto-detected via pkg-config; if not found, falls back to ALSA.
+
+### Run
 
 ```bash
 # Physical modeling piano (no bank needed, physics defaults)
@@ -57,7 +105,7 @@ cmake --build build --config Release
 ## Repository Structure
 
 ```
-engine/           C++ real-time engine (CoreEngine, ISynthCore, MIDI, miniaudio)
+engine/           C++ real-time engine (Engine, ISynthCore, MIDI, miniaudio)
 cores/
   additive_synthesis_piano/   Additive resynthesis piano
   physical_modeling_piano/    Dual-rail waveguide piano
