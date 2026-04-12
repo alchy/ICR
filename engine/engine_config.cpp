@@ -33,6 +33,9 @@ bool EngineConfig::load(const std::string& path, Logger& logger) {
     if (root.contains("default_core") && root["default_core"].is_string())
         default_core_ = root["default_core"].get<std::string>();
 
+    if (root.contains("block_size") && root["block_size"].is_number_integer())
+        block_size_ = root["block_size"].get<int>();
+
     if (root.contains("cores") && root["cores"].is_object()) {
         for (auto it = root["cores"].begin(); it != root["cores"].end(); ++it) {
             if (!it.value().is_object()) continue;
@@ -72,6 +75,7 @@ bool EngineConfig::save(Logger& logger) const {
     json root;
     root["log_file"] = log_file_.empty() ? "icr.log" : log_file_;
     root["default_core"] = dc;
+    root["block_size"] = block_size_;
 
     json cores_j = json::object();
     for (const auto& [cname, cfg] : cores_) {

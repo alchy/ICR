@@ -37,10 +37,14 @@ public:
     const std::string& configPath() const { return path_; }
     const std::string& logFilePath() const { return log_file_; }
 
+    int  blockSize() const { return block_size_; }
+    void setBlockSize(int bs) { block_size_ = bs; }
+
 private:
     std::string path_;
     std::string default_core_;
     std::string log_file_;
+    int         block_size_ = 256;
     std::unordered_map<std::string,
         std::unordered_map<std::string, std::string>> cores_;
 };

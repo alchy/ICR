@@ -110,6 +110,12 @@ bool Engine::loadEngineConfig(const std::string& config_path, Logger& logger) {
                        "Cannot open log file: " + log_path);
         }
     }
+
+    // Apply saved block size (if present in config)
+    int bs = config_.blockSize();
+    if (bs > 0 && bs != audio_.blockSize())
+        audio_.setBlockSize(bs);
+
     return true;
 }
 
@@ -471,6 +477,7 @@ bool Engine::setBlockSize(int block_size) {
                     "setBlockSize: audio restart failed");
         return false;
     }
+    config_.setBlockSize(block_size);
     logger_.log("Engine", LogSeverity::Info,
                 "Block size: " + std::to_string(block_size)
                 + " (" + std::to_string(1000.f * block_size / sample_rate_)
