@@ -1,0 +1,5 @@
+[
+  {"midi": 60, "vel_idx": 3, "duration_s": 2.0},
+  {"midi": 48, "vel_idx": 5, "duration_s": 2.0},
+  {"midi": 72, "vel_idx": 2, "duration_s": 1.5}
+]
