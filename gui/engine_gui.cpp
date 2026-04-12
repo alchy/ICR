@@ -992,6 +992,23 @@ int runEngineGui(Engine& engine, Logger& logger) {
                                 gs.bbe_enabled      = (gs.bbe_def > 0 || gs.bbe_bass > 0);
                                 gs.conv_enabled     = cv("convolver_enabled", 0) >= 64;
                                 gs.conv_mix         = cv("convolver_mix", 50);
+
+                                // Sync soundbank combo to actual core state
+                                auto bit = gs.core_banks.find(name);
+                                if (bit != gs.core_banks.end()) {
+                                    auto& cbs = bit->second;
+                                    if (cbs.is_sampler) {
+                                        auto* sc = dynamic_cast<SamplerCore*>(engine.core());
+                                        if (sc) cbs.active = sc->activeBankName();
+                                    } else if (!cbs.files.empty()) {
+                                        std::string pp = engine.coreConfigValue(name, "params_path");
+                                        if (!pp.empty()) {
+                                            std::string fn = filenameFromPath(pp);
+                                            for (const auto& f : cbs.files)
+                                                if (f == fn) { cbs.active = fn; break; }
+                                        }
+                                    }
+                                }
                             } else {
                                 // revert selection on failure
                                 for (int j = 0; j < (int)gs.core_names.size(); j++) {
