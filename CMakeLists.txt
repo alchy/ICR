@@ -42,6 +42,8 @@ set(ENGINE_SOURCES
     engine/synth_core_registry.cpp
     engine/engine.cpp
     engine/app_config.cpp
+    engine/engine_config.cpp
+    engine/batch_renderer.cpp
     engine/midi_input.cpp
     third_party/RtMidi.cpp
 )

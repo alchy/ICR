@@ -24,6 +24,8 @@
  */
 
 #include "i_synth_core.h"
+#include "master_bus.h"
+#include "engine_config.h"
 #include "../dsp/dsp_chain.h"
 #include "../dsp/agc.h"
 #include "logger.h"
@@ -63,17 +65,24 @@ public:
 
     /// Get engine config value for a core.  Returns empty string if not found.
     std::string coreConfigValue(const std::string& core_name,
-                                const std::string& key) const;
+                                const std::string& key) const {
+        return config_.value(core_name, key);
+    }
 
     /// Set engine config value (updates in-memory map, saved on exit).
     void setCoreConfigValue(const std::string& core_name,
-                            const std::string& key, const std::string& value);
+                            const std::string& key, const std::string& value) {
+        config_.setValue(core_name, key, value);
+    }
 
     /// Save current config state to the JSON file it was loaded from.
-    bool saveConfig();
+    bool saveConfig() { return config_.save(logger_); }
 
     /// Get default core name from engine config (empty if no config loaded).
-    const std::string& defaultCoreName() const { return default_core_name_; }
+    const std::string& defaultCoreName() const { return config_.defaultCoreName(); }
+
+    /// Access engine config (for GUI persistence, etc.)
+    EngineConfig& config() { return config_; }
 
     // Switch the active core at runtime.  MIDI events are routed to the active
     // core only, but ALL instantiated cores continue to processBlock (for dozvuk).
@@ -133,6 +142,7 @@ public:
     ISynthCore*  core()        noexcept { return active_core_;  }
     const std::string& activeCoreName() const noexcept { return active_core_name_; }
     DspChain*    getDspChain() noexcept { return &dsp_;        }
+    MasterBus&   masterBus()   noexcept { return master_bus_;  }
     Logger&      getLogger()   noexcept { return logger_;      }
 
     // Access a specific instantiated core by name (nullptr if not yet created).
@@ -169,7 +179,6 @@ private:
     static void audioCallback(ma_device* device, void* output,
                                const void* input, uint32_t frame_count);
     void processBlock(float* out_l, float* out_r, int n_samples) noexcept;
-    void applyMasterAndLfo(float* out_l, float* out_r, int n_samples) noexcept;
 
     // Multi-core: all instantiated cores live here. MIDI goes to active_core_,
     // but processBlock iterates ALL cores (so releasing voices dozvuk naturally).
@@ -178,29 +187,16 @@ private:
     ISynthCore*  active_core_      = nullptr;   // RT fast-path (never null after init)
     std::string  active_core_name_;
 
+    MasterBus                   master_bus_;
     DspChain                    dsp_;
     Logger                      logger_;
 
-    // Engine config (loaded from JSON, per-core settings)
-    std::FILE*  log_file_handle_ = nullptr;   // owned, closed in destructor
-    std::string default_core_name_;
-    std::string config_path_;   // path for saveConfig() on exit
+    // Engine config (per-core settings, persistence)
+    EngineConfig config_;
+    std::FILE*   log_file_handle_ = nullptr;   // owned, closed in destructor
 public:
-    const std::string& configPath() const { return config_path_; }
+    const std::string& configPath() const { return config_.configPath(); }
 private:
-    // core_name -> {key -> value} from engine_config.json
-    std::unordered_map<std::string,
-        std::unordered_map<std::string, std::string>> core_config_;
-
-    // Master mix — atomic so GUI thread writes are safe vs RT reads
-    std::atomic<float> master_gain_{1.f};
-    std::atomic<float> pan_l_      {1.f};
-    std::atomic<float> pan_r_      {1.f};
-
-    // LFO panning — speed/depth written by GUI, phase only touched by RT thread
-    std::atomic<float> lfo_speed_  {0.f};   // Hz
-    std::atomic<float> lfo_depth_  {0.f};   // 0..1
-    float              lfo_phase_  = 0.f;   // RT thread only
 
     // Audio device
     ma_device*          device_      = nullptr;
