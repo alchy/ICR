@@ -71,7 +71,8 @@ public:
     const SampleBuffer* sample_lo = nullptr;
     const SampleBuffer* sample_hi = nullptr;
     float    vel_blend   = 0.f;
-    int      position    = 0;
+    double   position    = 0.0;    // fractional position for SR conversion
+    double   pos_inc     = 1.0;    // playback rate: wav_sr / engine_sr
 
     // Envelope
     float    vel_gain    = 1.f;

@@ -414,11 +414,12 @@ int SamplerVoiceManager::allocVoice(int midi, uint8_t velocity,
     SamplerVoice& v = voices_[slot];
 
     // Damping buffer for click-free steal/retrigger
-    if (v.active && v.sample_lo && v.position < v.sample_lo->frames) {
+    int v_pos = (int)v.position;
+    if (v.active && v.sample_lo && v_pos < v.sample_lo->frames) {
         int damp_frames = (std::min)((int)(SAMPLER_DAMPING_MS * 0.001f * sr), 2048);
-        int avail = (std::min)(damp_frames, v.sample_lo->frames - v.position);
+        int avail = (std::min)(damp_frames, v.sample_lo->frames - v_pos);
         if (avail > 0) {
-            const float* src = v.sample_lo->data.data() + v.position * 2;
+            const float* src = v.sample_lo->data.data() + v_pos * 2;
             float env = v.vel_gain;
             if (v.releasing) env *= v.rel_gain;
             float fade_step = 1.f / (float)avail;
@@ -441,7 +442,10 @@ int SamplerVoiceManager::allocVoice(int midi, uint8_t velocity,
     v.sample_lo = lo;
     v.sample_hi = hi;
     v.vel_blend = vel_blend;
-    v.position  = 0;
+    v.position  = 0.0;
+    // Compute playback rate: if WAV SR differs from engine SR, resample
+    v.pos_inc   = (lo && lo->sample_rate > 0 && sr > 0)
+                ? (double)lo->sample_rate / (double)sr : 1.0;
 
     float vel_norm = (float)velocity / 127.f;
     v.vel_gain = vel_norm * vel_norm;
@@ -514,19 +518,32 @@ bool SamplerVoice::process(float* out_l, float* out_r, int n_samples,
         int max_frames = sample_lo->frames;
         if (do_blend && sample_hi->frames < max_frames)
             max_frames = sample_hi->frames;
-        if (position >= max_frames) {
+        int pos_int = (int)position;
+        if (pos_int >= max_frames - 1) {
             active = false;
             break;
         }
 
-        // Read + crossfade stereo samples between velocity layers
-        float sL = sample_lo->data[position * 2]     * w_lo;
-        float sR = sample_lo->data[position * 2 + 1] * w_lo;
+        // Linear interpolation for fractional position (SR conversion)
+        float frac = (float)(position - (double)pos_int);
+        int p0 = pos_int;
+        int p1 = pos_int + 1;
+
+        float sL = sample_lo->data[p0 * 2]     * (1.f - frac)
+                 + sample_lo->data[p1 * 2]     * frac;
+        float sR = sample_lo->data[p0 * 2 + 1] * (1.f - frac)
+                 + sample_lo->data[p1 * 2 + 1] * frac;
+        sL *= w_lo;
+        sR *= w_lo;
         if (do_blend) {
-            sL += sample_hi->data[position * 2]     * w_hi;
-            sR += sample_hi->data[position * 2 + 1] * w_hi;
+            float hL = sample_hi->data[p0 * 2]     * (1.f - frac)
+                     + sample_hi->data[p1 * 2]     * frac;
+            float hR = sample_hi->data[p0 * 2 + 1] * (1.f - frac)
+                     + sample_hi->data[p1 * 2 + 1] * frac;
+            sL += hL * w_hi;
+            sR += hR * w_hi;
         }
-        position++;
+        position += pos_inc;
 
         // Onset ramp
         float env = 1.f;
