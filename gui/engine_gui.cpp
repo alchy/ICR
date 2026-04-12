@@ -857,8 +857,21 @@ int runEngineGui(Engine& engine, Logger& logger) {
                 cname + ": " + std::to_string(cbs.files.size()) + " banks in " + cbs.dir);
         }
 
-        // Restore active bank from params_path in config
-        if (!cbs.is_sampler && !cbs.files.empty()) {
+        // Restore active bank from config
+        if (cbs.is_sampler && !cbs.files.empty()) {
+            // SamplerCore: restore from "active_bank" key
+            std::string saved = engine.coreConfigValue(cname, "active_bank");
+            if (!saved.empty()) {
+                for (const auto& f : cbs.files) {
+                    if (f == saved) { cbs.active = saved; break; }
+                }
+                // Auto-select the saved bank in the core
+                if (!cbs.active.empty()) {
+                    auto* sc = dynamic_cast<SamplerCore*>(engine.coreByName(cname));
+                    if (sc) sc->selectBank(cbs.active, engine.getLogger());
+                }
+            }
+        } else if (!cbs.is_sampler && !cbs.files.empty()) {
             std::string pp = engine.coreConfigValue(cname, "params_path");
             if (!pp.empty()) {
                 std::string fn = filenameFromPath(pp);
@@ -1416,8 +1429,8 @@ int runEngineGui(Engine& engine, Logger& logger) {
         for (const auto& [cname, cbs] : gs.core_banks) {
             if (!cbs.active.empty()) {
                 if (cbs.is_sampler) {
-                    // SamplerCore: active bank is a directory name in params_path
-                    // (don't overwrite params_path — it's the parent dir)
+                    // SamplerCore: save active bank name separately
+                    engine.setCoreConfigValue(cname, "active_bank", cbs.active);
                 } else {
                     std::string full_path = cbs.dir + "/" + cbs.active;
                     engine.setCoreConfigValue(cname, "params_path", full_path);
