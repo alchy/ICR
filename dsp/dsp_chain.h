@@ -53,7 +53,10 @@ public:
     bool loadConvolverIR(const std::string& path, float sr);
     void setConvolverEnabled(bool on) { convolver_.setEnabled(on); }
     void setConvolverMix(float mix)   { convolver_.setMix(mix); }
-    bool isConvolverLoaded() const    { return convolver_.irLength() > 0; }
+    bool isConvolverLoaded()  const { return convolver_.irLength() > 0; }
+    bool isConvolverEnabled() const { return convolver_.isEnabled(); }
+    float getConvolverMix()   const { return convolver_.getMix(); }
+    bool isLimiterEnabled()   const { return lim_ena_midi_ >= 64; }
 
     void setSoundboardDir(const std::string& dir) { soundboard_dir_ = dir; }
     const std::string& soundboardDir() const { return soundboard_dir_; }

@@ -244,6 +244,74 @@ void Engine::applyDspDefaults(const std::string& core_name) {
     if (conv_mix >= 0) dsp_.setConvolverMix((float)conv_mix / 127.f);
 }
 
+// ── Per-core parameter serialization ─────────────────────────────────────────
+
+void Engine::saveCoreParams(const std::string& core_name) {
+    // DSP bus params (MIDI 0-127 range, stored as string integers)
+    auto setI = [&](const std::string& k, int v) {
+        config_.setValue(core_name, k, std::to_string(v));
+    };
+
+    // Reconstruct MIDI values from physical values in master bus
+    // master_gain: physical 0..2 (square law) → MIDI = sqrt(g/2)*127
+    float g = master_bus_.gain();
+    setI("master_gain", (int)(std::sqrt(g / 2.f) * 127.f + 0.5f));
+
+    // pan: reconstruct from L/R coefficients → MIDI 0-127
+    float pl = master_bus_.panL(), pr = master_bus_.panR();
+    int pan_midi;
+    if (pl < 1.f)      pan_midi = 64 + (int)((1.f - pl) * 64.f + 0.5f);
+    else if (pr < 1.f)  pan_midi = 64 - (int)((1.f - pr) * 64.f + 0.5f);
+    else                pan_midi = 64;
+    setI("master_pan", pan_midi);
+
+    // LFO: physical → MIDI
+    setI("lfo_speed", (int)(master_bus_.lfoSpeed() / 2.f * 127.f + 0.5f));
+    setI("lfo_depth", (int)(master_bus_.lfoDepth() * 127.f + 0.5f));
+
+    // DSP chain
+    setI("limiter_threshold", (int)dsp_.getLimiterThreshold());
+    setI("limiter_release",   (int)dsp_.getLimiterRelease());
+    setI("limiter_enabled",   dsp_.isLimiterEnabled() ? 64 : 0);
+    setI("bbe_definition",    (int)dsp_.getBBEDefinition());
+    setI("bbe_bass_boost",    (int)dsp_.getBBEBassBoost());
+    setI("convolver_enabled", dsp_.isConvolverEnabled() ? 64 : 0);
+    setI("convolver_mix",     (int)(dsp_.getConvolverMix() * 127.f + 0.5f));
+
+    // Core-specific params via describeParams()
+    ISynthCore* c = coreByName(core_name);
+    if (c) {
+        auto params = c->describeParams();
+        for (const auto& p : params) {
+            // Store as "cp_<key>" to distinguish from DSP keys
+            config_.setValue(core_name, "cp_" + p.key,
+                            std::to_string(p.value));
+        }
+    }
+
+    logger_.log("Engine", LogSeverity::Info,
+                "Saved params for " + core_name);
+}
+
+void Engine::loadCoreParams(const std::string& core_name) {
+    // Restore DSP bus params
+    applyDspDefaults(core_name);
+
+    // Restore core-specific params via setParam()
+    ISynthCore* c = coreByName(core_name);
+    if (!c) return;
+
+    auto params = c->describeParams();
+    for (const auto& p : params) {
+        std::string v = config_.value(core_name, "cp_" + p.key);
+        if (v.empty()) continue;
+        try {
+            float fv = std::stof(v);
+            c->setParam(p.key, fv);
+        } catch (...) {}
+    }
+}
+
 // ── switchCore ────────────────────────────────────────────────────────────────
 
 bool Engine::switchCore(const std::string& core_name,

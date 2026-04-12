@@ -963,10 +963,17 @@ int runEngineGui(Engine& engine, Logger& logger) {
                     bool sel = (i == gs.selected_core);
                     if (ImGui::Selectable(gs.core_names[i].c_str(), sel)) {
                         if (i != gs.selected_core) {
+                            // Save outgoing core's params
+                            engine.saveCoreParams(gs.active_core_name);
+
                             gs.selected_core = i;
                             const std::string& name = gs.core_names[i];
                             if (engine.switchCore(name, "")) {
                                 gs.active_core_name = name;
+                                // loadCoreParams is called inside switchCore
+                                // (via applyDspDefaults + core params)
+                                engine.loadCoreParams(name);
+
                                 // Sync GUI sliders to engine DSP state
                                 auto cv = [&](const std::string& k, int fb) -> int {
                                     std::string v = engine.coreConfigValue(name, k);
@@ -983,6 +990,8 @@ int runEngineGui(Engine& engine, Logger& logger) {
                                 gs.bbe_def          = (uint8_t)cv("bbe_definition",  gs.bbe_def);
                                 gs.bbe_bass         = (uint8_t)cv("bbe_bass_boost",  gs.bbe_bass);
                                 gs.bbe_enabled      = (gs.bbe_def > 0 || gs.bbe_bass > 0);
+                                gs.conv_enabled     = cv("convolver_enabled", 0) >= 64;
+                                gs.conv_mix         = cv("convolver_mix", 50);
                             } else {
                                 // revert selection on failure
                                 for (int j = 0; j < (int)gs.core_names.size(); j++) {
@@ -1399,26 +1408,8 @@ int runEngineGui(Engine& engine, Logger& logger) {
             }
         }
 
-        // Remember DSP state for active core
-        const std::string& cn = gs.active_core_name;
-        engine.setCoreConfigValue(cn, "master_gain",
-            std::to_string((int)gs.master_gain));
-        engine.setCoreConfigValue(cn, "master_pan",
-            std::to_string((int)gs.pan));
-        engine.setCoreConfigValue(cn, "lfo_speed",
-            std::to_string((int)gs.lfo_speed));
-        engine.setCoreConfigValue(cn, "lfo_depth",
-            std::to_string((int)gs.lfo_depth));
-        engine.setCoreConfigValue(cn, "limiter_threshold",
-            std::to_string((int)gs.limiter_thr));
-        engine.setCoreConfigValue(cn, "limiter_release",
-            std::to_string((int)gs.limiter_rel));
-        engine.setCoreConfigValue(cn, "limiter_enabled",
-            std::to_string(gs.limiter_enabled ? 64 : 0));
-        engine.setCoreConfigValue(cn, "bbe_definition",
-            std::to_string((int)gs.bbe_def));
-        engine.setCoreConfigValue(cn, "bbe_bass_boost",
-            std::to_string((int)gs.bbe_bass));
+        // Save all params for active core (DSP + core-specific)
+        engine.saveCoreParams(gs.active_core_name);
 
         if (engine.saveConfig())
             logger.log("GUI", LogSeverity::Info, "Config saved on exit");

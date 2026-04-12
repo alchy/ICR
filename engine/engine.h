@@ -91,6 +91,14 @@ public:
     bool switchCore(const std::string& core_name,
                     const std::string& params_path);
 
+    // Save all parameters (DSP + core-specific) for a core to config.
+    // Called before switching away from a core and on GUI exit.
+    void saveCoreParams(const std::string& core_name);
+
+    // Load all parameters (DSP + core-specific) for a core from config.
+    // Called after switching to a core.  Uses describeParams() for core params.
+    void loadCoreParams(const std::string& core_name);
+
     // Phase 2: open audio device and start RT callback.
     bool start();
 
