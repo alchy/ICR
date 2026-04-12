@@ -3,7 +3,7 @@
   "description": "",
   "banks": [
     {
-      "bank": "soundbanks\\vv-rhodes-raw-nn-icreval-hybrid.json",
+      "bank": "soundbanks/vv-rhodes-raw-nn-icreval-hybrid.json",
       "notes": {
         "m064_vel0": 0.0,
         "m064_vel1": 0.9,

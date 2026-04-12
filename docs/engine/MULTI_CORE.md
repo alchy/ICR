@@ -53,7 +53,7 @@ are instantiated when the user selects them in the GUI for the first time.
 
 ```
 User selects "PhysicalModelingPianoCore" in GUI
-  -> CoreEngine::switchCore("PhysicalModelingPianoCore", "")
+  -> Engine::switchCore("PhysicalModelingPianoCore", "")
      -> core not in cores_ map -> SynthCoreRegistry::create()
      -> core->load(params_path_from_config, sr, logger)
      -> stored in cores_ map, set as active
@@ -67,7 +67,7 @@ Switching back to a previously used core is instant (no reload).
 
 ### Destruction
 
-All cores are destroyed when `CoreEngine` is destroyed (application exit).
+All cores are destroyed when `Engine` is destroyed (application exit).
 
 ## icr-config.json
 
@@ -196,7 +196,7 @@ F0 7D 01 <cmd> <core_id> <data...> F7
                       0x03 = SamplerCore
                       0x04 = SineCore
                       0x7F = engine-level (SET_MASTER with core_id=0x7F
-                             targets CoreEngine/DspChain, not any core)
+                             targets Engine/DspChain, not any core)
 ```
 
 When `core_id = 0x00`, the message is dispatched to the currently active
@@ -206,7 +206,7 @@ core (legacy behavior, matching the original protocol).
 
 ```
 MIDI SysEx frame arrives
-  -> CoreEngine::handleSysEx()
+  -> Engine::handleSysEx()
      1. Strip manufacturer header (0x7D 0x01)
      2. Read command byte and core_id
      3. Resolve target core:
@@ -410,7 +410,7 @@ serialized, or placed in shared memory for multi-core HW architectures.
 
 ### Per-core vs master bus
 
-Currently one AGC instance runs on the **master bus** (in CoreEngine).
+Currently one AGC instance runs on the **master bus** (in Engine).
 For per-core AGC (e.g. when distributing cores to separate HW), each core
 can include `dsp/agc.h` and maintain its own `AgcState`:
 

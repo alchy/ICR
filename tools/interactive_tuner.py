@@ -37,7 +37,7 @@ except ImportError:
 REPO_ROOT = Path(__file__).parent.parent.resolve()
 
 
-# ── SysEx encoding (matches core_engine.cpp protocol) ────────────────────────
+# ── SysEx encoding (matches engine.cpp protocol) ─────────────────────────────
 
 SYSEX_MFR     = [0x7D]           # educational/dev manufacturer ID
 CMD_SET_NOTE  = 0x01             # SET_NOTE_PARAM

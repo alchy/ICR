@@ -1,7 +1,7 @@
 /*
  * midi_input.cpp
  * ───────────────
- * MIDI message parsing and routing to CoreEngine.
+ * MIDI message parsing and routing to Engine.
  *
  * Handled messages:
  *   0x80 / 0x90  Note Off / Note On
@@ -11,11 +11,11 @@
  *   0xB0 CC 91   LFO depth (Reverb)
  *   0xB0 CC 93   LFO speed (Chorus)
  *   0xB0 CC 74   Limiter threshold
- *   0xF0         SysEx → CoreEngine::handleSysEx (ICR protocol: F0 7D 01 ...)
+ *   0xF0         SysEx → Engine::handleSysEx (ICR protocol: F0 7D 01 ...)
  */
 
 #include "midi_input.h"
-#include "core_engine.h"
+#include "engine.h"
 #include <stdexcept>
 #include <chrono>
 #include <cstdio>
@@ -40,7 +40,7 @@ std::vector<std::string> MidiInput::listPorts() {
 
 // ── open ──────────────────────────────────────────────────────────────────────
 
-bool MidiInput::open(CoreEngine& engine, int port_index) {
+bool MidiInput::open(Engine& engine, int port_index) {
     close();
     try {
         midi_   = new RtMidiIn();
@@ -68,7 +68,7 @@ bool MidiInput::open(CoreEngine& engine, int port_index) {
     }
 }
 
-bool MidiInput::openVirtual(CoreEngine& engine, const std::string& name) {
+bool MidiInput::openVirtual(Engine& engine, const std::string& name) {
     close();
     try {
         midi_   = new RtMidiIn();
@@ -163,7 +163,7 @@ void MidiInput::callback(double /*ts*/,
     uint64_t t = nowMs();
     self->activity_.any_ms.store(t, std::memory_order_relaxed);
 
-    // SysEx — route to CoreEngine::handleSysEx (ICR protocol: F0 7D 01 <cmd> ...)
+    // SysEx — route to Engine::handleSysEx (ICR protocol: F0 7D 01 <cmd> ...)
     if (status == 0xF0) {
         self->activity_.sysex_ms.store(t, std::memory_order_relaxed);
         // RtMidi delivers: [F0, ...payload..., F7]

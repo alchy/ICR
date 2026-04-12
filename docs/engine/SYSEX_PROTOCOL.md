@@ -34,7 +34,7 @@ which core instance receives the message.
 | 0x02 | PhysicalModelingPianoCore |
 | 0x03 | SamplerCore |
 | 0x04 | SineCore |
-| 0x7F | Engine-level (CoreEngine master mix + DspChain) |
+| 0x7F | Engine-level (Engine master mix + DspChain) |
 
 If the targeted core is not yet instantiated, the message is silently ignored.
 
@@ -152,7 +152,7 @@ F0 7D 01  10  <core_id>  <param_id>  <v0..v4>  F7
 | param_id range | Target | Description |
 |----------------|--------|-------------|
 | 0x01-0x07 | `core->setParam()` on targeted core | Core-specific global params |
-| 0x10-0x13 | CoreEngine atomics | Master mix (always engine, core_id ignored) |
+| 0x10-0x13 | Engine atomics | Master mix (always engine, core_id ignored) |
 | 0x20-0x26 | DspChain | Limiter + BBE + Convolver (always engine, core_id ignored) |
 
 ### Core params (0x01-0x07) -- core-specific
@@ -232,7 +232,7 @@ F0 7D 01  10  02  01  <float32>  F7
 
 ---
 
-## C++ dispatch (CoreEngine::handleSysEx)
+## C++ dispatch (Engine::handleSysEx)
 
 ```cpp
 // 1. Parse header: cmd = data[2], core_id = data[3]

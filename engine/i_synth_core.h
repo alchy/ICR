@@ -11,7 +11,7 @@
  *  - exposes parameters via generic key/value API (GUI-friendly)
  *  - provides visualization snapshot (active voices, last note detail)
  *
- * What is NOT part of the core (lives in CoreEngine):
+ * What is NOT part of the core (lives in Engine):
  *  - master gain / master pan
  *  - LFO panning
  *  - DspChain (limiter, BBE)
@@ -20,7 +20,7 @@
  *
  * Threading model:
  *  - noteOn/noteOff/sustainPedal/allNotesOff are called ONLY from the RT
- *    thread (CoreEngine drains the MIDI queue before calling processBlock).
+ *    thread (Engine drains the MIDI queue before calling processBlock).
  *  - setParam/getParam are called from GUI thread; implementations MUST be
  *    safe with respect to concurrent processBlock (use atomics or a param
  *    queue; direct float write is acceptable on x86 as a pragmatic choice).
@@ -29,7 +29,7 @@
  *    acquire locks, or perform IO.
  */
 
-#include "core_logger.h"
+#include "logger.h"
 #include <string>
 #include <vector>
 #include <cstdint>
@@ -112,8 +112,8 @@ public:
                       int                midi_to   = 127) = 0;
 
     // Change sample rate after load (recomputes coefficients).
-    // THREADING: must only be called before CoreEngine::start() or after
-    // CoreEngine::stop(). Implementations write non-atomic fields (e.g.
+    // THREADING: must only be called before Engine::start() or after
+    // Engine::stop(). Implementations write non-atomic fields (e.g.
     // inv_sr_); calling this while the RT thread runs processBlock is a data race.
     virtual void setSampleRate(float sr) = 0;
 

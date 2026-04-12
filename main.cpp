@@ -1,54 +1,20 @@
 /*
- * main.cpp — IthacaCoreResonator (headless real-time)
- * ─────────────────────────────────────────────────────
- * Usage:
- *   IthacaCoreResonator --core <name> [--params <file.json>]
- *                       [--config <synth_config.json>]
- *                       [--core-param key=value ...]
- *                       [--port <N>]
- *   IthacaCoreResonator --help
- *   IthacaCoreResonator --list-cores
- *
- * Options:
- *   --core <name>          Synthesis core (default: SineCore)
- *   --params <path>        Core parameter file (JSON, core-specific)
- *   --config <path>        Additional SynthConfig JSON applied via setParam
- *   --core-param key=value Override a core parameter (repeatable)
- *   --port <N>             MIDI input port index (default: 0)
- *   --midi-range-limit-from <N>  Skip notes with MIDI < N on load (default: 0)
- *   --midi-range-limit-to <N>    Skip notes with MIDI > N on load (default: 127)
- *   --list-cores           Print available cores and exit
- *   --help                 Show this message
- *
- * Cores and their parameter files:
- *   SineCore   No params file needed
- *   AdditiveSynthesisPianoCore  --params analysis/params-piano-ks-grand.json
- *              (generate with: python analysis/export_piano_params.py)
+ * main.cpp — ICR headless real-time CLI
+ * ──────────────────────────────────────
+ * Argument parsing and engine init are handled by AppConfig.
+ * This file owns the interactive keyboard/MIDI loop and batch render mode.
  */
 
-#include "engine/core_engine.h"
-#include "engine/synth_core_registry.h"
+#include "engine/app_config.h"
 #include "engine/midi_input.h"
 
-#if defined(__SSE__) || defined(_M_AMD64) || defined(_M_X64)
-#  include <immintrin.h>
-#  define ICR_ENABLE_FTZ() \
-     _MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON); \
-     _MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON)
-#else
-#  define ICR_ENABLE_FTZ() ((void)0)
-#endif
-
-// Pull in core registrations by including headers.
-// REGISTER_SYNTH_CORE() fires at static-init time in the corresponding .cpp.
+// Core registrations (static-init side effects)
 #include "cores/sine/sine_core.h"
 #include "cores/additive_synthesis_piano/additive_synthesis_piano_core.h"
 #include "cores/physical_modeling_piano/physical_modeling_piano_core.h"
 #include "cores/sampler/sampler_core.h"
 
-#include <string>
-#include <vector>
-#include <cstdlib>
+#include <memory>
 #include <cstdio>
 #include <thread>
 #include <chrono>
@@ -65,181 +31,51 @@ static void sleepMs(int ms) {
     std::this_thread::sleep_for(std::chrono::milliseconds(ms));
 }
 
-static void printHelp(const char* argv0) {
-    std::fprintf(stdout,
-        "IthacaCoreResonator — Pluggable Synthesizer\n"
-        "\n"
-        "Usage:\n"
-        "  %s --core <name> [--params <file>] [--config <file>]\n"
-        "             [--core-param key=value ...] [--port <N>]\n"
-        "  %s --core <name> --params <file> --render-batch <batch.json>\n"
-        "             --out-dir <dir> [--sr <hz>]\n"
-        "  %s --list-cores\n"
-        "  %s --help\n"
-        "\n"
-        "Options:\n"
-        "  --core <name>          Synthesis core (default: SineCore)\n"
-        "  --params <path>        Core parameter JSON (core-specific)\n"
-        "  --config <path>        SynthConfig JSON applied via setParam\n"
-        "  --core-param key=val   Override a core parameter (repeatable)\n"
-        "  --port <N>             MIDI input port index (default: 0)\n"
-        "  --midi-range-limit-from <N>  Skip notes with MIDI < N on load (default: 0)\n"
-        "  --midi-range-limit-to <N>    Skip notes with MIDI > N on load (default: 127)\n"
-        "  --list-cores           List registered cores and exit\n"
-        "  --help                 Show this message\n"
-        "\n"
-        "Offline batch render mode (no audio device):\n"
-        "  --render-batch <json>  JSON array [{midi,vel_idx,duration_s},...]\n"
-        "  --out-dir <dir>        Output directory for WAV files\n"
-        "  --sr <hz>              Sample rate (default: 48000)\n"
-        "\n"
-        "Keyboard fallback (no MIDI hardware):\n"
-        "  a s d f g h j k  ->  C4 D4 E4 F4 G4 A4 B4 C5\n"
-        "  z                ->  sustain (toggle)\n"
-        "  q                ->  quit\n",
-        argv0, argv0, argv0, argv0);
-}
-
 int main(int argc, char* argv[]) {
-    ICR_ENABLE_FTZ();  // prevent denormal stalls in biquad / IIR filters
+    ICR_ENABLE_FTZ();
     setvbuf(stdout, nullptr, _IONBF, 0);
 
-    std::string engine_config;
-    std::string core_name;
-    std::string params_json;
-    std::string ir_path;
-    std::string config_json;
-    int         midi_port    = 0;
-    std::string render_batch;   // --render-batch <json>
-    std::string render_out_dir; // --out-dir <dir>
-    int         render_sr    = 48000;
-    int         midi_from    = 0;    // --midi-range-limit-from
-    int         midi_to      = 127;  // --midi-range-limit-to
-    std::vector<std::pair<std::string,float>> core_params;  // --core-param key=value
-
-    for (int i = 1; i < argc; ++i) {
-        std::string a(argv[i]);
-        if (a == "--help" || a == "-h") {
-            printHelp(argv[0]);
-            return 0;
-        } else if (a == "--list-cores") {
-            auto cores = SynthCoreRegistry::instance().availableCores();
-            std::fprintf(stdout, "Available cores:\n");
-            for (const auto& c : cores)
-                std::fprintf(stdout, "  %s\n", c.c_str());
-            return 0;
-        } else if (a == "--engine-config" && i + 1 < argc) {
-            engine_config = argv[++i];
-        } else if (a == "--core" && i + 1 < argc) {
-            core_name = argv[++i];
-        } else if (a == "--params" && i + 1 < argc) {
-            params_json = argv[++i];
-        } else if (a == "--config" && i + 1 < argc) {
-            config_json = argv[++i];
-        } else if (a == "--core-param" && i + 1 < argc) {
-            std::string kv(argv[++i]);
-            auto eq = kv.find('=');
-            if (eq != std::string::npos) {
-                std::string key = kv.substr(0, eq);
-                float val = std::stof(kv.substr(eq + 1));
-                core_params.emplace_back(key, val);
-            } else {
-                std::fprintf(stderr, "--core-param: expected key=value, got: %s\n",
-                             kv.c_str());
-                return 1;
-            }
-        } else if (a == "--ir" && i + 1 < argc) {
-            ir_path = argv[++i];
-        } else if (a == "--port" && i + 1 < argc) {
-            midi_port = std::atoi(argv[++i]);
-        } else if (a == "--render-batch" && i + 1 < argc) {
-            render_batch = argv[++i];
-        } else if (a == "--out-dir" && i + 1 < argc) {
-            render_out_dir = argv[++i];
-        } else if (a == "--sr" && i + 1 < argc) {
-            render_sr = std::atoi(argv[++i]);
-        } else if (a == "--midi-range-limit-from" && i + 1 < argc) {
-            midi_from = std::atoi(argv[++i]);
-        } else if (a == "--midi-range-limit-to" && i + 1 < argc) {
-            midi_to = std::atoi(argv[++i]);
-        } else {
-            std::fprintf(stderr, "Unknown option: %s\n\n", a.c_str());
-            printHelp(argv[0]);
-            return 1;
-        }
-    }
+    AppConfig cfg;
+    int rc = cfg.parse(argc, argv, /*gui_mode=*/false);
+    if (rc != 0) return (rc == 2) ? 0 : 1;
 
     Logger logger(stdout, stdout);
 
     try {
-        auto engine = std::make_unique<CoreEngine>();
+        auto engine = std::make_unique<Engine>();
+        if (!cfg.initEngine(*engine, logger)) return 1;
 
-        // Auto-detect icr-config.json next to exe if not specified
-        if (engine_config.empty())
-            engine_config = "icr-config.json";
-        engine->loadEngineConfig(engine_config, logger);
-
-        if (core_name.empty())
-            core_name = engine->defaultCoreName();
-        if (core_name.empty())
-            core_name = "SineCore";
-
-        logger.log("main", LogSeverity::Info, "IthacaCoreResonator — " + core_name);
-
-        if (!engine->initialize(core_name, params_json, config_json, logger, midi_from, midi_to))
-            return 1;
-
-        // Load soundboard IR if provided
-        if (!ir_path.empty()) {
-            DspChain* dsp = engine->getDspChain();
-            if (dsp && dsp->loadConvolverIR(ir_path, 0)) {
-                dsp->setConvolverEnabled(true);
-                logger.log("main", LogSeverity::Info,
-                           "Loaded soundboard IR: " + ir_path);
-            } else {
-                logger.log("main", LogSeverity::Error,
-                           "Failed to load IR: " + ir_path);
-            }
-        }
-
-        // Apply --core-param overrides
-        for (const auto& kv : core_params) {
-            if (!engine->core()->setParam(kv.first, kv.second)) {
-                logger.log("main", LogSeverity::Warning,
-                           "Unknown core param: " + kv.first);
-            }
-        }
-
-        // ── Offline batch render mode ─────────────────────────────────────────
-        if (!render_batch.empty()) {
-            if (render_out_dir.empty()) {
+        // ── Offline batch render mode ────────────────────────────────────
+        if (!cfg.renderBatch().empty()) {
+            if (cfg.renderOutDir().empty()) {
                 logger.log("main", LogSeverity::Error,
                            "--render-batch requires --out-dir");
                 return 1;
             }
-            int n = engine->renderBatch(render_batch, render_out_dir, render_sr);
+            int n = engine->renderBatch(cfg.renderBatch(), cfg.renderOutDir(),
+                                        cfg.renderSr());
             return (n > 0) ? 0 : 1;
         }
 
         if (!engine->start()) return 1;
 
-        // Interactive loop (keyboard fallback + MIDI)
+        // ── MIDI input ───────────────────────────────────────────────────
         MidiInput midi;
         auto ports = MidiInput::listPorts();
         if (!ports.empty()) {
             for (int i = 0; i < (int)ports.size(); i++)
                 logger.log("MIDI", LogSeverity::Info,
                            "port [" + std::to_string(i) + "] " + ports[i]);
-            midi.open(*engine, midi_port);
+            midi.open(*engine, cfg.midiPort());
         }
 #ifndef _WIN32
         if (!midi.isOpen()) midi.openVirtual(*engine);
 #endif
 
-        // Keyboard fallback
-        const char  keys[] = "asdfghjk";
+        // ── Keyboard fallback ────────────────────────────────────────────
+        const char keys[] = "asdfghjk";
         const int  midis[] = { 60, 62, 64, 65, 67, 69, 71, 72 };
-        bool        sus    = false;
+        bool       sus = false;
         logger.log("main", LogSeverity::Info,
                    "Keyboard: a-k = C4-C5  |  z = sustain  |  q = quit");
 
@@ -264,7 +100,6 @@ int main(int argc, char* argv[]) {
             sleepMs(1);
         }
 #else
-        // POSIX raw terminal
         struct termios oldt, newt;
         tcgetattr(STDIN_FILENO, &oldt);
         newt = oldt;

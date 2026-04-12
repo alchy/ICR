@@ -1,9 +1,9 @@
 #pragma once
 /*
- * core_engine.h
+ * engine.h
  * ──────────────
  * Generic real-time engine wrapping an ISynthCore.
- * Replaces ResonatorEngine; works with any registered core.
+ * Works with any registered core.
  *
  * Responsibilities:
  *  - Create and own an ISynthCore (via SynthCoreRegistry)
@@ -15,18 +15,22 @@
  *  - Peak metering
  *
  * Usage:
- *   CoreEngine engine;
- *   engine.initialize("ResonatorCore", "soundbanks/params-ks-grand-ft.json",
- *                     "soundbanks/params-ks-grand-ft.synth_config.json", logger);
+ *   Engine engine;
+ *   engine.initialize("AdditiveSynthesisPianoCore", "soundbanks/params.json",
+ *                     "soundbanks/synth_config.json", logger);
  *   engine.start();
  *   engine.noteOn(60, 80);
  *   engine.stop();
  */
 
 #include "i_synth_core.h"
+#include "master_bus.h"
+#include "engine_config.h"
+#include "sysex_handler.h"
+#include "audio_device.h"
 #include "../dsp/dsp_chain.h"
 #include "../dsp/agc.h"
-#include "core_logger.h"
+#include "logger.h"
 #include <memory>
 #include <string>
 #include <vector>
@@ -34,15 +38,13 @@
 #include <atomic>
 #include <cstdint>
 
-struct ma_device;
+static constexpr int ENGINE_DEFAULT_SR         = 48000;
+static constexpr int ENGINE_DEFAULT_BLOCK_SIZE = 256;
 
-static constexpr int CORE_ENGINE_DEFAULT_SR         = 48000;
-static constexpr int CORE_ENGINE_DEFAULT_BLOCK_SIZE = 256;
-
-class CoreEngine {
+class Engine {
 public:
-    CoreEngine();
-    ~CoreEngine();
+    Engine();
+    ~Engine();
 
     // ── Initialization ────────────────────────────────────────────────────────
 
@@ -63,17 +65,24 @@ public:
 
     /// Get engine config value for a core.  Returns empty string if not found.
     std::string coreConfigValue(const std::string& core_name,
-                                const std::string& key) const;
+                                const std::string& key) const {
+        return config_.value(core_name, key);
+    }
 
     /// Set engine config value (updates in-memory map, saved on exit).
     void setCoreConfigValue(const std::string& core_name,
-                            const std::string& key, const std::string& value);
+                            const std::string& key, const std::string& value) {
+        config_.setValue(core_name, key, value);
+    }
 
     /// Save current config state to the JSON file it was loaded from.
-    bool saveConfig();
+    bool saveConfig() { return config_.save(logger_); }
 
     /// Get default core name from engine config (empty if no config loaded).
-    const std::string& defaultCoreName() const { return default_core_name_; }
+    const std::string& defaultCoreName() const { return config_.defaultCoreName(); }
+
+    /// Access engine config (for GUI persistence, etc.)
+    EngineConfig& config() { return config_; }
 
     // Switch the active core at runtime.  MIDI events are routed to the active
     // core only, but ALL instantiated cores continue to processBlock (for dozvuk).
@@ -82,13 +91,25 @@ public:
     bool switchCore(const std::string& core_name,
                     const std::string& params_path);
 
+    // Save all parameters (DSP + core-specific) for a core to config.
+    // Called before switching away from a core and on GUI exit.
+    void saveCoreParams(const std::string& core_name);
+
+    // Load all parameters (DSP + core-specific) for a core from config.
+    // Called after switching to a core.  Uses describeParams() for core params.
+    void loadCoreParams(const std::string& core_name);
+
     // Phase 2: open audio device and start RT callback.
     bool start();
 
     // Phase 3: stop audio device (blocks until callback thread exits).
     void stop();
 
-    bool isRunning()     const { return running_.load(); }
+    // Change block size at runtime (any positive integer, not limited to ^2).
+    // Restarts audio device if running.  Suitable for VST/JUCE integration.
+    bool setBlockSize(int block_size);
+
+    bool isRunning()     const { return audio_.isRunning(); }
     bool isInitialized() const { return active_core_ && active_core_->isLoaded(); }
 
     // ── Thread-safe MIDI ──────────────────────────────────────────────────────
@@ -114,7 +135,9 @@ public:
     // Process an incoming SysEx message (called from MidiInput callback thread).
     // data: bytes AFTER the leading F0, BEFORE the trailing F7.
     // Returns a PONG response to send, or an empty vector if no response needed.
-    std::vector<uint8_t> handleSysEx(const uint8_t* data, int len);
+    std::vector<uint8_t> handleSysEx(const uint8_t* data, int len) {
+        return sysex_.handle(data, len);
+    }
 
     // ── Offline batch render ───────────────────────────────────────────────────
     // Render a list of notes to mono int16 WAV files without starting the audio
@@ -133,6 +156,7 @@ public:
     ISynthCore*  core()        noexcept { return active_core_;  }
     const std::string& activeCoreName() const noexcept { return active_core_name_; }
     DspChain*    getDspChain() noexcept { return &dsp_;        }
+    MasterBus&   masterBus()   noexcept { return master_bus_;  }
     Logger&      getLogger()   noexcept { return logger_;      }
 
     // Access a specific instantiated core by name (nullptr if not yet created).
@@ -148,7 +172,7 @@ public:
     uint8_t getLastNoteVel()  const noexcept { return last_note_vel_ .load(std::memory_order_relaxed); }
 
     int sampleRate() const { return sample_rate_; }
-    int blockSize()  const { return block_size_;  }
+    int blockSize()  const { return audio_.blockSize(); }
 
 private:
     // ── MIDI event queue (lock-free SPSC ring, instance-local) ──────────────
@@ -169,7 +193,6 @@ private:
     static void audioCallback(ma_device* device, void* output,
                                const void* input, uint32_t frame_count);
     void processBlock(float* out_l, float* out_r, int n_samples) noexcept;
-    void applyMasterAndLfo(float* out_l, float* out_r, int n_samples) noexcept;
 
     // Multi-core: all instantiated cores live here. MIDI goes to active_core_,
     // but processBlock iterates ALL cores (so releasing voices dozvuk naturally).
@@ -178,38 +201,22 @@ private:
     ISynthCore*  active_core_      = nullptr;   // RT fast-path (never null after init)
     std::string  active_core_name_;
 
+    MasterBus                   master_bus_;
     DspChain                    dsp_;
     Logger                      logger_;
 
-    // Engine config (loaded from JSON, per-core settings)
-    std::FILE*  log_file_handle_ = nullptr;   // owned, closed in destructor
-    std::string default_core_name_;
-    std::string config_path_;   // path for saveConfig() on exit
+    // Engine config (per-core settings, persistence)
+    EngineConfig config_;
+    std::FILE*   log_file_handle_ = nullptr;   // owned, closed in destructor
 public:
-    const std::string& configPath() const { return config_path_; }
+    const std::string& configPath() const { return config_.configPath(); }
 private:
-    // core_name -> {key -> value} from engine_config.json
-    std::unordered_map<std::string,
-        std::unordered_map<std::string, std::string>> core_config_;
 
-    // Master mix — atomic so GUI thread writes are safe vs RT reads
-    std::atomic<float> master_gain_{1.f};
-    std::atomic<float> pan_l_      {1.f};
-    std::atomic<float> pan_r_      {1.f};
-
-    // LFO panning — speed/depth written by GUI, phase only touched by RT thread
-    std::atomic<float> lfo_speed_  {0.f};   // Hz
-    std::atomic<float> lfo_depth_  {0.f};   // 0..1
-    float              lfo_phase_  = 0.f;   // RT thread only
-
-    // Audio device
-    ma_device*          device_      = nullptr;
-    std::atomic<bool>   running_    {false};
-    int                 sample_rate_ = CORE_ENGINE_DEFAULT_SR;
-    int                 block_size_  = CORE_ENGINE_DEFAULT_BLOCK_SIZE;
-
-    float* buf_l_ = nullptr;
-    float* buf_r_ = nullptr;
+    // Audio device + buffers
+    AudioDevice audio_;
+    int         sample_rate_ = ENGINE_DEFAULT_SR;   // also used by cores + batch render
+    float*      buf_l_ = nullptr;
+    float*      buf_r_ = nullptr;
 
     // Progressive voice gain (AGC) — see dsp/agc.h
     dsp::AgcState agc_;
@@ -222,16 +229,5 @@ private:
     std::atomic<uint8_t> last_note_midi_{60};
     std::atomic<uint8_t> last_note_vel_ {80};
 
-    // SET_BANK chunk reassembly state (MIDI callback thread only — not concurrent)
-    std::string bank_chunk_buf_;
-    int         bank_chunk_total_ = 0;
-    int         bank_chunk_recv_  = 0;
+    SysExHandler sysex_{*this};
 };
-
-// ── Convenience: full startup + interactive loop ──────────────────────────────
-// Like runResonator, but selects core by name.
-int runCoreEngine(Logger&            logger,
-                  const std::string& core_name,
-                  const std::string& params_path,
-                  int                midi_port       = 0,
-                  const std::string& config_json_path = "");

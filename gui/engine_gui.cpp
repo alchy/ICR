@@ -1,7 +1,7 @@
 /*
- * resonator_gui.cpp
+ * engine_gui.cpp
  * ──────────────────
- * Dear ImGui + GLFW + OpenGL3 GUI for IthacaCoreResonator.
+ * Dear ImGui + GLFW + OpenGL3 GUI for ICR engine.
  *
  * Grid layout system:
  *   Row 0  — Top bar: MIDI port, status LEDs, voices, level
@@ -13,7 +13,7 @@
  * getVizState() — no hard-coded SynthConfig references.
  */
 
-#include "resonator_gui.h"
+#include "engine_gui.h"
 #include "../engine/midi_input.h"
 #include "../engine/synth_core_registry.h"
 #include "../cores/sampler/sampler_core.h"
@@ -126,6 +126,10 @@ struct GuiState {
     std::vector<std::string> ports;
     int  selected_port   = 0;
     bool midi_connected  = false;
+
+    // Block size (index into common sizes: 64, 128, 256, 512, 1024)
+    int  block_size_idx  = 2;   // default: 256
+    static constexpr int BLOCK_SIZES[] = { 64, 128, 256, 512, 1024 };
 
     bool active_notes[128] = {};
     int  mouse_held_note   = -1;
@@ -268,7 +272,7 @@ static void ledSep() {
 }
 
 // ── Piano keyboard widget ─────────────────────────────────────────────────────
-static int drawPiano(GuiState& gs, CoreEngine& engine) {
+static int drawPiano(GuiState& gs, Engine& engine) {
     ImDrawList* dl  = ImGui::GetWindowDrawList();
     ImVec2 origin   = ImGui::GetCursorScreenPos();
 
@@ -513,7 +517,7 @@ static void drawPartialsTable(const CoreVoiceViz& ln) {
 }
 
 // ── Section: Mix controls ─────────────────────────────────────────────────────
-static void drawMixControls(GuiState& gs, CoreEngine& engine) {
+static void drawMixControls(GuiState& gs, Engine& engine) {
     ImGui::SeparatorText("MIX");
     {
         int v = gs.master_gain;
@@ -538,7 +542,7 @@ static void drawMixControls(GuiState& gs, CoreEngine& engine) {
 }
 
 // ── Section: LFO pan controls ─────────────────────────────────────────────────
-static void drawLfoControls(GuiState& gs, CoreEngine& engine) {
+static void drawLfoControls(GuiState& gs, Engine& engine) {
     ImGui::SeparatorText("LFO PAN");
     {
         int v = gs.lfo_speed;
@@ -584,7 +588,7 @@ static void drawLfoControls(GuiState& gs, CoreEngine& engine) {
 }
 
 // ── Section: Limiter controls ─────────────────────────────────────────────────
-static void drawLimiterControls(GuiState& gs, CoreEngine& engine, DspChain* dsp) {
+static void drawLimiterControls(GuiState& gs, Engine& engine, DspChain* dsp) {
     {
         bool ena = gs.limiter_enabled;
         if (ImGui::Checkbox("##limon", &ena)) {
@@ -631,7 +635,7 @@ static void drawLimiterControls(GuiState& gs, CoreEngine& engine, DspChain* dsp)
 }
 
 // ── Section: BBE controls ─────────────────────────────────────────────────────
-static void drawBbeControls(GuiState& gs, CoreEngine& engine, DspChain* dsp) {
+static void drawBbeControls(GuiState& gs, Engine& engine, DspChain* dsp) {
     {
         bool ena = gs.bbe_enabled;
         if (ImGui::Checkbox("##bbeon", &ena)) {
@@ -748,7 +752,7 @@ static void drawConvolverControls(GuiState& gs, DspChain* dsp, float sr) {
 }
 
 // ── Core params panel (synthesis column) ─────────────────────────────────────
-static void drawCorePanel(CoreEngine& engine) {
+static void drawCorePanel(Engine& engine) {
     ISynthCore* core = engine.core();
     if (!core) {
         ImGui::TextDisabled("(no core loaded)");
@@ -763,7 +767,7 @@ static void drawCorePanel(CoreEngine& engine) {
 
 // ── Main GUI loop ─────────────────────────────────────────────────────────────
 
-int runResonatorGui(CoreEngine& engine, Logger& logger) {
+int runEngineGui(Engine& engine, Logger& logger) {
     g_glfw_logger = &logger;
     logger.log("GUI", LogSeverity::Info, "Starting GLFW + ImGui");
 
@@ -959,10 +963,17 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                     bool sel = (i == gs.selected_core);
                     if (ImGui::Selectable(gs.core_names[i].c_str(), sel)) {
                         if (i != gs.selected_core) {
+                            // Save outgoing core's params
+                            engine.saveCoreParams(gs.active_core_name);
+
                             gs.selected_core = i;
                             const std::string& name = gs.core_names[i];
                             if (engine.switchCore(name, "")) {
                                 gs.active_core_name = name;
+                                // loadCoreParams is called inside switchCore
+                                // (via applyDspDefaults + core params)
+                                engine.loadCoreParams(name);
+
                                 // Sync GUI sliders to engine DSP state
                                 auto cv = [&](const std::string& k, int fb) -> int {
                                     std::string v = engine.coreConfigValue(name, k);
@@ -979,6 +990,8 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
                                 gs.bbe_def          = (uint8_t)cv("bbe_definition",  gs.bbe_def);
                                 gs.bbe_bass         = (uint8_t)cv("bbe_bass_boost",  gs.bbe_bass);
                                 gs.bbe_enabled      = (gs.bbe_def > 0 || gs.bbe_bass > 0);
+                                gs.conv_enabled     = cv("convolver_enabled", 0) >= 64;
+                                gs.conv_mix         = cv("convolver_mix", 50);
                             } else {
                                 // revert selection on failure
                                 for (int j = 0; j < (int)gs.core_names.size(); j++) {
@@ -1114,6 +1127,33 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             if (ImGui::SmallButton("Refresh")) {
                 gs.ports = MidiInput::listPorts();
                 gs.selected_port = 0;
+            }
+
+            // ── Block size selector ──────────────────────────────────────
+            ImGui::SameLine(0, 20.f);
+            ImGui::Text("Block:");
+            ImGui::SameLine();
+            ImGui::SetNextItemWidth(100.f);
+            {
+                int cur_bs = engine.blockSize();
+                float latency_ms = 1000.f * cur_bs / engine.sampleRate();
+                char preview[32];
+                std::snprintf(preview, sizeof(preview), "%d (%.1f ms)", cur_bs, latency_ms);
+                if (ImGui::BeginCombo("##blocksize", preview)) {
+                    for (int i = 0; i < 5; i++) {
+                        int bs = GuiState::BLOCK_SIZES[i];
+                        float lat = 1000.f * bs / engine.sampleRate();
+                        char label[32];
+                        std::snprintf(label, sizeof(label), "%d (%.1f ms)", bs, lat);
+                        bool sel = (bs == cur_bs);
+                        if (ImGui::Selectable(label, sel)) {
+                            if (bs != cur_bs)
+                                engine.setBlockSize(bs);
+                        }
+                        if (sel) ImGui::SetItemDefaultFocus();
+                    }
+                    ImGui::EndCombo();
+                }
             }
         }
         sectionGap();
@@ -1368,26 +1408,8 @@ int runResonatorGui(CoreEngine& engine, Logger& logger) {
             }
         }
 
-        // Remember DSP state for active core
-        const std::string& cn = gs.active_core_name;
-        engine.setCoreConfigValue(cn, "master_gain",
-            std::to_string((int)gs.master_gain));
-        engine.setCoreConfigValue(cn, "master_pan",
-            std::to_string((int)gs.pan));
-        engine.setCoreConfigValue(cn, "lfo_speed",
-            std::to_string((int)gs.lfo_speed));
-        engine.setCoreConfigValue(cn, "lfo_depth",
-            std::to_string((int)gs.lfo_depth));
-        engine.setCoreConfigValue(cn, "limiter_threshold",
-            std::to_string((int)gs.limiter_thr));
-        engine.setCoreConfigValue(cn, "limiter_release",
-            std::to_string((int)gs.limiter_rel));
-        engine.setCoreConfigValue(cn, "limiter_enabled",
-            std::to_string(gs.limiter_enabled ? 64 : 0));
-        engine.setCoreConfigValue(cn, "bbe_definition",
-            std::to_string((int)gs.bbe_def));
-        engine.setCoreConfigValue(cn, "bbe_bass_boost",
-            std::to_string((int)gs.bbe_bass));
+        // Save all params for active core (DSP + core-specific)
+        engine.saveCoreParams(gs.active_core_name);
 
         if (engine.saveConfig())
             logger.log("GUI", LogSeverity::Info, "Config saved on exit");

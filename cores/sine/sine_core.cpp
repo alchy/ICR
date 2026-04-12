@@ -7,13 +7,13 @@
  *   Voice:        nezávislý výpočet zvuku (distribuce na HW)
  *   VoiceManager: životní cyklus hlasů (init, release, process)
  *   PatchManager:  MIDI → nativní překlad (velocity, sustain pedál)
- *   SineCore:     ISynthCore adaptér (propojení s CoreEngine)
+ *   SineCore:     ISynthCore adaptér (propojení s Engine)
  */
 #include "sine_core.h"
 #include "dsp/dsp_math.h"
 #include "engine/synth_core_registry.h"
 
-// Registrace do globálního registru — CoreEngine najde SineCore podle jména
+// Registrace do globálního registru — Engine najde SineCore podle jména
 REGISTER_SYNTH_CORE("SineCore", SineCore)
 
 static constexpr float TAU = 2.f * 3.14159265358979f;

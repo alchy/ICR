@@ -1,7 +1,6 @@
 #pragma once
 /*
- * core_logger.h — minimal Logger compatible with IthacaCore API.
- * Replace with the full IthacaCore core_logger.h when copying DSP files.
+ * logger.h — minimal Logger for ICR engine.
  *
  * Two output channels:
  *   log()   — diagnostic channel (file_out), fflush after each write.

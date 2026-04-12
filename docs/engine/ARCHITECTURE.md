@@ -22,11 +22,11 @@ The architecture follows the **Ithaca Core 3-layer pattern**
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│ CoreEngine::audioCallback (miniaudio, ~5.3 ms latency @ 256)   │
+│ Engine::audioCallback (miniaudio, ~5.3 ms latency @ 256)       │
 └─────────────────────────────────────────────────────────────────┘
                            |
 ┌─────────────────────────────────────────────────────────────────┐
-│ CoreEngine::processBlock (RT thread)                            │
+│ Engine::processBlock (RT thread)                                │
 │                                                                 │
 │ 1. Drain MIDI queue (512-event lock-free SPSC ring)            │
 │    └─ Route to active core: noteOn/Off/sustainPedal            │
@@ -59,7 +59,7 @@ The architecture follows the **Ithaca Core 3-layer pattern**
 │  (SineCore, AdditiveSynthesis, PhysicalModeling) │  Zero platform deps
 │  DspChain (convolver, BBE, limiter)             │  No allocation in RT
 ├─────────────────────────────────────────────────┤
-│  CoreEngine                                     │  RT loop, MIDI queue
+│  Engine                                         │  RT loop, MIDI queue
 │  (std::atomic params, lock-free SPSC ring)      │  std::filesystem I/O
 ├─────────────────────────────────────────────────┤
 │  miniaudio       │  RtMidi        │ ImGui/GLFW  │  Platform abstraction
@@ -190,7 +190,7 @@ MIDI SysEx. See [SysEx Protocol](SYSEX_PROTOCOL.md).
 
 ```
 engine/
-    core_engine.h/cpp           CoreEngine (audio, MIDI, master bus)
+    engine.h/cpp                Engine (audio, MIDI, master bus)
     i_synth_core.h              ISynthCore interface + viz structs
     synth_core_registry.h       Factory pattern (REGISTER_SYNTH_CORE macro)
     midi_input.h/cpp            RtMidi wrapper
@@ -207,5 +207,5 @@ dsp/
     bbe/                        BBE Sonic Maximizer
     convolver/                  Soundboard IR convolution (with SR resample)
 gui/
-    resonator_gui.h/cpp         ImGui real-time GUI (core-agnostic)
+    engine_gui.h/cpp            ImGui real-time GUI (core-agnostic)
 ```

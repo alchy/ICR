@@ -14,6 +14,7 @@ Usage:
 import numpy as np
 import struct
 import sys
+from pathlib import Path
 
 SR = 48000
 
@@ -66,7 +67,7 @@ def render_from_bank(bank_path, midis=None, duration_s=2.0, velocity=0.6):
         write_wav(fname, audio)
         print(f"  -> {fname}")
 
-    print(f"\nFiles: C:\\Users\\jindr\\PycharmProjects\\ICR\\tmp_audio\\")
+    print(f"\nFiles: {Path('tmp_audio').resolve()}")
 
 
 def one_pole_lp(x, g, p, state):
@@ -585,7 +586,7 @@ def run_experiment(name, variants, midi=60, duration_s=2.0):
         print(f"  -> {fname}")
 
     print(f"\n{'='*60}")
-    print(f"Files: C:\\Users\\jindr\\PycharmProjects\\ICR\\tmp_audio\\")
+    print(f"Files: {Path('tmp_audio').resolve()}")
     for idx, v in enumerate(variants):
         print(f"  [{idx}] {v.get('label','')}")
     print(f"{'='*60}")

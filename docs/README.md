@@ -4,7 +4,7 @@
 
 | Document | Content |
 |----------|---------|
-| [engine/ARCHITECTURE.md](engine/ARCHITECTURE.md) | CoreEngine, ISynthCore interface, 3-layer Ithaca Core pattern, threading, GUI |
+| [engine/ARCHITECTURE.md](engine/ARCHITECTURE.md) | Engine, ISynthCore interface, 3-layer Ithaca Core pattern, threading, GUI |
 | [engine/BUILD.md](engine/BUILD.md) | C++ build, Python prerequisites, CLI options, troubleshooting |
 | [engine/SYSEX_PROTOCOL.md](engine/SYSEX_PROTOCOL.md) | SysEx frame format, float encoding, engine-level commands |
 | [engine/MULTI_CORE.md](engine/MULTI_CORE.md) | Multi-core architecture, lifecycle, per-core SysEx, icr-config.json |

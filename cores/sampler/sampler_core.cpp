@@ -20,7 +20,7 @@
 REGISTER_SYNTH_CORE("SamplerCore", SamplerCore)
 
 // Default base directory for sample banks.
-// Normally provided by icr-config.json via CoreEngine.
+// Normally provided by icr-config.json via Engine.
 static const char* DEFAULT_SAMPLE_DIR = "soundbanks-sampler";
 
 // -- Directory scanning helpers (cross-platform via std::filesystem) ----------
