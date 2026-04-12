@@ -151,6 +151,8 @@ bool SamplerCore::selectBank(const std::string& name, Logger& logger) {
             std::lock_guard<std::mutex> lk(bank_mutex_);
             active_bank_idx_  = i;
             active_bank_name_ = name;
+            logger.log("SamplerCore", LogSeverity::Info,
+                       "Bank active: " + name);
             return true;
         }
 
@@ -184,6 +186,8 @@ bool SamplerCore::selectBank(const std::string& name, Logger& logger) {
 
         return true;
     }
+    logger.log("SamplerCore", LogSeverity::Warning,
+               "Bank not found: '" + name + "'");
     return false;
 }
 
@@ -199,8 +203,8 @@ bool SamplerCore::load(const std::string& params_path, float sr,
 
     if (banks_.empty()) {
         logger.log("SamplerCore", LogSeverity::Warning,
-                   "No sample banks found in " + base_dir);
-        // Still "loaded" -- works with no sound until a bank is selected
+                   "No sample banks found in " + base_dir
+                   + " — core active but silent (no bank loaded)");
         loaded_ = true;
         return true;
     }

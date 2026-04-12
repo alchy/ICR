@@ -83,9 +83,12 @@ bool PhysicalModelingPianoCore::load(const std::string& params_path, float sr,
                 logger.log("PhysicalModelingPianoCore", LogSeverity::Warning,
                            "Bank parse failed, using defaults: " + params_path);
         } else {
-            logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
-                       "No bank file, using defaults");
+            logger.log("PhysicalModelingPianoCore", LogSeverity::Warning,
+                       "No bank file — core active with physics defaults");
         }
+    } else {
+        logger.log("PhysicalModelingPianoCore", LogSeverity::Info,
+                   "No params_path — core active with physics defaults");
     }
 
     loaded_ = true;
