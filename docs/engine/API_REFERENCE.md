@@ -249,6 +249,122 @@ controls the block size and may request non-standard values.
 - **Main thread**: `initialize()`, `start()`, `stop()`, `switchCore()`.
   Not concurrent with RT thread (Engine handles sequencing).
 
+## Per-Core Parameter Serialization
+
+Each synthesis core has its own set of parameters that sound best with
+different settings — a piano core needs different gain, DSP, and timbre
+than a sine oscillator.  ICR persists all parameters per-core in
+`icr-config.json` so switching between cores restores the last-used settings.
+
+### What is serialized
+
+| Category | Parameters | Storage key |
+|----------|-----------|-------------|
+| **Master bus** | gain, pan, LFO speed, LFO depth | `master_gain`, `master_pan`, `lfo_speed`, `lfo_depth` |
+| **Limiter** | threshold, release, enabled | `limiter_threshold`, `limiter_release`, `limiter_enabled` |
+| **BBE** | definition, bass boost | `bbe_definition`, `bbe_bass_boost` |
+| **Convolver** | enabled, mix | `convolver_enabled`, `convolver_mix` |
+| **Core-specific** | All params from `describeParams()` | `cp_<key>` (e.g. `cp_beat_scale`) |
+
+DSP bus parameters are stored as MIDI integers (0-127).
+Core-specific parameters are stored as float strings with the `cp_` prefix.
+
+### When parameters are saved / loaded
+
+| Event | Action |
+|-------|--------|
+| **Core switch (GUI)** | Save outgoing core → `saveCoreParams(old)`, load incoming → `loadCoreParams(new)` |
+| **GUI exit** | Save active core → `saveCoreParams(active)`, then `saveConfig()` to disk |
+| **Engine startup** | `applyDspDefaults()` restores DSP bus from config |
+
+### icr-config.json structure
+
+```json
+{
+  "default_core": "AdditiveSynthesisPianoCore",
+  "log_file": "icr.log",
+  "cores": {
+    "AdditiveSynthesisPianoCore": {
+      "params_path": "soundbanks-additive/ks-grand.json",
+      "ir_path": "soundbanks-soundboard/grand-ir.wav",
+      "master_gain": "51",
+      "master_pan": "64",
+      "limiter_enabled": "0",
+      "cp_beat_scale": "1.0",
+      "cp_noise_level": "0.5",
+      "cp_keyboard_spread": "0.8"
+    },
+    "PhysicalModelingPianoCore": {
+      "params_path": "soundbanks-physical/D-grand.json",
+      "master_gain": "37",
+      "cp_brightness": "1.2",
+      "cp_stiffness_scale": "1.0"
+    }
+  }
+}
+```
+
+### Auto-discovery of new parameters
+
+Core-specific parameters are serialized via `ISynthCore::describeParams()`.
+When a new parameter is added to a core's `describeParams()` implementation,
+it is automatically included in serialization — no GUI or config code changes
+needed.  On first load, missing `cp_` keys are simply skipped (core uses its
+compiled default).
+
+### API
+
+```cpp
+// Save all params (DSP + core-specific) for a core to config
+engine.saveCoreParams("AdditiveSynthesisPianoCore");
+
+// Load all params from config and apply to engine + core
+engine.loadCoreParams("AdditiveSynthesisPianoCore");
+
+// Persist to disk
+engine.saveConfig();
+```
+
+### Core-specific parameters by core
+
+**AdditiveSynthesisPianoCore:**
+
+| Key | Group | Range | Description |
+|-----|-------|-------|-------------|
+| `beat_scale` | Timbre | 0.0–4.0 | Multi-string beating intensity |
+| `noise_level` | Timbre | 0.0–4.0 | Noise floor level |
+| `pan_spread` | Stereo | 0.0–π | Per-string pan angle (radians) |
+| `stereo_decorr` | Stereo | 0.0–2.0 | Stereo decorrelation amount |
+| `keyboard_spread` | Stereo | 0.0–π | Low-to-high pan spread |
+| `eq_strength` | Timbre | 0.0–1.0 | Spectral EQ curve intensity |
+| `rng_seed` | Debug | 0–9999 | Random seed for phase init |
+
+**PhysicalModelingPianoCore:**
+
+| Key | Group | Range | Description |
+|-----|-------|-------|-------------|
+| `brightness` | Timbre | 0.1–4.0 | High-frequency damping scale |
+| `stiffness_scale` | Timbre | 0.1–4.0 | String stiffness multiplier |
+| `sustain_scale` | Timbre | 0.1–4.0 | Decay time multiplier |
+| `keyboard_spread` | Stereo | 0.0–π | Low-to-high pan spread |
+| `stereo_spread` | Stereo | 0.0–1.0 | Multi-string stereo width |
+
+**SamplerCore:**
+
+| Key | Group | Range | Description |
+|-----|-------|-------|-------------|
+| `gain` | Output | 0.0–2.0 | Sample playback gain |
+| `keyboard_spread` | Stereo | 0.0–π | Low-to-high pan spread |
+| `release_time` | Envelope | 0.1–4.0 | Release envelope duration (s) |
+
+**SineCore:**
+
+| Key | Group | Range | Description |
+|-----|-------|-------|-------------|
+| `gain` | Output | 0.0–2.0 | Oscillator output gain |
+| `detune_cents` | Tuning | -100–100 | Pitch offset in cents |
+| `keyboard_spread` | Stereo | 0.0–π | Low-to-high pan spread |
+
 ## Architecture
 
 ```
